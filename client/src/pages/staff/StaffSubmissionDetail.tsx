@@ -246,13 +246,13 @@ export default function StaffSubmissionDetail() {
                 <div className="section-label">Submission</div>
                 <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "8px 0" }}>
                   <div className="field">
-                    <span className="f-label">Submission ID:</span>{" "}
+                    <span className="f-label">Submission ID</span>
                     <span className="f-value cell-mono" style={{ fontSize: 12 }}>
                       {detail.public_id}
                     </span>
                   </div>
                   <div className="field">
-                    <span className="f-label">Submission Time:</span>{" "}
+                    <span className="f-label">Submission Time</span>
                     <span className="f-value cell-mono" style={{ fontSize: 12 }}>
                       {new Date(detail.submitted_at).toLocaleString()}
                     </span>
@@ -423,7 +423,7 @@ function Field({
   if (!editing) {
     return (
       <div className="field">
-        <span className="f-label">{label}:</span>{" "}
+        <span className="f-label">{label}</span>
         <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value)}</span>
       </div>
     );

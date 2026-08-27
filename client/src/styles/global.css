@@ -366,6 +366,11 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
 }
 .edit-input:focus, .edit-select:focus, .edit-textarea:focus { border-color: var(--accent); }
 .edit-select { appearance: auto; }
+
+/* Submission answers — tabular label/value columns */
+.field-list { display: flex; flex-direction: column; gap: 10px; }
+.field { display: grid; grid-template-columns: minmax(180px, max-content) 1fr; column-gap: 28px; align-items: start; }
+.field .f-label { color: var(--text); font-weight: 500; }
 .field .f-value.inline { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 
 /* Ad-hoc staff-only field composer + controls */
