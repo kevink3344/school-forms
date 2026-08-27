@@ -36,6 +36,35 @@ interface RequestOptions {
   auth?: boolean;
 }
 
+// True while a /auth/refresh is in flight, so concurrent 401s share one refresh
+// instead of stampeding the endpoint.
+let refreshing: Promise<string | null> | null = null;
+
+async function refreshAccessToken(): Promise<string | null> {
+  if (refreshing) return refreshing;
+  refreshing = (async () => {
+    try {
+      const res = await fetch(`${API_BASE}/api/auth/refresh`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+      });
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data?.access_token) {
+        setToken(data.access_token);
+        return data.access_token as string;
+      }
+      return null;
+    } catch {
+      return null;
+    } finally {
+      refreshing = null;
+    }
+  })();
+  return refreshing;
+}
+
 async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   const headers: Record<string, string> = {
     "Content-Type": "application/json",
@@ -52,21 +81,44 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     credentials: "include",
   });
 
-  if (!res.ok) {
-    let detail = res.statusText;
-    try {
-      const data = await res.json();
-      if (data?.error) detail = data.error;
-      else if (data?.message) detail = data.message;
-    } catch {
-      // ignore parse errors
+  // If the access token expired (401) and this was an authenticated call, try
+  // once to refresh the token (the refresh token lives in an httpOnly cookie)
+  // and replay the original request.
+  if (res.status === 401 && opts.auth !== false) {
+    const newToken = await refreshAccessToken();
+    if (newToken) {
+      headers.Authorization = `Bearer ${newToken}`;
+      const retry = await fetch(`${API_BASE}${path}`, {
+        method: opts.method || "GET",
+        headers,
+        body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
+        credentials: "include",
+      });
+      if (retry.ok) {
+        if (retry.status === 204) return undefined as T;
+        return (await retry.json()) as T;
+      }
+      return await handleError(retry);
     }
-    throw new ApiError(res.status, detail);
   }
 
-  // 204 / no content
-  if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return await handleError(res);
+}
+
+// Parse a failed response into an ApiError. When the status is 401 the access
+// token could not be refreshed (session is genuinely gone), so we clear it to
+// keep the app from retrying with a dead token.
+async function handleError(res: Response): Promise<never> {
+  let detail = res.statusText;
+  try {
+    const data = (await res.json()) as { error?: string; message?: string } | null;
+    if (data?.error) detail = data.error;
+    else if (data?.message) detail = data.message;
+  } catch {
+    // ignore parse errors
+  }
+  if (res.status === 401) clearToken();
+  throw new ApiError(res.status, detail);
 }
 
 export class ApiError extends Error {
