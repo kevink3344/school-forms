@@ -132,15 +132,19 @@ export const DDL_STATEMENTS: string[] = [
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_name')
      CREATE UNIQUE INDEX UX_schools_name ON dbo.schools(name);`,
 
-  // Idempotent migration for the school import feature — adds columns + index
-  // to the already-existing dbo.schools table (safe to re-run).
+  // Idempotent migration for the school import feature — adds columns to the
+  // already-existing dbo.schools table (safe to re-run). Kept as its OWN batch
+  // so SQL Server binds the ALTERs before any index references the new column.
   `IF COL_LENGTH('dbo.schools', 'source_id') IS NULL
      ALTER TABLE dbo.schools ADD source_id INT NULL;
    IF COL_LENGTH('dbo.schools', 'grade_level') IS NULL
      ALTER TABLE dbo.schools ADD grade_level NVARCHAR(50) NULL;
    IF COL_LENGTH('dbo.schools', 'calendar') IS NULL
-     ALTER TABLE dbo.schools ADD calendar NVARCHAR(50) NULL;
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_source_id')
+     ALTER TABLE dbo.schools ADD calendar NVARCHAR(50) NULL;`,
+
+  // The filtered unique index is a SEPARATE batch: SQL Server compiles each batch
+  // before execution, so the columns must already exist when this runs.
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_source_id')
      CREATE UNIQUE INDEX UX_schools_source_id ON dbo.schools(source_id) WHERE source_id IS NOT NULL;`,
 
   `IF OBJECT_ID('dbo.users', 'U') IS NULL
