@@ -16,7 +16,8 @@ import { submissionsRouter } from "./routes/submissions.js";
 import { organizationsRouter } from "./routes/organizations.js";
 import { exportRouter } from "./routes/export.js";
 import { webhookRouter } from "./routes/webhook.js";
-import { healthRouter } from "./routes/health.js";
+import { healthRouter, infoHandler } from "./routes/health.js";
+import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
 
 const app = express();
@@ -60,7 +61,9 @@ if (env.swagger.enabled) {
 // Routes
 // -----------------------------------------------------------------------------
 app.use("/api/health", healthRouter);
+app.get("/api/info", infoHandler);
 app.use("/api/auth", authRouter);
+app.use("/api/settings", settingsRouter);
 app.use("/api/schools", schoolsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/forms", formsRouter);

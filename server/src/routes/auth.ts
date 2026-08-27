@@ -8,6 +8,7 @@ import {
   getDefaultOrganization,
   getOrganizationById,
   getOrganizationBySlug,
+  listUsersForSelect,
 } from "../db/queries.js";
 import {
   signAccessToken,
@@ -19,7 +20,7 @@ import {
   requireRoles,
   optionalAuth,
 } from "../auth.js";
-import { loginSchema, registerSchema } from "../schemas.js";
+import { loginSchema, registerSchema, selectLoginSchema, selectUsersQuerySchema } from "../schemas.js";
 import type { Role } from "../db/schema.js";
 
 export const authRouter = Router();
@@ -123,6 +124,82 @@ authRouter.post("/login", async (req, res, next) => {
       res.status(401).json({ error: "Invalid credentials" });
       return;
     }
+    if (!user.active) {
+      res.status(403).json({ error: "Account is deactivated. Contact an administrator." });
+      return;
+    }
+
+    const accessToken = signAccessToken(user);
+    const refreshToken = signRefreshToken(user.id);
+    setRefreshCookie(res, refreshToken);
+
+    res.json({
+      access_token: accessToken,
+      token_type: "bearer",
+      user: await toUserDto(user),
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// GET /api/auth/users — anonymous list of users for the select-mode dropdown,
+// optionally scoped to an org by ?org=<slug>. Never returns password hashes.
+// -----------------------------------------------------------------------------
+authRouter.get("/users", async (req, res, next) => {
+  try {
+    const parsed = selectUsersQuerySchema.safeParse(req.query);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+
+    let organizationId: number | null | undefined;
+    if (parsed.data.org) {
+      const org = await getOrganizationBySlug(parsed.data.org);
+      if (!org) {
+        res.status(404).json({ error: "Organization not found" });
+        return;
+      }
+      organizationId = org.id;
+    }
+
+    const users = await listUsersForSelect(organizationId);
+    res.json(users);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/select — select-mode login (test/demo). Signs in as a chosen
+// user with NO password. Optionally constrained to an org (multi-tenant guard).
+// Both this and the password endpoint stay live regardless of login_mode — the
+// mode is purely a client-side rendering decision.
+// -----------------------------------------------------------------------------
+authRouter.post("/select", async (req, res, next) => {
+  try {
+    const parsed = selectLoginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const { userId, organizationId } = parsed.data;
+
+    const user = await getUserById(userId);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    // Multi-tenant guard: if the client scoped to an org, the chosen user must
+    // belong to it.
+    if (organizationId !== undefined && organizationId !== null &&
+        user.organization_id !== organizationId) {
+      res.status(403).json({ error: "User does not belong to the selected organization" });
+      return;
+    }
+    // Respect deactivation even in select mode.
     if (!user.active) {
       res.status(403).json({ error: "Account is deactivated. Contact an administrator." });
       return;

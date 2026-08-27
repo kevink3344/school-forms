@@ -53,6 +53,17 @@ export interface User {
   display_name: string;
 }
 
+// Login modes selectable in Settings → Login Mode (and stored in app_settings).
+export type LoginMode = "select" | "password" | "maintenance";
+
+// A user row for the select-mode login dropdown (no password hash, no school).
+export interface LoginUser {
+  id: number;
+  display_name: string;
+  email: string;
+  role: Role;
+}
+
 // User row as returned by the admin /api/users endpoints — enriched with the
 // school's display name (null for admins with no school) and the active flag.
 export interface AdminUser extends User {

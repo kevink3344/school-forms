@@ -63,6 +63,57 @@ export async function getDefaultOrganization(): Promise<Organization> {
 }
 
 // -----------------------------------------------------------------------------
+// App settings (generic key/value store — public read, admin write)
+// -----------------------------------------------------------------------------
+interface SettingRow {
+  key: string;
+  value: string;
+}
+
+export async function getSetting(key: string): Promise<string | null> {
+  const rows = await execute<SettingRow>(
+    "SELECT key, value FROM dbo.app_settings WHERE key = @key",
+    { key }
+  );
+  return rows[0]?.value ?? null;
+}
+
+// Upsert a setting. SQL Server has no ON CONFLICT, so use MERGE. Returns the
+// stored value (the string, normalized) so callers can echo it back.
+export async function setSetting(key: string, value: string): Promise<string> {
+  await execute(
+    `MERGE dbo.app_settings AS target
+     USING (SELECT @key AS key, @value AS value) AS source
+     ON target.key = source.key
+     WHEN MATCHED THEN UPDATE SET target.value = source.value,
+                                  target.updated_at = SYSUTCDATETIME()
+     WHEN NOT MATCHED THEN INSERT (key, value, updated_at)
+       VALUES (source.key, source.value, SYSUTCDATETIME());`,
+    { key, value }
+  );
+  return value;
+}
+
+// Minimal user rows for the select-mode login dropdown. Never returns a
+// password hash — only the fields the dropdown label needs.
+export async function listUsersForSelect(organizationId?: number | null): Promise<
+  { id: number; display_name: string; email: string; role: Role }[]
+> {
+  const params: Record<string, unknown> = {};
+  const where = organizationId !== undefined && organizationId !== null
+    ? "WHERE organization_id = @organizationId"
+    : "";
+  if (where) params.organizationId = organizationId;
+  return execute<{ id: number; display_name: string; email: string; role: Role }>(
+    `SELECT id, display_name, email, role
+     FROM dbo.users
+     ${where}
+     ORDER BY display_name, email`,
+    params
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Schools
 // -----------------------------------------------------------------------------
 export async function listSchools(schoolId?: number | null): Promise<School[]> {

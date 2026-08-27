@@ -6,6 +6,8 @@ import type {
   ExportPreview,
   Form,
   FormWithFields,
+  LoginMode,
+  LoginUser,
   OrganizationWithMembers,
   PublicForm,
   Role,
@@ -184,6 +186,51 @@ export const api = {
     // Sends the token when present so a logged-in non-admin is scoped to their
     // own school; anonymous registration callers get the full public list.
     return request<School[]>("/api/auth/schools", { auth: true });
+  },
+
+  // -------------------------------------------------------------------------
+  // Login Mode / select-mode auth
+  // -------------------------------------------------------------------------
+  // List users for the select-mode dropdown, optionally scoped to an org slug.
+  async getLoginUsers(orgSlug?: string): Promise<LoginUser[]> {
+    const qs = orgSlug ? `?org=${encodeURIComponent(orgSlug)}` : "";
+    return request<LoginUser[]>(`/api/auth/users${qs}`, { auth: false });
+  },
+
+  // Sign in as a selected user WITHOUT a password (test/demo mode).
+  async loginSelect(userId: number, organizationId?: number | null): Promise<AuthResponse> {
+    return request<AuthResponse>("/api/auth/select", {
+      method: "POST",
+      auth: false,
+      body: { userId, organizationId },
+    });
+  },
+
+  // Read a public app setting (login_mode / maintenance_message).
+  async getPublicSetting(key: "login_mode" | "maintenance_message"): Promise<{
+    key: string;
+    value: string;
+  }> {
+    return request<{ key: string; value: string }>(`/api/settings/${key}`, { auth: false });
+  },
+
+  // Update an app setting (admin only).
+  async updateSetting(key: "login_mode" | "maintenance_message", value: string): Promise<{
+    key: string;
+    value: string;
+  }> {
+    return request<{ key: string; value: string }>(`/api/settings/${key}`, {
+      method: "PUT",
+      auth: true,
+      body: { value },
+    });
+  },
+
+  // Public app info — reports the version + whether LOGIN_MODE is overridden.
+  async getInfo(): Promise<{ version: string; loginModeOverride: LoginMode | null }> {
+    return request<{ version: string; loginModeOverride: LoginMode | null }>("/api/info", {
+      auth: false,
+    });
   },
 
   // -------------------------------------------------------------------------

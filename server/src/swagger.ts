@@ -193,6 +193,153 @@ export function buildSwaggerSpec() {
           },
         },
       },
+      "/api/info": {
+        get: {
+          tags: ["System"],
+          summary: "Public app info (version + login mode override)",
+          responses: {
+            "200": {
+              description: "App info",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      version: { type: "string" },
+                      loginModeOverride: { type: "string", nullable: true, example: "select" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/settings/{key}": {
+        get: {
+          tags: ["Settings"],
+          summary: "Get a public app setting (login_mode / maintenance_message)",
+          security: [],
+          parameters: [
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message"] } },
+          ],
+          responses: {
+            "200": {
+              description: "Setting value",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { key: { type: "string" }, value: { type: "string" } },
+                  },
+                },
+              },
+            },
+            "400": { description: "Unknown setting key" },
+          },
+        },
+        put: {
+          tags: ["Settings"],
+          summary: "Update an app setting (admin only)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message"] } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["value"],
+                  properties: { value: { type: "string" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { key: { type: "string" }, value: { type: "string" } },
+                  },
+                },
+              },
+            },
+            "400": { description: "Invalid value / unknown key" },
+            "401": { description: "Unauthorized" },
+            "403": { description: "Forbidden (not admin)" },
+          },
+        },
+      },
+      "/api/auth/users": {
+        get: {
+          tags: ["Auth"],
+          summary: "List users for the select-mode login dropdown",
+          security: [],
+          parameters: [
+            { name: "org", in: "query", required: false, schema: { type: "string" }, description: "Organization slug to scope results (e.g. academics)" },
+          ],
+          responses: {
+            "200": {
+              description: "Safe user list (no password hashes)",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        display_name: { type: "string" },
+                        email: { type: "string", format: "email" },
+                        role: { type: "string", enum: ["admin", "staff"] },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "404": { description: "Organization not found" },
+          },
+        },
+      },
+      "/api/auth/select": {
+        post: {
+          tags: ["Auth"],
+          summary: "Select-mode login (test/demo, no password)",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["userId"],
+                  properties: {
+                    userId: { type: "integer" },
+                    organizationId: { type: "integer", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } },
+              },
+            },
+            "400": { description: "Validation error" },
+            "403": { description: "Wrong org / deactivated account" },
+            "404": { description: "User not found" },
+          },
+        },
+      },
       "/api/auth/register": {
         post: {
           tags: ["Auth"],

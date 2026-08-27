@@ -1,8 +1,18 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
-import type { AdminUser, OrganizationWithMembers, Role, School } from "../../types";
+import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
+
+// login mode options displayed in the Settings → Login Mode panel.
+const LOGIN_MODES: { value: LoginMode; label: string; desc: string; tone: string }[] = [
+  { value: "select", label: "Select User (Test)", desc: "Pick a user from the directory — no email/password needed.", tone: "blue" },
+  { value: "password", label: "Password (Production)", desc: "Requires email + password for every sign-in.", tone: "green" },
+  { value: "maintenance", label: "System Maintenance", desc: "Blocks sign-in and shows a maintenance message.", tone: "amber" },
+];
+
+const MAINTENANCE_DEFAULT =
+  "We are performing scheduled maintenance. Please try again shortly.";
 
 // ---------------------------------------------------------------------------
 // Small inline form control (matches the .filter-group / .edit-input styling)
@@ -79,6 +89,12 @@ export default function AdminSettings() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  // Login Mode panel state.
+  const [loginMode, setLoginMode] = useState<LoginMode>("select");
+  const [loginModeOverride, setLoginModeOverride] = useState<LoginMode | null>(null);
+  const [maintenanceMessage, setMaintenanceMessage] = useState(MAINTENANCE_DEFAULT);
+  const [loginModeBusy, setLoginModeBusy] = useState(false);
+
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -96,6 +112,21 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not load users");
     } finally {
       setLoading(false);
+    }
+
+    // Load the Login Mode + maintenance settings (separate try so a settings
+    // failure never blocks the users/orgs panels).
+    try {
+      const [mode, info, msg] = await Promise.all([
+        api.getPublicSetting("login_mode"),
+        api.getInfo(),
+        api.getPublicSetting("maintenance_message"),
+      ]);
+      setLoginMode((mode.value as LoginMode) || "select");
+      setLoginModeOverride(info.loginModeOverride);
+      if (msg.value) setMaintenanceMessage(msg.value);
+    } catch {
+      // keep defaults
     }
   }, []);
 
@@ -171,6 +202,38 @@ export default function AdminSettings() {
       setMessage(`${u.display_name || u.email} is now ${active ? "active" : "inactive"}.`);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not update user");
+    }
+  };
+
+  // Set a login mode. Optimistic update with rollback on failure.
+  const setLoginModeValue = async (mode: LoginMode) => {
+    if (loginModeOverride) return; // locked by env override
+    setError("");
+    setLoginModeBusy(true);
+    const prev = loginMode;
+    setLoginMode(mode);
+    try {
+      await api.updateSetting("login_mode", mode);
+      setMessage(`Login mode set to "${mode}".`);
+    } catch (err) {
+      setLoginMode(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update login mode");
+    } finally {
+      setLoginModeBusy(false);
+    }
+  };
+
+  const saveMaintenanceMessage = async () => {
+    if (loginModeOverride) return;
+    setError("");
+    setLoginModeBusy(true);
+    try {
+      await api.updateSetting("maintenance_message", maintenanceMessage.trim());
+      setMessage("Maintenance message saved.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not save maintenance message");
+    } finally {
+      setLoginModeBusy(false);
     }
   };
 
@@ -272,6 +335,97 @@ export default function AdminSettings() {
               )}
             </tbody>
           </table>
+        </div>
+      </div>
+
+      {/* Login Mode panel */}
+      <div className="card">
+        <div className="card-head">
+          <h3>Login Mode</h3>
+          <span className="sub">Control how users sign in to School Forms</span>
+        </div>
+        <div className="card-body">
+          {loginModeOverride && (
+            <div
+              style={{
+                background: "rgb(255,247,229)",
+                color: "rgb(146,90,10)",
+                padding: "10px 14px",
+                borderRadius: "var(--radius)",
+                fontSize: 13,
+                marginBottom: 16,
+              }}
+            >
+              Login mode is locked to <strong>{loginModeOverride}</strong> by the{" "}
+              <code>LOGIN_MODE</code> environment variable and cannot be changed here.
+            </div>
+          )}
+
+          <div
+            style={{
+              display: "grid",
+              gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+              gap: 14,
+            }}
+          >
+            {LOGIN_MODES.map((m) => {
+              const active = loginMode === m.value;
+              return (
+                <button
+                  key={m.value}
+                  type="button"
+                  disabled={!!loginModeOverride || loginModeBusy}
+                  onClick={() => void setLoginModeValue(m.value)}
+                  style={{
+                    display: "flex",
+                    flexDirection: "column",
+                    alignItems: "flex-start",
+                    gap: 4,
+                    padding: 14,
+                    borderRadius: "var(--radius)",
+                    border: `1.5px solid ${active ? "var(--accent)" : "var(--border)"}`,
+                    background: active ? "rgb(238,246,255)" : "var(--app-bg)",
+                    cursor: !!loginModeOverride ? "not-allowed" : "pointer",
+                    textAlign: "left",
+                    fontFamily: "inherit",
+                      }}
+                >
+                  <span
+                    className={`badge ${active ? "badge-blue" : `badge-${m.tone}`}`}
+                    style={{ alignSelf: "flex-start" }}
+                  >
+                    {active ? "ACTIVE" : m.label}
+                  </span>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                    {m.label}
+                  </span>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{m.desc}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div style={{ marginTop: 18 }}>
+            <div className="filter-group" style={{ minWidth: 0 }}>
+              <label htmlFor="maintenance-message">Maintenance message</label>
+              <textarea
+                id="maintenance-message"
+                value={maintenanceMessage}
+                onChange={(e) => setMaintenanceMessage(e.target.value)}
+                rows={3}
+                disabled={!!loginModeOverride || loginModeBusy}
+              />
+            </div>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={!!loginModeOverride || loginModeBusy || !maintenanceMessage.trim()}
+              onClick={() => void saveMaintenanceMessage()}
+              style={{ marginTop: 10 }}
+            >
+              Save Maintenance Message
+            </button>
+          </div>
         </div>
       </div>
 

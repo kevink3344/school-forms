@@ -73,6 +73,14 @@ export const env = {
   webhookAdminEmail: process.env.SEED_ADMIN_EMAIL ?? "admin@schoolforms.local",
   webhookAdminPassword: process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!",
 
+  // Optional production lock for the login mode. When set to a valid mode
+  // (select/password/maintenance), it overrides the DB setting on reads and the
+  // Settings panel disables editing. See routes/settings.ts.
+  loginModeOverride: (() => {
+    const raw = process.env.LOGIN_MODE?.trim().toLowerCase();
+    return raw && ["select", "password", "maintenance"].includes(raw) ? raw : null;
+  })(),
+
   rateLimit: {
     windowMs: int("RATE_LIMIT_WINDOW_MS", 900000),
     max: int("RATE_LIMIT_MAX", 100),

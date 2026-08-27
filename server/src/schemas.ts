@@ -18,6 +18,18 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// Select-mode login (test/demo): pick a user by id, optionally constrained to an
+// org, with no password. Used by the "Select User (Test)" login form.
+export const selectLoginSchema = z.object({
+  userId: z.number().int().positive(),
+  organizationId: z.number().int().positive().optional().nullable(),
+});
+
+// Query params for the select-mode user dropdown.
+export const selectUsersQuerySchema = z.object({
+  org: z.string().min(1).max(60).optional(),
+});
+
 export const refreshSchema = z.object({
   refresh_token: z.string().optional(),
 });

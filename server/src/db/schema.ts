@@ -375,6 +375,16 @@ export const DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_adhoc_fields_submission')
      CREATE INDEX IX_adhoc_fields_submission ON dbo.submission_adhoc_fields(submission_id);`,
+
+  // Generic app-wide key/value settings (login_mode, maintenance_message, ...).
+  // This is the storage for the Login Mode feature (Settings → Login Mode).
+  // The column is added in the same batch here since it's a fresh CREATE TABLE.
+  `IF OBJECT_ID('dbo.app_settings', 'U') IS NULL
+   CREATE TABLE dbo.app_settings (
+     key        NVARCHAR(100) NOT NULL PRIMARY KEY,
+     value      NVARCHAR(MAX) NOT NULL,
+     updated_at DATETIME2 NOT NULL CONSTRAINT DF_app_settings_updated_at DEFAULT SYSUTCDATETIME()
+   );`,
 ];
 
 // -----------------------------------------------------------------------------
