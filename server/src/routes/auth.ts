@@ -4,7 +4,7 @@ import {
   getUserByEmail,
   getUserById,
   createUser,
-  listSchools,
+  listSchools as defaultListSchools,
 } from "../db/queries.js";
 import {
   signAccessToken,
@@ -14,6 +14,7 @@ import {
   clearRefreshCookie,
   requireAuth,
   requireRoles,
+  optionalAuth,
 } from "../auth.js";
 import { loginSchema, registerSchema } from "../schemas.js";
 import type { Role } from "../db/schema.js";
@@ -171,11 +172,16 @@ authRouter.post("/logout", (_req, res) => {
 });
 
 // -----------------------------------------------------------------------------
-// GET /api/auth/schools — public list for registration school picker
+// GET /api/auth/schools — public list for registration school picker.
+// Authenticated non-admins are scoped to their own school; anonymous + admins
+// get the full list (admins use /api/schools for the scoped dashboard).
 // -----------------------------------------------------------------------------
-authRouter.get("/schools", async (_req, res, next) => {
+authRouter.get("/schools", optionalAuth, async (req, res, next) => {
   try {
-    const schools = await listSchools();
+    const schools =
+      req.user && req.user.role !== "admin"
+        ? await defaultListSchools(req.user.school_id)
+        : await defaultListSchools();
     res.json(schools);
   } catch (err) {
     next(err);

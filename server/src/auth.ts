@@ -100,6 +100,28 @@ export function requireRoles(...roles: Role[]) {
   };
 }
 
+// Attach req.user when a *valid* token is supplied, but never reject anonymous
+// callers. Used by the public `/api/auth/schools` route so a logged-in non-admin
+// gets scoped to their own school while the register screen stays open.
+export function optionalAuth(req: Request, _res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (header && header.startsWith("Bearer ")) {
+    try {
+      const token = header.slice("Bearer ".length);
+      const payload = verifyAccessToken(token);
+      req.user = {
+        id: payload.sub,
+        email: payload.email,
+        role: payload.role,
+        school_id: payload.school_id,
+      };
+    } catch {
+      // Invalid/expired token — treat as anonymous rather than rejecting.
+    }
+  }
+  next();
+}
+
 // -----------------------------------------------------------------------------
 // Cookie helpers for refresh token (httpOnly)
 // -----------------------------------------------------------------------------

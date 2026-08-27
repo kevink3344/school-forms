@@ -7,6 +7,7 @@ import type {
   FormWithFields,
   PublicForm,
   School,
+  SchoolPage,
   SubmissionAnswer,
   SubmissionDetail,
   SubmissionRow,
@@ -118,7 +119,21 @@ export const api = {
   },
 
   async listSchools(): Promise<School[]> {
-    return request<School[]>("/api/auth/schools", { auth: false });
+    // Sends the token when present so a logged-in non-admin is scoped to their
+    // own school; anonymous registration callers get the full public list.
+    return request<School[]>("/api/auth/schools", { auth: true });
+  },
+
+  async listSchoolColumns(): Promise<{ columns: string[] }> {
+    return request<{ columns: string[] }>("/api/schools/columns", { auth: true });
+  },
+
+  async listSchoolsPage(page = 1, pageSize = 50): Promise<SchoolPage> {
+    return request<SchoolPage>(`/api/schools/page?page=${page}&pageSize=${pageSize}`, { auth: true });
+  },
+
+  async importSchools(): Promise<{ total: number }> {
+    return request<{ total: number }>("/api/schools/import", { method: "POST", auth: true });
   },
 
   // -------------------------------------------------------------------------

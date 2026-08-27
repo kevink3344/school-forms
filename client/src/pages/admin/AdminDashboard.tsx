@@ -196,9 +196,14 @@ export default function AdminDashboard() {
           columns={preview.columns}
           rows={preview.rows}
           selectedForm={selectedForm?.title || ""}
+          onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
         />
       ) : (
-        <MetaGrid rows={submissions} schoolName={schoolName} />
+        <MetaGrid
+          rows={submissions}
+          schoolName={schoolName}
+          onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
+        />
       )}
 
       <ExportModal
@@ -220,10 +225,12 @@ function SpreadsheetGrid({
   columns,
   rows,
   selectedForm,
+  onOpen,
 }: {
   columns: ExportPreview["columns"];
   rows: Record<string, unknown>[];
   selectedForm: string;
+  onOpen: (publicId: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
 
@@ -266,13 +273,18 @@ function SpreadsheetGrid({
         </thead>
         <tbody>
           {rows.map((r) => (
-            <tr key={String(r.submission_public_id)}>
+            <tr
+              key={String(r.submission_public_id)}
+              className="grid-row"
+              onClick={() => onOpen(String(r.submission_public_id))}
+            >
               <td className="col-check">
                 <input
                   type="checkbox"
                   className="row-check"
                   checked={selected.has(String(r.submission_public_id))}
                   onChange={() => toggle(String(r.submission_public_id))}
+                  onClick={(e) => e.stopPropagation()}
                 />
               </td>
               {columns.map((c) => (
@@ -304,9 +316,11 @@ function SpreadsheetGrid({
 function MetaGrid({
   rows,
   schoolName,
+  onOpen,
 }: {
   rows: SubmissionRow[];
   schoolName: (id: number | null) => string;
+  onOpen: (publicId: string) => void;
 }) {
   if (!rows.length) {
     return <div className="empty-state">No submissions for the selected filters.</div>;
@@ -325,7 +339,11 @@ function MetaGrid({
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr key={s.public_id}>
+            <tr
+              key={s.public_id}
+              className="grid-row"
+              onClick={() => onOpen(s.public_id)}
+            >
               <td className="cell-mono">{s.public_id}</td>
               <td className="cell-strong">{s.form_name}</td>
               <td>{schoolName(s.school_id)}</td>

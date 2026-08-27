@@ -25,6 +25,10 @@ export default function StaffSubmissionDetail() {
   const navigate = useNavigate();
   const { user } = useAuth();
 
+  // Admins land here via /admin/submissions/:publicId; back should return there.
+  // Staff use /staff/:publicId; back returns to the staff queue.
+  const isAdmin = user?.role === "admin";
+
   const [detail, setDetail] = useState<SubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -245,8 +249,11 @@ export default function StaffSubmissionDetail() {
     return (
       <div className="empty-state">
         {error || "Submission not found."}{" "}
-        <button className="badge-button" onClick={() => navigate("/staff")}>
-          Back to queue
+        <button
+          className="badge-button"
+          onClick={() => navigate(isAdmin ? "/admin" : "/staff")}
+        >
+          Back to {isAdmin ? "dashboard" : "queue"}
         </button>
       </div>
     );
@@ -275,8 +282,11 @@ export default function StaffSubmissionDetail() {
               Edit
             </button>
           )}
-          <button className="secondary-button" onClick={() => navigate("/staff")}>
-            Back to queue
+          <button
+            className="secondary-button"
+            onClick={() => navigate(isAdmin ? "/admin" : "/staff")}
+          >
+            Back to {isAdmin ? "dashboard" : "queue"}
           </button>
         </div>
       </div>

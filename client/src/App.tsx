@@ -6,6 +6,7 @@ import RegisterPage from "./pages/RegisterPage";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminForms from "./pages/admin/AdminForms";
 import AdminFormDesigner from "./pages/admin/AdminFormDesigner";
+import AdminSchools from "./pages/admin/AdminSchools";
 import StaffQueue from "./pages/staff/StaffQueue";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
 import ParentSubmit from "./pages/parent/ParentSubmit";
@@ -53,6 +54,26 @@ export default function App() {
           <ProtectedRoute roles={["admin"]}>
             <AppShell>
               <AdminFormDesigner />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/schools"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <AdminSchools />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/admin/submissions/:publicId"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <StaffSubmissionDetail />
             </AppShell>
           </ProtectedRoute>
         }

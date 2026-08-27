@@ -15,9 +15,20 @@ export type FieldType =
 
 export interface School {
   id: number;
+  source_id: number | null;
   name: string;
+  grade_level: string | null;
+  calendar: string | null;
   district: string | null;
   created_at: string;
+}
+
+export interface SchoolPage {
+  rows: School[];
+  total: number;
+  page: number;
+  pageSize: number;
+  totalPages: number;
 }
 
 export interface User {

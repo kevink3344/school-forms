@@ -30,15 +30,21 @@ export async function execute<T = unknown>(
 // -----------------------------------------------------------------------------
 // Schools
 // -----------------------------------------------------------------------------
-export async function listSchools(): Promise<School[]> {
+export async function listSchools(schoolId?: number | null): Promise<School[]> {
+  if (schoolId !== undefined && schoolId !== null) {
+    return execute<School>(
+      "SELECT id, source_id, name, grade_level, calendar, district, created_at FROM dbo.schools WHERE id = @schoolId ORDER BY name",
+      { schoolId }
+    );
+  }
   return execute<School>(
-    "SELECT id, name, district, created_at FROM dbo.schools ORDER BY name"
+    "SELECT id, source_id, name, grade_level, calendar, district, created_at FROM dbo.schools ORDER BY name"
   );
 }
 
 export async function getSchool(id: number): Promise<School | null> {
   const rows = await execute<School>(
-    "SELECT id, name, district, created_at FROM dbo.schools WHERE id = @id",
+    "SELECT id, source_id, name, grade_level, calendar, district, created_at FROM dbo.schools WHERE id = @id",
     { id }
   );
   return rows[0] ?? null;
@@ -47,11 +53,89 @@ export async function getSchool(id: number): Promise<School | null> {
 export async function createSchool(name: string, district: string | null): Promise<School> {
   const rows = await execute<School>(
     `INSERT INTO dbo.schools (name, district)
-     OUTPUT INSERTED.id, INSERTED.name, INSERTED.district, INSERTED.created_at
+     OUTPUT INSERTED.id, INSERTED.source_id, INSERTED.name, INSERTED.grade_level,
+            INSERTED.calendar, INSERTED.district, INSERTED.created_at
      VALUES (@name, @district)`,
     { name, district }
   );
   return rows[0];
+}
+
+// Paginated listing for the admin Schools page.
+export async function listSchoolsPage(params: {
+  page: number;
+  pageSize: number;
+}): Promise<{ rows: School[]; total: number }> {
+  const { page, pageSize } = params;
+  const offset = (page - 1) * pageSize;
+  const countRows = await execute<{ total: number }>(
+    "SELECT COUNT(*) AS total FROM dbo.schools"
+  );
+  const total = countRows[0]?.total ?? 0;
+  const rows = await execute<School>(
+    `SELECT id, source_id, name, grade_level, calendar, district, created_at
+     FROM dbo.schools
+     ORDER BY name
+     OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`,
+    { offset, pageSize }
+  );
+  return { rows, total };
+}
+
+// Upsert a school from the imported feed, keyed on the stable source_id (FID).
+export async function upsertSchoolFromSource(s: {
+  sourceId: number;
+  name: string;
+  gradeLevel: string | null;
+  calendar: string | null;
+  district: string | null;
+}): Promise<School> {
+  const rows = await execute<School>(
+    `MERGE dbo.schools AS tgt
+     USING (SELECT @sourceId AS source_id) AS src
+       ON tgt.source_id = src.source_id
+     WHEN MATCHED THEN
+       UPDATE SET tgt.name = @name, tgt.grade_level = @gradeLevel,
+                  tgt.calendar = @calendar,
+                  tgt.district = COALESCE(@district, tgt.district)
+     WHEN NOT MATCHED THEN
+       INSERT (source_id, name, grade_level, calendar, district)
+       VALUES (@sourceId, @name, @gradeLevel, @calendar, @district)
+     OUTPUT INSERTED.id, INSERTED.source_id, INSERTED.name, INSERTED.grade_level,
+            INSERTED.calendar, INSERTED.district, INSERTED.created_at;`,
+    { sourceId: s.sourceId, name: s.name, gradeLevel: s.gradeLevel, calendar: s.calendar, district: s.district }
+  );
+  return rows[0];
+}
+
+// -----------------------------------------------------------------------------
+// School import: parse helpers (pure — no DB)
+// -----------------------------------------------------------------------------
+export function normalizeSchoolLabel(label: string): string {
+  return label.replace(/\s+/g, "").toUpperCase();
+}
+
+export function featureToSchool(
+  feature: Record<string, unknown>,
+  columns: string[]
+): { sourceId: number; name: string; gradeLevel: string | null; calendar: string | null; district: string | null } {
+  // GeoJSON Feature: { id, geometry, properties: { ... } }
+  const props = (feature?.properties ?? {}) as Record<string, unknown>;
+  const get = (label: string): string | null => {
+    const key = normalizeSchoolLabel(label);
+    const v = props[key];
+    if (v === undefined || v === null || String(v).trim() === "") return null;
+    return String(v).trim();
+  };
+  // "Name" is the primary display name; fall back to NAME_SHORT.
+  const name = get("Name") || get("NameShort") || `School ${feature.id ?? ""}`;
+  return {
+    sourceId: Number(feature.id ?? props["FID"] ?? 0),
+    name,
+    gradeLevel: get("GradeLevel") ?? get("Grade"),
+    calendar: get("Calendar"),
+    district: get("District"),
+  };
 }
 
 // -----------------------------------------------------------------------------

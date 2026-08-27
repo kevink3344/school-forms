@@ -77,4 +77,14 @@ export const env = {
     windowMs: int("RATE_LIMIT_WINDOW_MS", 900000),
     max: int("RATE_LIMIT_MAX", 100),
   },
+
+  // School import: a public ArcGIS GeoJSON feed + the table columns to render.
+  // Import is manual (admin button); see docs/plans/school-import.md.
+  schoolImport: {
+    url: process.env.SCHOOL_JSON ?? "",
+    columns: (process.env.SCHOOL_TABLE_COLUMNS ?? "")
+      .split(",")
+      .map((s) => s.trim().trim())
+      .filter(Boolean),
+  },
 };
