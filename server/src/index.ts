@@ -1,3 +1,5 @@
+import path from "node:path";
+import { existsSync } from "node:fs";
 import express, { type Request, type Response, type NextFunction } from "express";
 import cors from "cors";
 import helmet from "helmet";
@@ -63,14 +65,29 @@ app.use("/api/submissions", submissionsRouter);
 app.use("/api/export", exportRouter);
 app.use("/api/webhook", webhookRouter);
 
-// Root convenience → docs
-app.get("/", (_req, res) => {
-  res.json({
-    name: "School Forms API",
-    docs: "/api/docs",
-    health: "/api/health",
+// -----------------------------------------------------------------------------
+// Serve the built client (SPA) so a single URL hosts BOTH the API and the app.
+// In production, the React app and API share the same origin; the client calls
+// relative "/api/..." so no CORS is needed. Falls back to a JSON root in dev.
+// -----------------------------------------------------------------------------
+const clientDist = env.clientDistPath;
+const clientIndex = existsSync(clientDist) ? path.join(clientDist, "index.html") : null;
+if (clientIndex) {
+  app.use(express.static(clientDist));
+  // SPA fallback — every non-/api GET returns the app shell (pushes client-side routes).
+  app.get("*", (req, res, next) => {
+    if (req.path.startsWith("/api")) return next();
+    res.sendFile(clientIndex);
   });
-});
+} else {
+  app.get("/", (_req, res) => {
+    res.json({
+      name: "School Forms API",
+      docs: "/api/docs",
+      health: "/api/health",
+    });
+  });
+}
 
 // -----------------------------------------------------------------------------
 // 404 + error handling

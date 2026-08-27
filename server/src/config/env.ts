@@ -29,6 +29,11 @@ export const env = {
 
   port: int("PORT", 4000),
 
+  // Path to the built client (single-origin serve in production).
+  // Resolved relative to the repo root, NOT process.cwd(), so it works no matter
+  // where Azure (or the user) starts the server from.
+  clientDistPath: process.env.CLIENT_DIST_PATH ?? path.join(repoRoot, "client", "dist"),
+
   azureWebAppName: process.env.AZURE_WEBAPP_NAME ?? "school-forms-api",
   publicBaseUrl: process.env.PUBLIC_BASE_URL ?? "http://localhost:4000",
   apiBaseUrl: process.env.API_BASE_URL ?? "http://localhost:4000",

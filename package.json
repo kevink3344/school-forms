@@ -16,6 +16,7 @@
     "typecheck": "npm-run-all typecheck:server typecheck:client",
     "typecheck:server": "npm --workspace server run typecheck",
     "typecheck:client": "npm --workspace client run typecheck",
+    "start": "node server/dist/index.js",
     "seed": "npm --workspace server run seed"
   },
   "devDependencies": {
