@@ -206,16 +206,23 @@ export const DDL_STATEMENTS: string[] = [
   // ---------------------------------------------------------------------
   // Organizations — users.organization_id (1:1 tenant boundary).
   // Nullable → backfill to Academics → NOT NULL. FK and index.
+  //
+  // These are SPLIT into separate batches because SQL Server compiles each
+  // `request.batch()` before executing it. A statement that references
+  // organization_id cannot be compiled in the same batch that only ADDS the
+  // column via ALTER TABLE — that yields error 207 "Invalid column name".
   // ---------------------------------------------------------------------
   `IF COL_LENGTH('dbo.users', 'organization_id') IS NULL
-     ALTER TABLE dbo.users ADD organization_id INT NULL;
-   IF EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
+     ALTER TABLE dbo.users ADD organization_id INT NULL;`,
+
+  `IF EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
      UPDATE u SET u.organization_id = o.id
      FROM dbo.users u CROSS JOIN dbo.organizations o
      WHERE o.slug = N'academics' AND u.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
-     ALTER TABLE dbo.users ALTER COLUMN organization_id INT NOT NULL;
-   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_users_organization')
+     ALTER TABLE dbo.users ALTER COLUMN organization_id INT NOT NULL;`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_users_organization')
      ALTER TABLE dbo.users ADD CONSTRAINT FK_users_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_users_organization')
@@ -243,16 +250,19 @@ export const DDL_STATEMENTS: string[] = [
   // ---------------------------------------------------------------------
   // Organizations — forms.organization_id (tenant owner of the form).
   // Nullable → backfill to Academics → NOT NULL. FK and index.
+  // (Split into separate batches to avoid error 207 — see users note above.)
   // ---------------------------------------------------------------------
   `IF COL_LENGTH('dbo.forms', 'organization_id') IS NULL
-     ALTER TABLE dbo.forms ADD organization_id INT NULL;
-   IF EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
+     ALTER TABLE dbo.forms ADD organization_id INT NULL;`,
+
+  `IF EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
      UPDATE f SET f.organization_id = o.id
      FROM dbo.forms f CROSS JOIN dbo.organizations o
      WHERE o.slug = N'academics' AND f.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
-     ALTER TABLE dbo.forms ALTER COLUMN organization_id INT NOT NULL;
-   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_forms_organization')
+     ALTER TABLE dbo.forms ALTER COLUMN organization_id INT NOT NULL;`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_forms_organization')
      ALTER TABLE dbo.forms ADD CONSTRAINT FK_forms_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_organization')
@@ -297,16 +307,19 @@ export const DDL_STATEMENTS: string[] = [
   // ---------------------------------------------------------------------
   // Organizations — submissions.organization_id (denormalized from its form
   // for fast org scoping, mirroring school_id). Backfill from forms.
+  // (Split into separate batches to avoid error 207 — see users note above.)
   // ---------------------------------------------------------------------
   `IF COL_LENGTH('dbo.submissions', 'organization_id') IS NULL
-     ALTER TABLE dbo.submissions ADD organization_id INT NULL;
-   IF EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL)
+     ALTER TABLE dbo.submissions ADD organization_id INT NULL;`,
+
+  `IF EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL)
      UPDATE s SET s.organization_id = f.organization_id
      FROM dbo.submissions s JOIN dbo.forms f ON f.id = s.form_id
      WHERE s.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL AND form_id IS NOT NULL)
-     ALTER TABLE dbo.submissions ALTER COLUMN organization_id INT NOT NULL;
-   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_submissions_organization')
+     ALTER TABLE dbo.submissions ALTER COLUMN organization_id INT NOT NULL;`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_submissions_organization')
      ALTER TABLE dbo.submissions ADD CONSTRAINT FK_submissions_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_school_form')
