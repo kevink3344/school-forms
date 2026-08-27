@@ -405,7 +405,7 @@ async function reconcileFormFields(
         `DELETE FROM dbo.form_fields
          WHERE id=@id AND form_id=@formId
            AND NOT EXISTS (SELECT 1 FROM dbo.submission_values sv WHERE sv.field_id = dbo.form_fields.id)`,
-        { id }
+        { id, formId }
       );
     }
   }
