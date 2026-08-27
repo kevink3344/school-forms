@@ -262,10 +262,10 @@ export async function updateUser(
     `UPDATE dbo.users
      SET display_name = @displayName, email = @email, active = @active,
          school_id = @schoolId, role = @role, organization_id = @organizationId
-     WHERE id = @id
      OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
             INSERTED.school_id, INSERTED.organization_id, INSERTED.display_name,
-            INSERTED.active, INSERTED.created_at`,
+            INSERTED.active, INSERTED.created_at
+     WHERE id = @id`,
     { id, displayName, email, active, schoolId, role, organizationId }
   );
   return rows[0] ?? null;
