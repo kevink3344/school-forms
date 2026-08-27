@@ -49,6 +49,7 @@ export interface User {
   role: Role;
   school_id: number | null;
   display_name: string;
+  active: boolean;
   created_at: Date;
 }
 
@@ -155,6 +156,7 @@ export const DDL_STATEMENTS: string[] = [
      role          NVARCHAR(20) NOT NULL CHECK (role IN ('admin','staff')),
      school_id     INT NULL,
      display_name  NVARCHAR(120) NOT NULL,
+     active        BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
      created_at    DATETIME2 NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_users_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE SET NULL
    );
@@ -162,6 +164,11 @@ export const DDL_STATEMENTS: string[] = [
      CREATE UNIQUE INDEX UX_users_email ON dbo.users(email);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_users_school')
      CREATE INDEX IX_users_school ON dbo.users(school_id);`,
+
+  // Idempotent migration for the admin Settings → Users feature — adds the
+  // active flag to an ALREADY-EXISTING dbo.users table (safe to re-run).
+  `IF COL_LENGTH('dbo.users', 'active') IS NULL
+     ALTER TABLE dbo.users ADD active BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1;`,
 
   `IF OBJECT_ID('dbo.forms', 'U') IS NULL
    CREATE TABLE dbo.forms (

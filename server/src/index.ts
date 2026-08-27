@@ -10,6 +10,7 @@ import { env } from "./config/env.js";
 import { initDb, isDbReady } from "./db/pool.js";
 import { authRouter } from "./routes/auth.js";
 import { schoolsRouter } from "./routes/schools.js";
+import { usersRouter } from "./routes/users.js";
 import { formsRouter } from "./routes/forms.js";
 import { submissionsRouter } from "./routes/submissions.js";
 import { exportRouter } from "./routes/export.js";
@@ -60,6 +61,7 @@ if (env.swagger.enabled) {
 app.use("/api/health", healthRouter);
 app.use("/api/auth", authRouter);
 app.use("/api/schools", schoolsRouter);
+app.use("/api/users", usersRouter);
 app.use("/api/forms", formsRouter);
 app.use("/api/submissions", submissionsRouter);
 app.use("/api/export", exportRouter);

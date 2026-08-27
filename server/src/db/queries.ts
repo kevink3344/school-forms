@@ -143,7 +143,7 @@ export function featureToSchool(
 // -----------------------------------------------------------------------------
 export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, display_name, created_at
+    `SELECT id, email, password_hash, role, school_id, display_name, active, created_at
      FROM dbo.users WHERE email = @email`,
     { email }
   );
@@ -152,7 +152,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getUserById(id: number): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, display_name, created_at
+    `SELECT id, email, password_hash, role, school_id, display_name, active, created_at
      FROM dbo.users WHERE id = @id`,
     { id }
   );
@@ -164,16 +164,59 @@ export async function createUser(
   passwordHash: string,
   role: Role,
   schoolId: number | null,
-  displayName: string
+  displayName: string,
+  active = true
 ): Promise<User> {
   const rows = await execute<User>(
-    `INSERT INTO dbo.users (email, password_hash, role, school_id, display_name)
+    `INSERT INTO dbo.users (email, password_hash, role, school_id, display_name, active)
      OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
-            INSERTED.school_id, INSERTED.display_name, INSERTED.created_at
-     VALUES (@email, @passwordHash, @role, @schoolId, @displayName)`,
-    { email, passwordHash, role, schoolId, displayName }
+            INSERTED.school_id, INSERTED.display_name, INSERTED.active, INSERTED.created_at
+     VALUES (@email, @passwordHash, @role, @schoolId, @displayName, @active)`,
+    { email, passwordHash, role, schoolId, displayName, active }
   );
   return rows[0];
+}
+
+// A user row enriched with their school's display name (LEFT JOIN so admins with
+// no school still appear). Used by the admin Settings → Users panel.
+export interface AdminUserRow extends User {
+  school_name: string | null;
+}
+
+export async function listUsers(): Promise<AdminUserRow[]> {
+  return execute<AdminUserRow>(
+    `SELECT u.id, u.email, u.password_hash, u.role, u.school_id, u.display_name,
+            u.active, u.created_at,
+            s.name AS school_name
+     FROM dbo.users u
+     LEFT JOIN dbo.schools s ON s.id = u.school_id
+     ORDER BY u.role, u.display_name, u.email`
+  );
+}
+
+export async function updateUser(
+  id: number,
+  data: { display_name?: string; email?: string; active?: boolean; school_id?: number | null; role?: Role }
+): Promise<User | null> {
+  const existing = await getUserById(id);
+  if (!existing) return null;
+
+  const displayName = data.display_name ?? existing.display_name;
+  const email = data.email ?? existing.email;
+  const active = data.active ?? existing.active;
+  const schoolId = data.school_id === undefined ? existing.school_id : data.school_id;
+  const role = data.role ?? existing.role;
+
+  const rows = await execute<User>(
+    `UPDATE dbo.users
+     SET display_name = @displayName, email = @email, active = @active,
+         school_id = @schoolId, role = @role
+     WHERE id = @id
+     OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
+            INSERTED.school_id, INSERTED.display_name, INSERTED.active, INSERTED.created_at`,
+    { id, displayName, email, active, schoolId, role }
+  );
+  return rows[0] ?? null;
 }
 
 // -----------------------------------------------------------------------------

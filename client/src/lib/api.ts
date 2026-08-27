@@ -1,11 +1,13 @@
 import type {
   AuthResponse,
   AdhocField,
+  AdminUser,
   Comment,
   ExportPreview,
   Form,
   FormWithFields,
   PublicForm,
+  Role,
   School,
   SchoolPage,
   SubmissionAnswer,
@@ -192,6 +194,44 @@ export const api = {
 
   async importSchools(): Promise<{ total: number }> {
     return request<{ total: number }>("/api/schools/import", { method: "POST", auth: true });
+  },
+
+  // -------------------------------------------------------------------------
+  // Users (admin Settings → Users panel)
+  // -------------------------------------------------------------------------
+  async listUsers(): Promise<AdminUser[]> {
+    return request<AdminUser[]>("/api/users", { auth: true });
+  },
+
+  async createUser(input: {
+    email: string;
+    password: string;
+    display_name: string;
+    role: Role;
+    school_id?: number | null;
+  }): Promise<AdminUser> {
+    return request<AdminUser>("/api/users", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  async updateUser(
+    id: number,
+    input: {
+      display_name?: string;
+      email?: string;
+      active?: boolean;
+      role?: Role;
+      school_id?: number | null;
+    }
+  ): Promise<AdminUser> {
+    return request<AdminUser>(`/api/users/${id}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
   },
 
   // -------------------------------------------------------------------------

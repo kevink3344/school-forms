@@ -39,6 +39,14 @@ export interface User {
   display_name: string;
 }
 
+// User row as returned by the admin /api/users endpoints — enriched with the
+// school's display name (null for admins with no school) and the active flag.
+export interface AdminUser extends User {
+  school_name: string | null;
+  active: boolean;
+  created_at: string;
+}
+
 export interface FormField {
   id: number;
   form_id: number;

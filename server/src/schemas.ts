@@ -22,6 +22,27 @@ export const refreshSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// Users (admin Settings → Users panel)
+// -----------------------------------------------------------------------------
+export const createUserSchema = z.object({
+  email: z.string().email(),
+  password: z.string().min(8).max(100),
+  display_name: z.string().min(1).max(120),
+  role: z.enum(ROLES).default("staff"),
+  school_id: z.number().int().positive().optional().nullable(),
+});
+
+export const updateUserSchema = z
+  .object({
+    display_name: z.string().min(1).max(120).optional(),
+    email: z.string().email().optional(),
+    active: z.boolean().optional(),
+    role: z.enum(ROLES).optional(),
+    school_id: z.number().int().positive().optional().nullable(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+// -----------------------------------------------------------------------------
 // Schools
 // -----------------------------------------------------------------------------
 export const createSchoolSchema = z.object({

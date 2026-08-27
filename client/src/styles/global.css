@@ -161,6 +161,34 @@ p { margin: 0; }
   border-top: 1px solid var(--border);
 }
 
+/* Form grid (modal create/edit forms) */
+.form-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; }
+.form-grid label.cf {
+  display: flex; flex-direction: column; gap: 5px; font-size: 11px; font-weight: 600;
+  color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;
+}
+.form-grid label.cf input,
+.form-grid label.cf select { width: 100%; }
+
+/* Toggle switch (Users panel active/inactive) */
+.toggle { display: inline-flex; align-items: center; cursor: pointer; }
+.toggle input { position: absolute; opacity: 0; width: 0; height: 0; }
+.toggle .track {
+  width: 38px; height: 22px; border-radius: 999px; background: var(--border);
+  position: relative; transition: background-color .2s; flex-shrink: 0;
+}
+.toggle .thumb {
+  position: absolute; top: 2px; left: 2px; width: 18px; height: 18px; border-radius: 50%;
+  background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,0.2); transition: transform .2s;
+}
+.toggle input:checked + .track { background: var(--accent); }
+.toggle input:checked + .track .thumb { transform: translateX(16px); }
+.toggle input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
+
+@media (max-width: 768px) {
+  .form-grid { grid-template-columns: 1fr; }
+}
+
 /* Inline alerts */
 .alert-error, .alert-success {
   padding: 10px 12px; border-radius: var(--radius); font-size: 13px; margin-bottom: 16px;
