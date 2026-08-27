@@ -102,6 +102,12 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
     }
   }
 
+  // Success — parse and return the response body.
+  if (res.ok) {
+    if (res.status === 204) return undefined as T;
+    return (await res.json()) as T;
+  }
+
   return await handleError(res);
 }
 
