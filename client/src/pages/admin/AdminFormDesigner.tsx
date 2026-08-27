@@ -29,6 +29,10 @@ export default function AdminFormDesigner() {
   // Editor state for the field list
   const [fields, setFields] = useState<FormField[]>([]);
 
+  // Editable form-level metadata (title / description)
+  const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -37,6 +41,8 @@ export default function AdminFormDesigner() {
         if (cancelled) return;
         setForm(f);
         setFields(f.fields || []);
+        setTitle(f.title || "");
+        setDescription(f.description ?? "");
       })
       .catch(() => setError("Could not load form"))
       .finally(() => {
@@ -95,8 +101,8 @@ export default function AdminFormDesigner() {
     setError("");
     try {
       await api.updateForm(formId, {
-        title: form?.title || "Untitled",
-        description: form?.description ?? null,
+        title: title || "Untitled",
+        description: description || null,
         fields: fields.map((f, i) => ({
           id: f.id || undefined,
           label: f.label,
@@ -112,6 +118,8 @@ export default function AdminFormDesigner() {
       const fresh = await api.getForm(formId);
       setForm(fresh);
       setFields(fresh.fields || []);
+      setTitle(fresh.title || "");
+      setDescription(fresh.description ?? "");
       setDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save form");
@@ -145,7 +153,7 @@ export default function AdminFormDesigner() {
   return (
     <div>
       <PageHead
-        title={form?.title || "Form Designer"}
+        title={title || "Form Designer"}
         subtitle={`ID ${formId} · ${form ? formStatusBadge(form.status).label : ""}`}
         actions={
           <>
@@ -184,6 +192,40 @@ export default function AdminFormDesigner() {
           {error}
         </div>
       )}
+
+      <div className="card">
+        <div className="card-head">
+          <h3>Form Details</h3>
+        </div>
+        <div className="card-body">
+          <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+            <div className="filter-group" style={{ minWidth: 0 }}>
+              <label>Title</label>
+              <input
+                type="text"
+                value={title}
+                placeholder="Form title"
+                onChange={(e) => {
+                  setTitle(e.target.value);
+                  setDirty(true);
+                }}
+              />
+            </div>
+            <div className="filter-group" style={{ minWidth: 0 }}>
+              <label>Description</label>
+              <textarea
+                value={description}
+                rows={2}
+                placeholder="Optional description shown to parents"
+                onChange={(e) => {
+                  setDescription(e.target.value);
+                  setDirty(true);
+                }}
+              />
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div className="card">
         <div className="card-head">
