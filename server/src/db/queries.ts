@@ -72,7 +72,7 @@ interface SettingRow {
 
 export async function getSetting(key: string): Promise<string | null> {
   const rows = await execute<SettingRow>(
-    "SELECT key, value FROM dbo.app_settings WHERE key = @key",
+    "SELECT [key], [value] FROM dbo.app_settings WHERE [key] = @key",
     { key }
   );
   return rows[0]?.value ?? null;
@@ -83,12 +83,12 @@ export async function getSetting(key: string): Promise<string | null> {
 export async function setSetting(key: string, value: string): Promise<string> {
   await execute(
     `MERGE dbo.app_settings AS target
-     USING (SELECT @key AS key, @value AS value) AS source
-     ON target.key = source.key
-     WHEN MATCHED THEN UPDATE SET target.value = source.value,
+     USING (SELECT @key AS [key], @value AS [value]) AS source
+     ON target.[key] = source.[key]
+     WHEN MATCHED THEN UPDATE SET target.[value] = source.[value],
                                   target.updated_at = SYSUTCDATETIME()
-     WHEN NOT MATCHED THEN INSERT (key, value, updated_at)
-       VALUES (source.key, source.value, SYSUTCDATETIME());`,
+     WHEN NOT MATCHED THEN INSERT ([key], [value], updated_at)
+       VALUES (source.[key], source.[value], SYSUTCDATETIME());`,
     { key, value }
   );
   return value;
@@ -737,17 +737,54 @@ export async function getSubmissionDetail(publicId: string, organizationId?: num
   return { ...submission, values, comments, adhocFields, staffOnlyFields };
 }
 
+// Resolve which school a submission belongs to. District-wide forms (e.g. CDM)
+// collect a parent-typed "School" answer rather than being tied to a single
+// school. When the form has a "School"-labeled field and the parent's answer
+// matches a school name exactly (case-insensitive), the submission is scoped to
+// that school so the matching staff can see it. Falls back to form.school_id.
+export async function resolveSubmissionSchoolId(
+  form: Pick<Form, "id" | "school_id">,
+  answers: { field_id: number; value: string | number | boolean | string[] | null }[]
+): Promise<number | null> {
+  const fallback = form.school_id ?? null;
+
+  // Identify "school" answer fields by their label — the CDM Google Form uses a
+  // plain-text field labeled "School" (also tolerate "School Name").
+  const fields = await listFormFields(form.id);
+  const schoolFieldIds = new Set<number>();
+  for (const f of fields) {
+    const label = f.label.trim().toLowerCase();
+    if (label === "school" || label === "school name") schoolFieldIds.add(f.id);
+  }
+  if (schoolFieldIds.size === 0) return fallback;
+
+  for (const a of answers) {
+    if (!schoolFieldIds.has(a.field_id)) continue;
+    if (typeof a.value !== "string" || !a.value.trim()) continue;
+    const name = a.value.trim();
+    // Exact match against schools.name (Azure SQL default collation is
+    // case-insensitive, so "broughton high school" matches "Broughton High School").
+    const rows = await execute<Pick<School, "id">>(
+      "SELECT id FROM dbo.schools WHERE name = @name",
+      { name }
+    );
+    if (rows[0]?.id) return rows[0].id;
+  }
+  return fallback;
+}
+
 export async function createSubmission(
   form: Form,
   publicId: string,
   answers: { field_id: number; value: string | number | boolean | string[] | null }[]
 ): Promise<SubmissionDetail> {
+  const schoolId = await resolveSubmissionSchoolId(form, answers);
   const subs = await execute<Submission>(
     `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status)
      OUTPUT INSERTED.id, INSERTED.public_id, INSERTED.form_id, INSERTED.school_id,
             INSERTED.organization_id, INSERTED.status, INSERTED.submitted_at, INSERTED.updated_at
      VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted')`,
-    { publicId, formId: form.id, schoolId: form.school_id ?? null, organizationId: form.organization_id }
+    { publicId, formId: form.id, schoolId, organizationId: form.organization_id }
   );
   const submission = subs[0];
   for (const a of answers) {

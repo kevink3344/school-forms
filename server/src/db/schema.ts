@@ -381,8 +381,8 @@ export const DDL_STATEMENTS: string[] = [
   // The column is added in the same batch here since it's a fresh CREATE TABLE.
   `IF OBJECT_ID('dbo.app_settings', 'U') IS NULL
    CREATE TABLE dbo.app_settings (
-     key        NVARCHAR(100) NOT NULL PRIMARY KEY,
-     value      NVARCHAR(MAX) NOT NULL,
+     [key]      NVARCHAR(100) NOT NULL PRIMARY KEY,
+     [value]    NVARCHAR(MAX) NOT NULL,
      updated_at DATETIME2 NOT NULL CONSTRAINT DF_app_settings_updated_at DEFAULT SYSUTCDATETIME()
    );`,
 ];
