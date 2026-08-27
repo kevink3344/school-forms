@@ -94,11 +94,11 @@ export default function AdminFormDesigner() {
     setSaving(true);
     setError("");
     try {
-      await api.createForm({
+      await api.updateForm(formId, {
         title: form?.title || "Untitled",
         description: form?.description ?? null,
-        school_id: form?.school_id ?? null,
         fields: fields.map((f, i) => ({
+          id: f.id || undefined,
           label: f.label,
           type: f.type,
           options: f.options,

@@ -211,6 +211,121 @@ export async function createForm(
   return getFormWithFields(form.id) as Promise<FormWithFields>;
 }
 
+export async function updateForm(
+  formId: number,
+  data: {
+    title?: string;
+    description?: string | null;
+    status?: string;
+    fields?: {
+      id?: number;
+      label: string;
+      type: string;
+      options?: string[] | null;
+      required?: boolean;
+      staff_only?: boolean;
+      sort_order?: number;
+      placeholder?: string | null;
+    }[];
+  }
+): Promise<FormWithFields | null> {
+  const existing = await getForm(formId);
+  if (!existing) return null;
+
+  const title = data.title ?? existing.title;
+  const description = data.description === undefined ? existing.description : data.description;
+  const status = data.status ?? existing.status;
+
+  await execute(
+    `UPDATE dbo.forms SET title=@title, description=@description, status=@status, updated_at=SYSUTCDATETIME() WHERE id=@id`,
+    { id: formId, title, description, status }
+  );
+
+  if (data.fields) {
+    await reconcileFormFields(formId, data.fields);
+  }
+
+  return getFormWithFields(formId);
+}
+
+// Replace the form's fields in place. Existing fields (matched by id) are updated,
+// new fields (no id / id=0) are inserted, and removed fields are deleted — but only
+// if they have no submission values, since submission_values.field_id has an
+// ON DELETE NO ACTION foreign key. This keeps edits to draft forms safe while not
+// crashing on forms that already collected responses.
+async function reconcileFormFields(
+  formId: number,
+  fields: {
+    id?: number;
+    label: string;
+    type: string;
+    options?: string[] | null;
+    required?: boolean;
+    staff_only?: boolean;
+    sort_order?: number;
+    placeholder?: string | null;
+  }[]
+): Promise<void> {
+  const existingRows = await execute<FormField>(
+    `SELECT id FROM dbo.form_fields WHERE form_id = @formId`,
+    { formId }
+  );
+  const existingIds = new Set(existingRows.map((r) => r.id));
+  const incomingIds = new Set<number>();
+
+  for (let i = 0; i < fields.length; i++) {
+    const f = fields[i];
+    const sortOrder = f.sort_order ?? i;
+    const options = f.options && f.options.length ? JSON.stringify(f.options) : null;
+    if (f.id && existingIds.has(f.id)) {
+      incomingIds.add(f.id);
+      await execute(
+        `UPDATE dbo.form_fields
+         SET label=@label, type=@type, options=@options, required=@required,
+             staff_only=@staffOnly, sort_order=@sortOrder, placeholder=@placeholder
+         WHERE id=@id AND form_id=@formId`,
+        {
+          id: f.id,
+          label: f.label,
+          type: f.type,
+          options,
+          required: f.required ?? false,
+          staffOnly: f.staff_only ?? false,
+          sortOrder,
+          placeholder: f.placeholder ?? null,
+        }
+      );
+    } else {
+      await execute(
+        `INSERT INTO dbo.form_fields (form_id, label, type, options, required, staff_only, sort_order, placeholder)
+         VALUES (@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, @placeholder)`,
+        {
+          formId,
+          label: f.label,
+          type: f.type,
+          options,
+          required: f.required ?? false,
+          staffOnly: f.staff_only ?? false,
+          sortOrder,
+          placeholder: f.placeholder ?? null,
+        }
+      );
+    }
+  }
+
+  // Delete removed fields only when they have no submission values (FK NO ACTION).
+  for (const id of existingIds) {
+    if (!incomingIds.has(id)) {
+      await execute(
+        `DELETE FROM dbo.form_fields
+         WHERE id=@id AND form_id=@formId
+           AND NOT EXISTS (SELECT 1 FROM dbo.submission_values sv WHERE sv.field_id = dbo.form_fields.id)`,
+        { id }
+      );
+    }
+  }
+}
+
 // -----------------------------------------------------------------------------
 // Submissions
 // -----------------------------------------------------------------------------

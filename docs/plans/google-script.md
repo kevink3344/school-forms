@@ -9,11 +9,8 @@
 // values you set in the School Forms form designer; this script maps
 // title -> field_id by fetching the published form's field list.
 
-// NOTE: Google Apps Script runs on Google's servers, so it CANNOT reach localhost.
-// Use the public Azure URL below (stable for production). The localtunnel URL
-// (quick-owls-train.loca.lt) is now DEPRECATED and changes every restart — if
-// you ever fall back to it, recreate it and re-paste it here. Never use
-// http://localhost:4000 here.
+// API_BASE is ONLY the origin (scheme + host). The script appends "/api/..." paths below.
+// Do NOT add "/api/webhook/google" here — that would double the path and cause 404s.
 const API_BASE = 'https://webform-sandbox-addph8hsd9feghdp.eastus2-01.azurewebsites.net';
 const FORM_ID = 1;                       // numeric DB form_id, NOT a string
 const WEBHOOK_SECRET = 'ebbe86f0c8e2e1aeceeb6aa1583a3b15a11eea87e6caeffc6b55c4ff4fa54714dad5737567c7003e4b638d40e42334b2'; // must match GOOGLE_FORMS_WEBHOOK_SECRET
@@ -49,10 +46,7 @@ function onFormSubmit(e) {
   const res = UrlFetchApp.fetch(API_BASE + '/api/webhook/google', {
     method: 'post',
     contentType: 'application/json',
-    headers: {
-      'X-Webhook-Secret': WEBHOOK_SECRET,
-      'bypass-tunnel-reminder': 'true', // localtunnel: skip the interstitial page
-    },
+    headers: { 'X-Webhook-Secret': WEBHOOK_SECRET },
     payload: JSON.stringify(payload),
     muteHttpExceptions: true, // so we can inspect the HTTP status on failure
   });
@@ -71,7 +65,6 @@ function getFieldMap(formId) {
   const res = UrlFetchApp.fetch(API_BASE + '/api/forms/' + formId + '/public', {
     method: 'get',
     contentType: 'application/json',
-    headers: { 'bypass-tunnel-reminder': 'true' }, // localtunnel: skip the interstitial page
     muteHttpExceptions: true,
   });
   if (res.getResponseCode() !== 200) {

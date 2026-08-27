@@ -151,6 +151,31 @@ export const api = {
     });
   },
 
+  async updateForm(
+    id: number,
+    input: {
+      title?: string;
+      description?: string | null;
+      status?: string;
+      fields: {
+        id?: number;
+        label: string;
+        type: string;
+        options?: string[] | null;
+        required?: boolean;
+        staff_only?: boolean;
+        sort_order?: number;
+        placeholder?: string | null;
+      }[];
+    }
+  ): Promise<FormWithFields> {
+    return request<FormWithFields>(`/api/forms/${id}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
+  },
+
   async updateFormStatus(id: number, status: string): Promise<FormWithFields> {
     return request<FormWithFields>(`/api/forms/${id}/status`, {
       method: "PATCH",

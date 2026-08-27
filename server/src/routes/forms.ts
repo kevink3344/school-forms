@@ -3,6 +3,7 @@ import {
   listForms,
   getFormWithFields,
   createForm,
+  updateForm,
   execute,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
@@ -111,22 +112,17 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const existing = await getFormWithFields(id);
-    if (!existing) {
+    const updated = await updateForm(id, {
+      title: parsed.data.title,
+      description: parsed.data.description,
+      status: parsed.data.status,
+      fields: parsed.data.fields,
+    });
+    if (!updated) {
       res.status(404).json({ error: "Form not found" });
       return;
     }
-    const title = parsed.data.title ?? existing.title;
-    const description = parsed.data.description === undefined ? existing.description : parsed.data.description;
-    const status = parsed.data.status ?? existing.status;
-
-    // Update basic fields
-    await execute(
-      `UPDATE dbo.forms SET title=@title, description=@description, status=@status, updated_at=SYSUTCDATETIME() WHERE id=@id`,
-      { id, title, description, status }
-    );
-
-    res.json(await getFormWithFields(id));
+    res.json(updated);
   } catch (err) {
     next(err);
   }

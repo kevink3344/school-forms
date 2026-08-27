@@ -35,6 +35,7 @@ export const createSchoolSchema = z.object({
 const fieldTypeEnum = z.enum(FIELD_TYPES);
 
 export const fieldSchema = z.object({
+  id: z.number().int().positive().optional(),
   label: z.string().min(1).max(200),
   type: fieldTypeEnum,
   options: z.array(z.string().min(1).max(200)).optional().nullable(),
