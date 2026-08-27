@@ -136,6 +136,8 @@ export interface SubmissionDetail extends Submission {
   values: SubmissionValueRow[];
   comments: Comment[];
   adhocFields: AdhocField[];
+  // The form's own staff-only field definitions (always shown on the detail page).
+  staffOnlyFields: FormField[];
 }
 
 export interface AuthResponse {

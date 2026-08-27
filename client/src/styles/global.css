@@ -143,6 +143,19 @@ p { margin: 0; }
 .card-head h3 { margin: 0; font-size: 15px; font-weight: 700; }
 .card-head .sub { font-size: 12px; color: var(--text-muted); margin: 0; }
 .card-body { padding: 18px; }
+
+/* Field-group tabs (Form Designer: parent-facing vs staff-only) */
+.tabs {
+  display: inline-flex; gap: 4px; padding: 4px; background: var(--panel-bg);
+  border: 1px solid var(--border); border-radius: var(--radius);
+}
+.tabs .tab {
+  border: none; background: transparent; color: var(--text-muted); font-size: 13px;
+  font-weight: 600; padding: 7px 16px; border-radius: calc(var(--radius) - 1px);
+  cursor: pointer; transition: background-color .15s, color .15s;
+}
+.tabs .tab:hover:not(:disabled) { color: var(--text); }
+.tabs .tab.active { background: var(--accent); color: #fff; }
 .card-foot {
   display: flex; align-items: center; gap: 12px; padding: 12px 18px;
   border-top: 1px solid var(--border);

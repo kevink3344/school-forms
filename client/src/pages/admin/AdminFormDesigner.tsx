@@ -26,6 +26,9 @@ export default function AdminFormDesigner() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  // Which field tab is active: parent-facing ("form") or staff-only ("staff").
+  const [activeTab, setActiveTab] = useState<"form" | "staff">("form");
+
   // Editor state for the field list
   const [fields, setFields] = useState<FormField[]>([]);
 
@@ -62,6 +65,12 @@ export default function AdminFormDesigner() {
     setDirty(true);
   };
 
+  // The form's parent-facing fields and its staff-only fields. Each tab renders
+  // a filtered view of the single `fields` source of truth, but once a field is
+  // created its group (staff_only) is fixed, so toggling the tab never migrates it.
+  const formFields = fields.filter((f) => !f.staff_only);
+  const staffFields = fields.filter((f) => f.staff_only);
+
   const addField = () => {
     setFields((prev) => [
       ...prev,
@@ -72,7 +81,7 @@ export default function AdminFormDesigner() {
         type: "text",
         options: null,
         required: false,
-        staff_only: false,
+        staff_only: activeTab === "staff",
         sort_order: prev.length,
         placeholder: null,
       },
@@ -80,17 +89,23 @@ export default function AdminFormDesigner() {
     setDirty(true);
   };
 
-  const removeField = (index: number) => {
-    setFields((prev) => prev.filter((_, i) => i !== index));
+  const removeField = (field: FormField) => {
+    setFields((prev) => prev.filter((f) => f !== field));
     setDirty(true);
   };
 
-  const moveField = (index: number, dir: -1 | 1) => {
+  const moveField = (field: FormField, dir: -1 | 1) => {
     setFields((prev) => {
+      const idx = prev.indexOf(field);
+      if (idx < 0) return prev;
+      // Move within the same group (skip fields of the other tab).
+      let target = idx + dir;
+      while (target >= 0 && target < prev.length && prev[target].staff_only !== field.staff_only) {
+        target += dir;
+      }
+      if (target < 0 || target >= prev.length) return prev;
       const next = [...prev];
-      const target = index + dir;
-      if (target < 0 || target >= next.length) return prev;
-      [next[index], next[target]] = [next[target], next[index]];
+      [next[idx], next[target]] = [next[target], next[idx]];
       return next;
     });
     setDirty(true);
@@ -230,36 +245,79 @@ export default function AdminFormDesigner() {
       <div className="card">
         <div className="card-head">
           <h3>Fields</h3>
-          <span className="sub" style={{ marginLeft: "auto" }}>
-            Mark fields <strong>Staff Only</strong> to hide them from parents.
-          </span>
+          <div className="tabs" style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              className={`tab ${activeTab === "form" ? "active" : ""}`}
+              onClick={() => setActiveTab("form")}
+            >
+              Form Fields ({formFields.length})
+            </button>
+            <button
+              type="button"
+              className={`tab ${activeTab === "staff" ? "active" : ""}`}
+              onClick={() => setActiveTab("staff")}
+            >
+              Staff Only Fields ({staffFields.length})
+            </button>
+          </div>
         </div>
         <div className="card-body">
-          {fields.length === 0 ? (
-            <div className="empty-state">
-              No fields yet. Add your first field below.
-            </div>
+          {activeTab === "form" ? (
+            <>
+              <div className="sub" style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+                These fields are shown to parents when they submit the form.
+              </div>
+              {formFields.length === 0 ? (
+                <div className="empty-state">No parent-facing fields yet. Add your first field below.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {formFields.map((f) => (
+                    <FieldRow
+                      key={f.id}
+                      field={f}
+                      index={fields.indexOf(f)}
+                      count={fields.length}
+                      showStaffOnlyToggle={false}
+                      onChange={(patch) => rebuildField(fields.indexOf(f), patch)}
+                      onRemove={() => removeField(f)}
+                      onMove={(dir) => moveField(f, dir)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-              {fields.map((f, i) => (
-                <FieldRow
-                  key={i}
-                  field={f}
-                  index={i}
-                  count={fields.length}
-                  onChange={(patch) => rebuildField(i, patch)}
-                  onRemove={() => removeField(i)}
-                  onMove={(dir) => moveField(i, dir)}
-                />
-              ))}
-            </div>
+            <>
+              <div className="sub" style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+                These fields are hidden from parents. Staff fill them in on each submission's detail page.
+              </div>
+              {staffFields.length === 0 ? (
+                <div className="empty-state">No staff-only fields yet. Add one to capture private info per submission.</div>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  {staffFields.map((f) => (
+                    <FieldRow
+                      key={f.id}
+                      field={f}
+                      index={fields.indexOf(f)}
+                      count={fields.length}
+                      showStaffOnlyToggle={false}
+                      onChange={(patch) => rebuildField(fields.indexOf(f), patch)}
+                      onRemove={() => removeField(f)}
+                      onMove={(dir) => moveField(f, dir)}
+                    />
+                  ))}
+                </div>
+              )}
+            </>
           )}
 
           <button className="secondary-button" onClick={addField} style={{ marginTop: 14 }}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
               <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
             </svg>
-            Add Field
+            Add {activeTab === "staff" ? "Staff Only" : "Form"} Field
           </button>
         </div>
       </div>
@@ -272,6 +330,7 @@ function FieldRow({
   field,
   index,
   count,
+  showStaffOnlyToggle,
   onChange,
   onRemove,
   onMove,
@@ -279,6 +338,7 @@ function FieldRow({
   field: FormField;
   index: number;
   count: number;
+  showStaffOnlyToggle: boolean;
   onChange: (patch: Partial<FormField>) => void;
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
@@ -304,6 +364,30 @@ function FieldRow({
             ↓
           </button>
         </div>
+        {showStaffOnlyToggle && (
+          <label
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 8,
+              fontSize: 13,
+              cursor: "pointer",
+              marginLeft: 8,
+            }}
+          >
+            <input
+              type="checkbox"
+              checked={field.staff_only}
+              onChange={(e) => onChange({ staff_only: e.target.checked })}
+            />
+            Staff Only
+          </label>
+        )}
+        {field.staff_only && !showStaffOnlyToggle && (
+          <span className="badge badge-orange" style={{ fontSize: 11, marginLeft: 8 }}>
+            Staff Only
+          </span>
+        )}
         <div className="filter-spacer" />
         <button className="icon-button" title="Remove field" onClick={onRemove}>
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -357,22 +441,6 @@ function FieldRow({
             onChange={(e) => onChange({ required: e.target.checked })}
           />
           Required
-        </label>
-        <label
-          style={{
-            display: "flex",
-            alignItems: "center",
-            gap: 8,
-            fontSize: 13,
-            cursor: "pointer",
-          }}
-        >
-          <input
-            type="checkbox"
-            checked={field.staff_only}
-            onChange={(e) => onChange({ staff_only: e.target.checked })}
-          />
-          Staff Only
         </label>
       </div>
     </div>

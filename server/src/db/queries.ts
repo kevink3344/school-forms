@@ -437,6 +437,9 @@ export interface SubmissionDetail extends SubmissionRow {
   comments: CommentRow[];
   // Staff-only fields added ad-hoc to this submission (not part of the fixed form).
   adhocFields: AdhocFieldRow[];
+  // The form's own staff-only field definitions — these are always shown on the
+  // detail page so staff can fill them in one by one (even before a value exists).
+  staffOnlyFields: FormField[];
 }
 
 export async function listSubmissions(params: {
@@ -547,7 +550,11 @@ export async function getSubmissionDetail(publicId: string): Promise<SubmissionD
   const values = await listSubmissionValues(submission.id);
   const comments = await listComments(submission.id);
   const adhocFields = await listAdhocFields(submission.id);
-  return { ...submission, values, comments, adhocFields };
+  // The form's staff-only field definitions, so the detail page can render every
+  // staff-only field (including ones not yet answered) for one-by-one filling.
+  const formFields = await listFormFields(submission.form_id);
+  const staffOnlyFields = formFields.filter((f) => f.staff_only);
+  return { ...submission, values, comments, adhocFields, staffOnlyFields };
 }
 
 export async function createSubmission(

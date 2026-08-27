@@ -1,24 +1,11 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow, AdhocField, FieldType } from "../../types";
+import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
 import { StatusBadge } from "../../components/layout";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "resolved"];
-
-const FIELD_TYPES: { value: FieldType; label: string }[] = [
-  { value: "text", label: "Text" },
-  { value: "textarea", label: "Paragraph" },
-  { value: "number", label: "Number" },
-  { value: "date", label: "Date" },
-  { value: "select", label: "Dropdown" },
-  { value: "radio", label: "Radio" },
-  { value: "checkbox", label: "Checkbox" },
-  { value: "email", label: "Email" },
-];
-
-const OPTIONS_FIELD_TYPES: FieldType[] = ["select", "radio", "checkbox"];
 
 export default function StaffSubmissionDetail() {
   const { publicId } = useParams<{ publicId: string }>();
@@ -41,22 +28,9 @@ export default function StaffSubmissionDetail() {
   const [draft, setDraft] = useState<Record<number, string | number | boolean | string[] | null>>({});
   const [saving, setSaving] = useState(false);
 
-  // Ad-hoc field state
-  const [adhocDrafts, setAdhocDrafts] = useState<Record<number, string | number | boolean | string[] | null>>({});
-  const [adhocEditingId, setAdhocEditingId] = useState<number | null>(null);
-  const [showComposer, setShowComposer] = useState(false);
-  const [cfg, setCfg] = useState<{
-    label: string;
-    type: FieldType;
-    options: string;
-    value: string | number | boolean | string[] | null;
-  }>({
-    label: "",
-    type: "text",
-    options: "",
-    value: "",
-  });
-  const [adhocBusy, setAdhocBusy] = useState(false);
+  // Always-editable staff-only fields (the form's staff_only form_fields)
+  const [staffDraft, setStaffDraft] = useState<Record<number, string | number | boolean | string[] | null>>({});
+  const [savingStaff, setSavingStaff] = useState(false);
 
   const load = () => {
     if (!publicId) return;
@@ -66,7 +40,7 @@ export default function StaffSubmissionDetail() {
       .then((d) => {
         setDetail(d);
         setDraft(valuesToDraft(d.values));
-        setAdhocDrafts(adhocValuesToDraft(d.adhocFields));
+        setStaffDraft(valuesToDraft(d.values));
       })
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load submission"))
       .finally(() => setLoading(false));
@@ -146,95 +120,29 @@ export default function StaffSubmissionDetail() {
     }
   };
 
-  // ---- Ad-hoc staff-only field handlers ----
-  const setAdhocDraftValue = (fieldId: number, value: string | number | boolean | string[] | null) => {
-    setAdhocDrafts((prev) => ({ ...prev, [fieldId]: value }));
-  };
-
-  const startAdhocEdit = (f: AdhocField) => {
-    const type = f.type as FieldType;
-    setCfg({
-      label: f.label,
-      type,
-      options: Array.isArray(f.options) ? f.options.join("\n") : "",
-      value: f.value,
-    });
-    setAdhocEditingId(f.id);
-    setShowComposer(true);
-  };
-
-  const cancelComposer = () => {
-    setShowComposer(false);
-    setAdhocEditingId(null);
-    setCfg({ label: "", type: "text", options: "", value: "" });
-  };
-
-  const handleAdhocSubmit = async (e: FormEvent) => {
-    e.preventDefault();
+  // Persist the always-editable staff-only fields (form's staff_only form_fields).
+  const handleSaveStaff = async () => {
     if (!publicId || !detail) return;
-    if (!cfg.label.trim()) {
-      setError("A field label is required.");
-      return;
-    }
-    const options = OPTIONS_FIELD_TYPES.includes(cfg.type)
-      ? cfg.options.split("\n").map((s) => s.trim()).filter((s) => s.length > 0)
-      : null;
-    // Parse value based on type.
-    let value: string | number | boolean | string[] | null = cfg.value;
-    if (cfg.type === "number" && cfg.value !== "" && typeof cfg.value === "string") value = Number(cfg.value);
-
-    setAdhocBusy(true);
+    setSavingStaff(true);
     setError("");
     try {
-      const fieldId = adhocEditingId;
-      if (fieldId) {
-        await api.updateAdhocField(publicId, fieldId, {
-          label: cfg.label,
-          type: cfg.type,
-          options,
-          value,
-        });
-      } else {
-        await api.createAdhocField(publicId, {
-          label: cfg.label,
-          type: cfg.type,
-          options,
-          value,
-        });
-      }
+      const answers = detail.staffOnlyFields.map((f) => ({
+        field_id: f.id,
+        value: staffDraft[f.id] ?? null,
+      }));
+      await api.updateSubmissionValues(publicId, answers);
       const refreshed = await api.getSubmission(publicId);
       setDetail(refreshed);
-      setAdhocDrafts(adhocValuesToDraft(refreshed.adhocFields));
-      setShowComposer(false);
-      setAdhocEditingId(null);
-      setCfg({ label: "", type: "text", options: "", value: "" });
+      setStaffDraft(valuesToDraft(refreshed.values));
     } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not save staff field");
+      setError(err instanceof ApiError ? err.message : "Could not save staff-only fields");
     } finally {
-      setAdhocBusy(false);
+      setSavingStaff(false);
     }
   };
 
-  const handleAdhocDelete = async (f: AdhocField) => {
-    if (!publicId) return;
-    if (!window.confirm(`Delete the staff field "${f.label}"? This cannot be undone.`)) return;
-    setAdhocBusy(true);
-    setError("");
-    try {
-      await api.deleteAdhocField(publicId, f.id);
-      const refreshed = await api.getSubmission(publicId);
-      setDetail(refreshed);
-      setAdhocDrafts(adhocValuesToDraft(refreshed.adhocFields));
-      if (adhocEditingId === f.id) {
-        setShowComposer(false);
-        setAdhocEditingId(null);
-        setCfg({ label: "", type: "text", options: "", value: "" });
-      }
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not delete staff field");
-    } finally {
-      setAdhocBusy(false);
-    }
+  const setStaffDraftValue = (fieldId: number, value: string | number | boolean | string[] | null) => {
+    setStaffDraft((prev) => ({ ...prev, [fieldId]: value }));
   };
 
   if (loading) {
@@ -260,7 +168,6 @@ export default function StaffSubmissionDetail() {
   }
 
   const parentFields = detail.values.filter((v) => !v.staff_only);
-  const staffFields = detail.values.filter((v) => v.staff_only);
 
   return (
     <div>
@@ -364,204 +271,69 @@ export default function StaffSubmissionDetail() {
                     />
                   ))}
                 </div>
-
-                {staffFields.length > 0 && (
-                  <>
-                    <div
-                      className="staff-only-box"
-                      style={{
-                        marginTop: 16,
-                        border: "1px dashed var(--accent)",
-                        background: "#eff7fe",
-                        borderRadius: "var(--radius)",
-                        padding: "14px 16px",
-                      }}
-                    >
-                      <div className="so-head">
-                        <span className="lock-badge">
-                          <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                            <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-                            <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-                          </svg>
-                          Staff only
-                        </span>
-                      </div>
-                      <div className="field-list">
-                        {staffFields.map((v) => (
-                          <Field
-                            key={v.field_id}
-                            v={v}
-                            editing={editing}
-                            value={editing ? (draft[v.field_id] ?? v.value) : v.value}
-                            onChange={(val) => setDraftValue(v.field_id, val)}
-                          />
-                        ))}
-                      </div>
-                    </div>
-                  </>
-                )}
               </div>
             </div>
           </form>
-
-          {/* Ad-hoc staff-only fields */}
-          <div className="staff-only-box" style={{ marginTop: 16 }}>
-            <div className="so-head">
-              <span className="lock-badge">
-                <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                  <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-                  <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-                </svg>
-                Staff-only fields
-              </span>
-              <button
-                type="button"
-                className="badge-button"
-                onClick={() => {
-                  setShowComposer((s) => !s);
-                  setAdhocEditingId(null);
-                }}
-                disabled={adhocBusy}
-              >
-                + Add field
-              </button>
-            </div>
-            <div className="field-list" style={{ marginTop: 10 }}>
-              {detail.adhocFields.length === 0 && !showComposer && (
-                <div style={{ color: "var(--text-muted)", fontSize: 13 }}>
-                  No staff-only fields yet. Add one to capture extra info for this submission.
-                </div>
-              )}
-              {detail.adhocFields.map((f) => (
-                <div className="adhoc-field" key={f.id}>
-                  <div className="af-head">
-                    <span className="af-label">{f.label}</span>
-                    <div className="af-actions">
-                      <button type="button" className="icon-btn" title="Edit" onClick={() => startAdhocEdit(f)}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                          <path d="M4 20h4l10-10-4-4L4 16v4z" stroke="currentColor" strokeWidth="1.8" />
-                        </svg>
-                      </button>
-                      <button type="button" className="icon-btn danger" title="Delete" onClick={() => handleAdhocDelete(f)}>
-                        <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                          <path d="M4 7h16M9 7V5h6v2M6 7l1 12h10l1-12" stroke="currentColor" strokeWidth="1.8" />
-                        </svg>
-                      </button>
-                    </div>
-                  </div>
-                  <Field
-                    v={{
-                      id: f.id,
-                      submission_id: f.submission_id,
-                      field_id: f.id,
-                      field_label: f.label,
-                      field_type: f.type,
-                      options: f.options,
-                      staff_only: true,
-                      value: f.value,
-                    }}
-                    editing={false}
-                    value={adhocDrafts[f.id] ?? f.value}
-                    onChange={(val) => setAdhocDraftValue(f.id, val)}
-                  />
-                </div>
-              ))}
-            </div>
-
-            {showComposer && (
-              <form className="adhoc-composer" onSubmit={handleAdhocSubmit}>
-                <div className="composer-grid">
-                  <div className="full">
-                    <label className="cf">
-                      Label
-                      <input
-                        className="edit-input"
-                        value={cfg.label}
-                        onChange={(e) => setCfg((c) => ({ ...c, label: e.target.value }))}
-                        placeholder="e.g. Additional notes"
-                        required
-                      />
-                    </label>
-                  </div>
-                  <div>
-                    <label className="cf">
-                      Type
-                      <select
-                        className="edit-select"
-                        value={cfg.type}
-                        onChange={(e) => setCfg((c) => ({ ...c, type: e.target.value as FieldType }))}
-                      >
-                        {FIELD_TYPES.map((ft) => (
-                          <option key={ft.value} value={ft.value}>
-                            {ft.label}
-                          </option>
-                        ))}
-                      </select>
-                    </label>
-                  </div>
-                  {OPTIONS_FIELD_TYPES.includes(cfg.type) && (
-                    <div className="full">
-                      <label className="cf">
-                        Options (one per line)
-                        <textarea
-                          className="edit-textarea"
-                          value={cfg.options}
-                          onChange={(e) => setCfg((c) => ({ ...c, options: e.target.value }))}
-                          rows={3}
-                        />
-                      </label>
-                      {cfg.options
-                        .split("\n")
-                        .map((s) => s.trim())
-                        .filter(Boolean).length > 0 && (
-                        <label className="cf">
-                          Value
-                          {renderEditor(
-                            cfg.type,
-                            cfg.options.split("\n").map((s) => s.trim()).filter(Boolean),
-                            cfg.value,
-                            (val) => setCfg((c) => ({ ...c, value: val })),
-                            "adhoc-composer-value"
-                          )}
-                        </label>
-                      )}
-                    </div>
-                  )}
-                  {!OPTIONS_FIELD_TYPES.includes(cfg.type) && (
-                    <div className="full">
-                      <label className="cf">
-                        Value
-                        {cfg.type === "textarea" ? (
-                          <textarea
-                            className="edit-textarea"
-                            value={toStr(cfg.value)}
-                            onChange={(e) => setCfg((c) => ({ ...c, value: e.target.value }))}
-                            rows={3}
-                          />
-                        ) : (
-                          <input
-                            className="edit-input"
-                            type={cfg.type === "number" ? "number" : cfg.type === "date" ? "date" : cfg.type === "email" ? "email" : "text"}
-                            value={toStr(cfg.value)}
-                            onChange={(e) => setCfg((c) => ({ ...c, value: e.target.value }))}
-                          />
-                        )}
-                      </label>
-                    </div>
-                  )}
-                </div>
-                <div className="field-actions">
-                  <button type="submit" className="primary-button" disabled={adhocBusy}>
-                    {adhocBusy ? "Saving..." : adhocEditingId ? "Save changes" : "Add field"}
-                  </button>
-                  <button type="button" className="secondary-button" onClick={cancelComposer} disabled={adhocBusy}>
-                    Cancel
-                  </button>
-                </div>
-              </form>
-            )}
-          </div>
         </section>
+      </div>
+
+      {/* Staff-only fields — always editable (the form's staff_only form fields) */}
+      <div className="staff-only-box" style={{ marginTop: 18, border: "1px dashed var(--accent)", background: "#eff7fe" }}>
+        <div className="so-head">
+          <span className="lock-badge">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+              <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
+              <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
+            </svg>
+            Staff-only fields
+          </span>
+          <span className="muted-note" style={{ fontSize: 12 }}>
+            Fill in the values for this submission
+          </span>
+        </div>
+
+        {detail.staffOnlyFields.length === 0 ? (
+          <div className="muted-note" style={{ marginTop: 8 }}>
+            This form has no staff-only fields defined.
+          </div>
+        ) : (
+          <div className="field-list" style={{ marginTop: 12 }}>
+            {detail.staffOnlyFields.map((f) => {
+              const existing = detail.values.find((v) => v.field_id === f.id);
+              return (
+                <Field
+                  key={f.id}
+                  v={{
+                    id: existing?.id ?? f.id,
+                    submission_id: detail.id,
+                    field_id: f.id,
+                    value: staffDraft[f.id] ?? existing?.value ?? null,
+                    field_label: f.label,
+                    field_type: f.type,
+                    staff_only: true,
+                    options: f.options,
+                  }}
+                  editing={true}
+                  value={staffDraft[f.id] ?? existing?.value ?? null}
+                  onChange={(val) => setStaffDraftValue(f.id, val)}
+                />
+              );
+            })}
+          </div>
+        )}
+
+        {detail.staffOnlyFields.length > 0 && (
+          <div className="field-actions" style={{ marginTop: 14 }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={handleSaveStaff}
+              disabled={savingStaff}
+            >
+              {savingStaff ? "Saving..." : "Save staff fields"}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Comment thread (full width at the bottom) */}
@@ -779,12 +551,6 @@ const STATUS_LABEL: Record<SubmissionStatus, string> = {
 function valuesToDraft(values: SubmissionValueRow[]): Record<number, string | number | boolean | string[] | null> {
   const d: Record<number, string | number | boolean | string[] | null> = {};
   for (const v of values) d[v.field_id] = v.value;
-  return d;
-}
-
-function adhocValuesToDraft(fields: AdhocField[]): Record<number, string | number | boolean | string[] | null> {
-  const d: Record<number, string | number | boolean | string[] | null> = {};
-  for (const f of fields) d[f.id] = f.value;
   return d;
 }
 
