@@ -10,6 +10,7 @@ export const registerSchema = z.object({
   display_name: z.string().min(1).max(120),
   school_id: z.number().int().positive(),
   role: z.enum(ROLES).default("staff"),
+  slug: z.string().min(1).max(60).optional(),
 });
 
 export const loginSchema = z.object({
@@ -30,6 +31,7 @@ export const createUserSchema = z.object({
   display_name: z.string().min(1).max(120),
   role: z.enum(ROLES).default("staff"),
   school_id: z.number().int().positive().optional().nullable(),
+  organization_id: z.number().int().positive().optional().nullable(),
 });
 
 export const updateUserSchema = z
@@ -39,6 +41,7 @@ export const updateUserSchema = z
     active: z.boolean().optional(),
     role: z.enum(ROLES).optional(),
     school_id: z.number().int().positive().optional().nullable(),
+    organization_id: z.number().int().positive().optional().nullable(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 

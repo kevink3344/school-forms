@@ -12,6 +12,8 @@ import {
   updateAdhocField,
   deleteAdhocField,
   listAdhocFields,
+  getForm,
+  getOrganizationBySlug,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import {
@@ -23,7 +25,6 @@ import {
   updateAdhocFieldSchema,
 } from "../schemas.js";
 import { newPublicId } from "../db/schema.js";
-import { getForm } from "../db/queries.js";
 
 export const submissionsRouter = Router();
 
@@ -39,7 +40,12 @@ submissionsRouter.post("/", async (req, res, next) => {
     }
     const { form_id, answers } = parsed.data;
 
-    const form = await getForm(form_id);
+    // Org-slug optional query param — when present, the form must belong to that
+    // org (used by the org-scoped public /org/:slug/submission routes).
+    const orgSlug = req.query.org ? String(req.query.org) : undefined;
+    const org = orgSlug ? await getOrganizationBySlug(orgSlug) : null;
+
+    const form = await getForm(form_id, org?.id ?? null);
     if (!form) {
       res.status(404).json({ error: "Form not found" });
       return;
@@ -50,12 +56,7 @@ submissionsRouter.post("/", async (req, res, next) => {
     }
 
     const publicId = newPublicId();
-    const submission = await createSubmission(
-      form_id,
-      form.school_id,
-      publicId,
-      answers
-    );
+    const submission = await createSubmission(form, publicId, answers);
 
     res.status(201).json({
       public_id: submission.public_id,
@@ -73,7 +74,9 @@ submissionsRouter.post("/", async (req, res, next) => {
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId/public", async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const orgSlug = req.query.org ? String(req.query.org) : undefined;
+    const org = orgSlug ? await getOrganizationBySlug(orgSlug) : null;
+    const submission = await getSubmissionDetail(req.params.publicId, org?.id ?? null);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -95,13 +98,14 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 submissionsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
     const isStaff = req.user!.role === "staff";
+    const organizationId = req.user!.organization_id;
     const schoolId = isStaff ? req.user!.school_id : (req.query.school_id ? Number(req.query.school_id) : undefined);
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const from = req.query.from ? String(req.query.from) : undefined;
     const to = req.query.to ? String(req.query.to) : undefined;
 
-    const submissions = await listSubmissions({ schoolId, formId, status, from, to });
+    const submissions = await listSubmissions({ organizationId, schoolId, formId, status, from, to });
     res.json(submissions);
   } catch (err) {
     next(err);
@@ -113,12 +117,12 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (r
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    // Staff can only view submissions belonging to their own school
+    // Staff can only view submissions belonging to their own school within their org
     if (req.user!.role === "staff") {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
@@ -144,7 +148,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -157,7 +161,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       }
     }
     await updateSubmissionStatus(submission.id, parsed.data.status);
-    const updated = await getSubmissionDetail(req.params.publicId);
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     res.json(updated);
   } catch (err) {
     next(err);
@@ -175,7 +179,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -188,7 +192,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
       }
     }
     await updateSubmissionValues(submission.id, parsed.data.answers);
-    const updated = await getSubmissionDetail(req.params.publicId);
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     res.json(updated);
   } catch (err) {
     next(err);
@@ -205,7 +209,7 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -235,7 +239,7 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -264,7 +268,7 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "a
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -303,7 +307,7 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -338,7 +342,7 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
 // -----------------------------------------------------------------------------
 submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;

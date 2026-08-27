@@ -4,9 +4,9 @@ import {
   getExportColumns,
   listSubmissionValues,
   execute,
+  getForm,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
-import { getForm } from "../db/queries.js";
 
 export const exportRouter = Router();
 
@@ -67,7 +67,7 @@ exportRouter.get("/preview", requireAuth, requireRoles("admin"), async (req, res
       res.status(400).json({ error: "form_id is required" });
       return;
     }
-    const form = await getForm(formId);
+    const form = await getForm(formId, req.user!.organization_id);
     if (!form) {
       res.status(404).json({ error: "Form not found" });
       return;
@@ -79,7 +79,7 @@ exportRouter.get("/preview", requireAuth, requireRoles("admin"), async (req, res
       return { ...c, field_id: m ? Number(m[1]) : 0 };
     });
 
-    const submissions = await listSubmissions({ schoolId, formId, status });
+    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status });
     const rows = await buildExportRows(formId, columns, submissions);
 
     res.json({
@@ -107,7 +107,7 @@ exportRouter.get("/csv", requireAuth, requireRoles("admin"), async (req, res, ne
       res.status(400).json({ error: "form_id is required" });
       return;
     }
-    const form = await getForm(formId);
+    const form = await getForm(formId, req.user!.organization_id);
     if (!form) {
       res.status(404).json({ error: "Form not found" });
       return;
@@ -122,7 +122,7 @@ exportRouter.get("/csv", requireAuth, requireRoles("admin"), async (req, res, ne
       return { ...c, field_id: m ? Number(m[1]) : 0 };
     });
 
-    const submissions = await listSubmissions({ schoolId, formId, status });
+    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status });
     const rows = await buildExportRows(formId, columns, submissions);
 
     // Build CSV — use the field label as the visible header, but look up each

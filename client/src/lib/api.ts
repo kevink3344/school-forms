@@ -6,6 +6,7 @@ import type {
   ExportPreview,
   Form,
   FormWithFields,
+  OrganizationWithMembers,
   PublicForm,
   Role,
   School,
@@ -155,6 +156,7 @@ export const api = {
     password: string;
     display_name: string;
     school_id: number;
+    slug?: string;
   }): Promise<AuthResponse> {
     return request<AuthResponse>("/api/auth/register", {
       method: "POST",
@@ -184,6 +186,13 @@ export const api = {
     return request<School[]>("/api/auth/schools", { auth: true });
   },
 
+  // -------------------------------------------------------------------------
+  // Organizations (admin Settings → Organizations panel)
+  // -------------------------------------------------------------------------
+  async listOrganizations(): Promise<OrganizationWithMembers[]> {
+    return request<OrganizationWithMembers[]>("/api/organizations", { auth: true });
+  },
+
   async listSchoolColumns(): Promise<{ columns: string[] }> {
     return request<{ columns: string[] }>("/api/schools/columns", { auth: true });
   },
@@ -209,6 +218,7 @@ export const api = {
     display_name: string;
     role: Role;
     school_id?: number | null;
+    organization_id?: number | null;
   }): Promise<AdminUser> {
     return request<AdminUser>("/api/users", {
       method: "POST",
@@ -225,6 +235,7 @@ export const api = {
       active?: boolean;
       role?: Role;
       school_id?: number | null;
+      organization_id?: number | null;
     }
   ): Promise<AdminUser> {
     return request<AdminUser>(`/api/users/${id}`, {
@@ -403,33 +414,40 @@ export const api = {
   // -------------------------------------------------------------------------
   // Public (anonymous) parent submission
   // -------------------------------------------------------------------------
-  async listPublicForms(): Promise<PublicForm[]> {
-    return request<PublicForm[]>("/api/forms/public", { auth: false });
+  async listPublicForms(slug?: string): Promise<PublicForm[]> {
+    const qs = slug ? `?org=${encodeURIComponent(slug)}` : "";
+    return request<PublicForm[]>(`/api/forms/public${qs}`, { auth: false });
   },
 
-  async getPublicForm(id: number): Promise<PublicForm> {
-    return request<PublicForm>(`/api/forms/${id}/public`, { auth: false });
+  async getPublicForm(id: number, slug?: string): Promise<PublicForm> {
+    const qs = slug ? `?org=${encodeURIComponent(slug)}` : "";
+    return request<PublicForm>(`/api/forms/${id}/public${qs}`, { auth: false });
   },
 
-  async submitForm(input: {
-    form_id: number;
-    answers: { field_id: number; value: string | number | boolean | string[] | null }[];
-  }): Promise<{ public_id: string; message: string }> {
-    return request<{ public_id: string; message: string }>("/api/submissions", {
+  async submitForm(
+    input: {
+      form_id: number;
+      answers: { field_id: number; value: string | number | boolean | string[] | null }[];
+    },
+    slug?: string
+  ): Promise<{ public_id: string; message: string }> {
+    const qs = slug ? `?org=${encodeURIComponent(slug)}` : "";
+    return request<{ public_id: string; message: string }>(`/api/submissions${qs}`, {
       method: "POST",
       auth: false,
       body: input,
     });
   },
 
-  async getSubmissionPublic(publicId: string): Promise<{
+  async getSubmissionPublic(publicId: string, slug?: string): Promise<{
     public_id: string;
     status: string;
     submitted_at: string;
     form_name: string;
   }> {
+    const qs = slug ? `?org=${encodeURIComponent(slug)}` : "";
     return request<{ public_id: string; status: string; submitted_at: string; form_name: string }>(
-      `/api/submissions/${publicId}/public`,
+      `/api/submissions/${publicId}/public${qs}`,
       { auth: false }
     );
   },

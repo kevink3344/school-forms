@@ -3,9 +3,11 @@ import { useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { Form } from "../../types";
 import { PageHead, FormStatusBadge } from "../../components/layout";
+import { useAuth } from "../../context/AuthContext";
 
 export default function AdminForms() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [forms, setForms] = useState<Form[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -64,7 +66,16 @@ export default function AdminForms() {
     <div>
       <PageHead
         title="Forms"
-        subtitle="Design form templates, set staff-only fields, and publish for parents."
+        subtitle={
+          <>
+            Design form templates, set staff-only fields, and publish for parents.
+            {user?.organization_slug ? (
+              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: 11, verticalAlign: "middle" }}>
+                {user.organization_slug}
+              </span>
+            ) : null}
+          </>
+        }
         actions={
           <button className="primary-button" onClick={() => setShowNew((v) => !v)}>
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none">

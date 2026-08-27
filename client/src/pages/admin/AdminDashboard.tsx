@@ -4,6 +4,7 @@ import { api } from "../../lib/api";
 import type { ExportPreview, Form, School, SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
+import { useAuth } from "../../context/AuthContext";
 
 interface Filters {
   school_id: string;
@@ -15,6 +16,7 @@ interface Filters {
 
 export default function AdminDashboard() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [forms, setForms] = useState<Form[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
@@ -114,7 +116,16 @@ export default function AdminDashboard() {
     <div>
       <PageHead
         title="Submissions"
-        subtitle="All form submissions across every school. Filter, then export the exact columns you need."
+        subtitle={
+          <>
+            All form submissions across every school. Filter, then export the exact columns you need.
+            {user?.organization_slug ? (
+              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: 11, verticalAlign: "middle" }}>
+                {user.organization_slug}
+              </span>
+            ) : null}
+          </>
+        }
         actions={
           <>
             <button className="secondary-button" onClick={() => navigate("/admin/forms")}>

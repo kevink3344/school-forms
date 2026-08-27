@@ -9,6 +9,7 @@ import type {
   Comment,
   AdhocField,
   Role,
+  Organization,
 } from "./schema.js";
 
 // -----------------------------------------------------------------------------
@@ -25,6 +26,40 @@ export async function execute<T = unknown>(
   }
   const result = await request.query(query);
   return (result.recordset ?? []) as T[];
+}
+
+// -----------------------------------------------------------------------------
+// Organizations
+// -----------------------------------------------------------------------------
+export async function listOrganizations(): Promise<Organization[]> {
+  return execute<Organization>(
+    "SELECT id, slug, name, created_at FROM dbo.organizations ORDER BY name"
+  );
+}
+
+// Resolve an org by its URL slug (used for the public `/:slug` form routes).
+export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {
+  const rows = await execute<Organization>(
+    "SELECT id, slug, name, created_at FROM dbo.organizations WHERE slug = @slug",
+    { slug }
+  );
+  return rows[0] ?? null;
+}
+
+export async function getOrganizationById(id: number): Promise<Organization | null> {
+  const rows = await execute<Organization>(
+    "SELECT id, slug, name, created_at FROM dbo.organizations WHERE id = @id",
+    { id }
+  );
+  return rows[0] ?? null;
+}
+
+// The default tenant that self-registered users land in. The plan defines
+// `academics` as the canonical default org (seeded in DDL).
+export async function getDefaultOrganization(): Promise<Organization> {
+  const org = await getOrganizationBySlug("academics");
+  if (!org) throw new Error("Default organization 'academics' not found — run initDb first");
+  return org;
 }
 
 // -----------------------------------------------------------------------------
@@ -143,7 +178,7 @@ export function featureToSchool(
 // -----------------------------------------------------------------------------
 export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, display_name, active, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, created_at
      FROM dbo.users WHERE email = @email`,
     { email }
   );
@@ -152,7 +187,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getUserById(id: number): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, display_name, active, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, created_at
      FROM dbo.users WHERE id = @id`,
     { id }
   );
@@ -165,14 +200,16 @@ export async function createUser(
   role: Role,
   schoolId: number | null,
   displayName: string,
-  active = true
+  active = true,
+  organizationId: number | null = null
 ): Promise<User> {
   const rows = await execute<User>(
-    `INSERT INTO dbo.users (email, password_hash, role, school_id, display_name, active)
+    `INSERT INTO dbo.users (email, password_hash, role, school_id, display_name, active, organization_id)
      OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
-            INSERTED.school_id, INSERTED.display_name, INSERTED.active, INSERTED.created_at
-     VALUES (@email, @passwordHash, @role, @schoolId, @displayName, @active)`,
-    { email, passwordHash, role, schoolId, displayName, active }
+            INSERTED.school_id, INSERTED.organization_id, INSERTED.display_name,
+            INSERTED.active, INSERTED.created_at
+     VALUES (@email, @passwordHash, @role, @schoolId, @displayName, @active, @organizationId)`,
+    { email, passwordHash, role, schoolId, displayName, active, organizationId }
   );
   return rows[0];
 }
@@ -181,22 +218,35 @@ export async function createUser(
 // no school still appear). Used by the admin Settings → Users panel.
 export interface AdminUserRow extends User {
   school_name: string | null;
+  organization_name: string | null;
+  organization_slug: string | null;
 }
 
-export async function listUsers(): Promise<AdminUserRow[]> {
+// Optional org filter. When provided, only users in that org are returned.
+export async function listUsers(organizationId?: number | null): Promise<AdminUserRow[]> {
+  const params: Record<string, unknown> = {};
+  const where = organizationId !== undefined && organizationId !== null
+    ? "WHERE u.organization_id = @organizationId"
+    : "";
+  if (where) params.organizationId = organizationId;
   return execute<AdminUserRow>(
-    `SELECT u.id, u.email, u.password_hash, u.role, u.school_id, u.display_name,
-            u.active, u.created_at,
-            s.name AS school_name
+    `SELECT u.id, u.email, u.password_hash, u.role, u.school_id, u.organization_id,
+            u.display_name, u.active, u.created_at,
+            s.name AS school_name,
+            o.name AS organization_name,
+            o.slug AS organization_slug
      FROM dbo.users u
      LEFT JOIN dbo.schools s ON s.id = u.school_id
-     ORDER BY u.role, u.display_name, u.email`
+     LEFT JOIN dbo.organizations o ON o.id = u.organization_id
+     ${where}
+     ORDER BY u.role, u.display_name, u.email`,
+    params
   );
 }
 
 export async function updateUser(
   id: number,
-  data: { display_name?: string; email?: string; active?: boolean; school_id?: number | null; role?: Role }
+  data: { display_name?: string; email?: string; active?: boolean; school_id?: number | null; role?: Role; organization_id?: number | null }
 ): Promise<User | null> {
   const existing = await getUserById(id);
   if (!existing) return null;
@@ -206,15 +256,17 @@ export async function updateUser(
   const active = data.active ?? existing.active;
   const schoolId = data.school_id === undefined ? existing.school_id : data.school_id;
   const role = data.role ?? existing.role;
+  const organizationId = data.organization_id === undefined ? existing.organization_id : data.organization_id;
 
   const rows = await execute<User>(
     `UPDATE dbo.users
      SET display_name = @displayName, email = @email, active = @active,
-         school_id = @schoolId, role = @role
+         school_id = @schoolId, role = @role, organization_id = @organizationId
      WHERE id = @id
      OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
-            INSERTED.school_id, INSERTED.display_name, INSERTED.active, INSERTED.created_at`,
-    { id, displayName, email, active, schoolId, role }
+            INSERTED.school_id, INSERTED.organization_id, INSERTED.display_name,
+            INSERTED.active, INSERTED.created_at`,
+    { id, displayName, email, active, schoolId, role, organizationId }
   );
   return rows[0] ?? null;
 }
@@ -226,26 +278,42 @@ export interface FormWithFields extends Form {
   fields: FormField[];
 }
 
-export async function listForms(schoolId?: number | null): Promise<Form[]> {
+// Optional school + org filters. When provided, forms are narrowed to that org
+// (and optionally a single school). Omit both to return all forms (admin).
+export async function listForms(schoolId?: number | null, organizationId?: number | null): Promise<Form[]> {
   const params: Record<string, unknown> = {};
-  let where = "1=1";
+  const clauses: string[] = [];
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("f.organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
   if (schoolId !== undefined && schoolId !== null) {
-    where = "f.school_id = @schoolId";
+    clauses.push("f.school_id = @schoolId");
     params.schoolId = schoolId;
   }
+  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
-    `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.status,
-            f.created_at, f.updated_at
-     FROM dbo.forms f WHERE ${where} ORDER BY f.updated_at DESC`,
+    `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
+            f.status, f.created_at, f.updated_at
+     FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
   );
 }
 
-export async function getForm(id: number): Promise<Form | null> {
+// Fetch a form that belongs to the provided organization (used for org-scoped
+// public routes and admin actions). Returns null when the form exists but does
+// NOT belong to that org, preventing cross-org leakage.
+export async function getForm(id: number, organizationId?: number | null): Promise<Form | null> {
+  const clauses: string[] = ["id = @id"];
+  const params: Record<string, unknown> = { id };
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
   const rows = await execute<Form>(
-    `SELECT id, title, description, school_id, designer_id, status, created_at, updated_at
-     FROM dbo.forms WHERE id = @id`,
-    { id }
+    `SELECT id, title, description, school_id, designer_id, organization_id, status, created_at, updated_at
+     FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
+    params
   );
   return rows[0] ?? null;
 }
@@ -282,8 +350,8 @@ function parseFormFieldOptions(raw: string[] | string | null | undefined): strin
   }
 }
 
-export async function getFormWithFields(id: number): Promise<FormWithFields | null> {
-  const form = await getForm(id);
+export async function getFormWithFields(id: number, organizationId?: number | null): Promise<FormWithFields | null> {
+  const form = await getForm(id, organizationId);
   if (!form) return null;
   const fields = await listFormFields(id);
   return { ...form, fields };
@@ -295,11 +363,13 @@ export async function createForm(
     description,
     schoolId,
     designerId,
+    organizationId,
   }: {
     title: string;
     description: string | null;
     schoolId: number | null;
     designerId: number | null;
+    organizationId: number;
   },
   fields: {
     label: string;
@@ -313,11 +383,12 @@ export async function createForm(
 ): Promise<FormWithFields> {
   // Insert form
   const forms = await execute<Form>(
-    `INSERT INTO dbo.forms (title, description, school_id, designer_id, status)
+    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status)
      OUTPUT INSERTED.id, INSERTED.title, INSERTED.description, INSERTED.school_id,
-            INSERTED.designer_id, INSERTED.status, INSERTED.created_at, INSERTED.updated_at
-     VALUES (@title, @description, @schoolId, @designerId, 'draft')`,
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null }
+            INSERTED.designer_id, INSERTED.organization_id, INSERTED.status,
+            INSERTED.created_at, INSERTED.updated_at
+     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft')`,
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -487,6 +558,7 @@ export interface SubmissionDetail extends SubmissionRow {
 }
 
 export async function listSubmissions(params: {
+  organizationId?: number | null;
   schoolId?: number | null;
   formId?: number | null;
   status?: string | null;
@@ -495,6 +567,10 @@ export async function listSubmissions(params: {
 }): Promise<SubmissionRow[]> {
   const p: Record<string, unknown> = {};
   const clauses: string[] = [];
+  if (params.organizationId !== undefined && params.organizationId !== null) {
+    clauses.push("s.organization_id = @organizationId");
+    p.organizationId = params.organizationId;
+  }
   if (params.schoolId !== undefined && params.schoolId !== null) {
     clauses.push("s.school_id = @schoolId");
     p.schoolId = params.schoolId;
@@ -517,7 +593,7 @@ export async function listSubmissions(params: {
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<SubmissionRow>(
-    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.status, s.submitted_at, s.updated_at,
+    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status, s.submitted_at, s.updated_at,
             f.title AS form_name,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
@@ -532,10 +608,19 @@ export async function listSubmissions(params: {
   );
 }
 
-export async function getSubmissionByPublicId(publicId: string): Promise<SubmissionRow | null> {
+// Fetch a submission by its public id. When an organizationId is provided, the
+// submission must belong to that org — used to keep public submission readback
+// and detail views scoped to the org that owns the form.
+export async function getSubmissionByPublicId(publicId: string, organizationId?: number | null): Promise<SubmissionRow | null> {
+  const clauses: string[] = ["s.public_id = @publicId"];
+  const params: Record<string, unknown> = { publicId };
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("s.organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
   const rows = await execute<SubmissionRow>(
-    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.status, s.submitted_at, s.updated_at,
-            f.title AS form_name,
+    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status, s.submitted_at, s.updated_at,
+            f.title AS form_name, f.organization_id AS form_organization_id,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
              JOIN dbo.form_fields ff ON ff.id = sv.field_id
@@ -543,8 +628,8 @@ export async function getSubmissionByPublicId(publicId: string): Promise<Submiss
              ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
-     WHERE s.public_id = @publicId`,
-    { publicId }
+     WHERE ${clauses.join(" AND ")}`,
+    params
   );
   return rows[0] ?? null;
 }
@@ -588,8 +673,8 @@ export async function listComments(submissionId: number): Promise<CommentRow[]> 
   );
 }
 
-export async function getSubmissionDetail(publicId: string): Promise<SubmissionDetail | null> {
-  const submission = await getSubmissionByPublicId(publicId);
+export async function getSubmissionDetail(publicId: string, organizationId?: number | null): Promise<SubmissionDetail | null> {
+  const submission = await getSubmissionByPublicId(publicId, organizationId);
   if (!submission) return null;
   const values = await listSubmissionValues(submission.id);
   const comments = await listComments(submission.id);
@@ -602,17 +687,16 @@ export async function getSubmissionDetail(publicId: string): Promise<SubmissionD
 }
 
 export async function createSubmission(
-  formId: number,
-  schoolId: number | null,
+  form: Form,
   publicId: string,
   answers: { field_id: number; value: string | number | boolean | string[] | null }[]
 ): Promise<SubmissionDetail> {
   const subs = await execute<Submission>(
-    `INSERT INTO dbo.submissions (public_id, form_id, school_id, status)
+    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status)
      OUTPUT INSERTED.id, INSERTED.public_id, INSERTED.form_id, INSERTED.school_id,
-            INSERTED.status, INSERTED.submitted_at, INSERTED.updated_at
-     VALUES (@publicId, @formId, @schoolId, 'submitted')`,
-    { publicId, formId, schoolId: schoolId ?? null }
+            INSERTED.organization_id, INSERTED.status, INSERTED.submitted_at, INSERTED.updated_at
+     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted')`,
+    { publicId, formId: form.id, schoolId: form.school_id ?? null, organizationId: form.organization_id }
   );
   const submission = subs[0];
   for (const a of answers) {
@@ -630,7 +714,7 @@ export async function createSubmission(
       }
     );
   }
-  const detail = await getSubmissionDetail(publicId);
+  const detail = await getSubmissionDetail(publicId, form.organization_id);
   if (!detail) throw new Error("Failed to read back created submission");
   return detail;
 }

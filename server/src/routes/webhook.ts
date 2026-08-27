@@ -46,7 +46,7 @@ webhookRouter.post("/google", async (req, res, next) => {
     }
 
     const publicId = newPublicId();
-    const submission = await createSubmission(form_id, form.school_id, publicId, answers);
+    const submission = await createSubmission(form, publicId, answers);
 
     res.status(201).json({
       public_id: submission.public_id,

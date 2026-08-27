@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
-import type { AdminUser, Role, School } from "../../types";
+import type { AdminUser, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
+import { useAuth } from "../../context/AuthContext";
 
 // ---------------------------------------------------------------------------
 // Small inline form control (matches the .filter-group / .edit-input styling)
@@ -56,6 +57,7 @@ interface FormState {
   password: string; // only used on create
   role: Role;
   school_id: string; // "" = no school
+  organization_id: string; // "" = default to current admin's org
 }
 
 const EMPTY: FormState = {
@@ -65,11 +67,14 @@ const EMPTY: FormState = {
   password: "",
   role: "staff",
   school_id: "",
+  organization_id: "",
 };
 
 export default function AdminSettings() {
+  const { user } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
+  const [orgs, setOrgs] = useState<OrganizationWithMembers[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
@@ -83,9 +88,10 @@ export default function AdminSettings() {
     setLoading(true);
     setError("");
     try {
-      const [u, s] = await Promise.all([api.listUsers(), api.listSchools()]);
+      const [u, s, o] = await Promise.all([api.listUsers(), api.listSchools(), api.listOrganizations()]);
       setUsers(u);
       setSchools(s);
+      setOrgs(o);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not load users");
     } finally {
@@ -111,6 +117,7 @@ export default function AdminSettings() {
       password: "",
       role: u.role,
       school_id: u.school_id === null ? "" : String(u.school_id),
+      organization_id: u.organization_id === null ? "" : String(u.organization_id),
     });
     setModalOpen(true);
     setSaveError("");
@@ -134,6 +141,7 @@ export default function AdminSettings() {
           display_name: form.display_name,
           role: form.role,
           school_id: form.school_id ? Number(form.school_id) : null,
+          organization_id: form.organization_id ? Number(form.organization_id) : null,
         });
         setMessage("User created.");
       } else {
@@ -142,6 +150,7 @@ export default function AdminSettings() {
           email: form.email,
           role: form.role,
           school_id: form.school_id ? Number(form.school_id) : null,
+          organization_id: form.organization_id ? Number(form.organization_id) : null,
         });
         setMessage("User updated.");
       }
@@ -202,6 +211,7 @@ export default function AdminSettings() {
                 <th>Name</th>
                 <th>Email</th>
                 <th>Role</th>
+                <th>Organization</th>
                 <th>School</th>
                 <th>Status</th>
                 <th style={{ textAlign: "right" }}>Actions</th>
@@ -210,13 +220,13 @@ export default function AdminSettings() {
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
                     Loading…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
                     No users yet. Click <strong>Add User</strong> to create one.
                   </td>
                 </tr>
@@ -230,6 +240,7 @@ export default function AdminSettings() {
                       <td>
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       </td>
+                      <td>{u.organization_name ?? "—"}</td>
                       <td>{u.school_name ?? "—"}</td>
                       <td>
                         <span className={`badge ${u.active ? "badge-green" : "badge-gray"}`}>
@@ -258,6 +269,42 @@ export default function AdminSettings() {
                     </tr>
                   );
                 })
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Organizations panel */}
+      <div className="card">
+        <div className="card-head">
+          <h3>Organizations</h3>
+          <span className="sub">Tenant boundaries — schools are shared across all organizations</span>
+        </div>
+        <div className="card-body" style={{ padding: 0 }}>
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Slug</th>
+                <th>Members</th>
+              </tr>
+            </thead>
+            <tbody>
+              {orgs.length === 0 ? (
+                <tr>
+                  <td colSpan={3} style={{ textAlign: "center", padding: 24 }}>
+                    No organizations.
+                  </td>
+                </tr>
+              ) : (
+                orgs.map((o) => (
+                  <tr key={o.id}>
+                    <td className="cell-strong">{o.name}</td>
+                    <td className="cell-mono">{o.slug}</td>
+                    <td>{o.member_count} user{o.member_count === 1 ? "" : "s"}</td>
+                  </tr>
+                ))
               )}
             </tbody>
           </table>
@@ -319,6 +366,22 @@ export default function AdminSettings() {
                 >
                   <option value="staff">Staff</option>
                   <option value="admin">Admin</option>
+                </select>
+              </Field>
+              <Field label="Organization">
+                <select
+                  className="edit-select"
+                  value={form.organization_id}
+                  onChange={(e) => setForm((f) => ({ ...f, organization_id: e.target.value }))}
+                >
+                  <option value="">
+                    {user?.organization_slug ? `— ${user.organization_slug} —` : "— Default (Academics) —"}
+                  </option>
+                  {orgs.map((o) => (
+                    <option key={o.id} value={o.id}>
+                      {o.name}
+                    </option>
+                  ))}
                 </select>
               </Field>
               <Field label="School" full>

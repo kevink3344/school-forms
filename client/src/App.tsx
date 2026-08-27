@@ -24,6 +24,11 @@ export default function App() {
       <Route path="/submit/:formId" element={<ParentSubmit />} />
       <Route path="/submission/:publicId" element={<ParentConfirmation />} />
 
+      {/* Public: org-scoped parent submission */}
+      <Route path="/org/:slug/submit" element={<ParentSubmit />} />
+      <Route path="/org/:slug/forms/:formId" element={<ParentSubmit />} />
+      <Route path="/org/:slug/submission/:publicId" element={<ParentConfirmation />} />
+
       {/* Auth */}
       <Route path="/login" element={<LoginPage />} />
       <Route path="/register" element={<RegisterPage />} />

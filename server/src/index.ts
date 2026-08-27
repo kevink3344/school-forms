@@ -13,6 +13,7 @@ import { schoolsRouter } from "./routes/schools.js";
 import { usersRouter } from "./routes/users.js";
 import { formsRouter } from "./routes/forms.js";
 import { submissionsRouter } from "./routes/submissions.js";
+import { organizationsRouter } from "./routes/organizations.js";
 import { exportRouter } from "./routes/export.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { healthRouter } from "./routes/health.js";
@@ -64,6 +65,7 @@ app.use("/api/schools", schoolsRouter);
 app.use("/api/users", usersRouter);
 app.use("/api/forms", formsRouter);
 app.use("/api/submissions", submissionsRouter);
+app.use("/api/organizations", organizationsRouter);
 app.use("/api/export", exportRouter);
 app.use("/api/webhook", webhookRouter);
 

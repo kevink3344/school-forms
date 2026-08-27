@@ -3,6 +3,7 @@ import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import type { FormField, FieldType, FormWithFields } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
+import { useAuth } from "../../context/AuthContext";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -18,6 +19,7 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
 export default function AdminFormDesigner() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { user } = useAuth();
   const formId = Number(id);
 
   const [form, setForm] = useState<FormWithFields | null>(null);
@@ -169,7 +171,7 @@ export default function AdminFormDesigner() {
     <div>
       <PageHead
         title={title || "Form Designer"}
-        subtitle={`ID ${formId} · ${form ? formStatusBadge(form.status).label : ""}`}
+        subtitle={`ID ${formId} · ${form ? formStatusBadge(form.status).label : ""}${user?.organization_slug ? ` · ${user.organization_slug}` : ""}`}
         actions={
           <>
             <button className="secondary-button" onClick={() => navigate("/admin/forms")}>
@@ -321,6 +323,20 @@ export default function AdminFormDesigner() {
           </button>
         </div>
       </div>
+
+      {form?.status === "published" && user?.organization_slug && (
+        <div className="card" style={{ marginTop: 16 }}>
+          <div className="card-head">
+            <h3>Public link</h3>
+            <span className="sub">Share this link with parents</span>
+          </div>
+          <div className="card-body">
+            <code className="cell-mono" style={{ wordBreak: "break-all" }}>
+              {`/org/${user.organization_slug}/forms/${form.id}`}
+            </code>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

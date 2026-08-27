@@ -23,6 +23,18 @@ export interface School {
   created_at: string;
 }
 
+export interface Organization {
+  id: number;
+  slug: string;
+  name: string;
+  created_at: string;
+}
+
+// Organizations list row returned by /api/organizations — includes member count.
+export interface OrganizationWithMembers extends Organization {
+  member_count: number;
+}
+
 export interface SchoolPage {
   rows: School[];
   total: number;
@@ -36,6 +48,8 @@ export interface User {
   email: string;
   role: Role;
   school_id: number | null;
+  organization_id: number | null;
+  organization_slug: string | null;
   display_name: string;
 }
 
@@ -43,6 +57,8 @@ export interface User {
 // school's display name (null for admins with no school) and the active flag.
 export interface AdminUser extends User {
   school_name: string | null;
+  organization_name: string | null;
+  organization_slug: string | null;
   active: boolean;
   created_at: string;
 }
@@ -65,6 +81,7 @@ export interface Form {
   description: string | null;
   school_id: number | null;
   designer_id: number | null;
+  organization_id: number | null;
   status: FormStatus;
   created_at: string;
   updated_at: string;
@@ -84,6 +101,7 @@ export interface Submission {
   public_id: string;
   form_id: number;
   school_id: number | null;
+  organization_id: number | null;
   status: SubmissionStatus;
   submitted_at: string;
   updated_at: string;

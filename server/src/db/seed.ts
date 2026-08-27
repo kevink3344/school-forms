@@ -15,6 +15,13 @@ async function seed() {
   const pool = await getPool();
   const req = pool.request();
 
+  // 0. Resolve the Academics organization (the tenant that owns all seeded data).
+  //    initDb() guarantees the two default orgs exist (see DDL seed block).
+  const orgResult = await pool.request()
+    .input("slug", "academics")
+    .query(`SELECT id FROM dbo.organizations WHERE slug = @slug`);
+  const orgId = orgResult.recordset[0].id as number;
+
   // 1. Default school
   const schoolResult = await req.query(
     `IF NOT EXISTS (SELECT 1 FROM dbo.schools WHERE name = N'Sample School')
@@ -23,7 +30,7 @@ async function seed() {
   );
   const school = schoolResult.recordset[0];
 
-  // 2. Default admin
+  // 2. Default admin (belongs to Academics org)
   const adminEmail = env.webhookAdminEmail || "admin@schoolforms.local";
   const adminPassword = env.webhookAdminPassword || "ChangeMe123!";
   const adminHash = await bcrypt.hash(adminPassword, 12);
@@ -31,10 +38,11 @@ async function seed() {
     .input("email", adminEmail)
     .input("hash", adminHash)
     .input("id", school.id)
+    .input("orgId", orgId)
     .query(
       `IF NOT EXISTS (SELECT 1 FROM dbo.users WHERE email = @email)
-         INSERT INTO dbo.users (email, password_hash, role, school_id, display_name)
-         VALUES (@email, @hash, 'admin', @id, N'System Admin');`
+         INSERT INTO dbo.users (email, password_hash, role, school_id, display_name, organization_id)
+         VALUES (@email, @hash, 'admin', @id, N'System Admin', @orgId);`
     );
 
   // 3. CDM form
@@ -42,10 +50,11 @@ async function seed() {
   // use the returned id for the fields + reference submission below.
   const formExists = await pool.request()
     .input("schoolId", school.id)
+    .input("orgId", orgId)
     .query(
       `IF NOT EXISTS (SELECT 1 FROM dbo.forms WHERE title = N'CDM')
-         INSERT INTO dbo.forms (title, description, school_id, designer_id, status)
-         VALUES (N'CDM', N'Child Development Monitor form (reference)', @schoolId, NULL, 'published');
+         INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status)
+         VALUES (N'CDM', N'Child Development Monitor form (reference)', @schoolId, NULL, @orgId, 'published');
        SELECT id FROM dbo.forms WHERE title = N'CDM';`
     );
   const FORM_ID = formExists.recordset[0].id as number;
@@ -87,10 +96,11 @@ async function seed() {
       .input("publicId", PUBLIC_ID)
       .input("formId", FORM_ID)
       .input("schoolId", school.id)
+      .input("orgId", orgId)
       .query(
-        `INSERT INTO dbo.submissions (public_id, form_id, school_id, status)
+        `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status)
          OUTPUT INSERTED.id
-         VALUES (@publicId, @formId, @schoolId, 'submitted');`
+         VALUES (@publicId, @formId, @schoolId, @orgId, 'submitted');`
       );
     const submissionId = sub.recordset[0].id;
 

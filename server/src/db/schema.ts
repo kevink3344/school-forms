@@ -32,6 +32,13 @@ export type CommentVisibility = (typeof COMMENT_VISIBILITY)[number];
 // -----------------------------------------------------------------------------
 // Typed row shapes (mirror the SQL Server tables below)
 // -----------------------------------------------------------------------------
+export interface Organization {
+  id: number;
+  slug: string;
+  name: string;
+  created_at: Date;
+}
+
 export interface School {
   id: number;
   source_id: number | null;
@@ -48,6 +55,7 @@ export interface User {
   password_hash: string;
   role: Role;
   school_id: number | null;
+  organization_id: number;
   display_name: string;
   active: boolean;
   created_at: Date;
@@ -59,6 +67,7 @@ export interface Form {
   description: string | null;
   school_id: number | null;
   designer_id: number | null;
+  organization_id: number;
   status: FormStatus;
   created_at: Date;
   updated_at: Date;
@@ -81,6 +90,7 @@ export interface Submission {
   public_id: string;
   form_id: number;
   school_id: number | null;
+  organization_id: number;
   status: SubmissionStatus;
   submitted_at: Date;
   updated_at: Date;
@@ -148,6 +158,29 @@ export const DDL_STATEMENTS: string[] = [
   `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_source_id')
      CREATE UNIQUE INDEX UX_schools_source_id ON dbo.schools(source_id) WHERE source_id IS NOT NULL;`,
 
+  // ---------------------------------------------------------------------
+  // Organizations (multi-tenancy). Created BEFORE users/forms/submissions
+  // because they carry an FK back to organizations.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.organizations', 'U') IS NULL
+   CREATE TABLE dbo.organizations (
+     id         INT IDENTITY(1,1) PRIMARY KEY,
+     slug       NVARCHAR(60)  NOT NULL,
+     name       NVARCHAR(120) NOT NULL,
+     created_at DATETIME2 NOT NULL CONSTRAINT DF_organizations_created_at DEFAULT SYSUTCDATETIME()
+   );
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_slug')
+     CREATE UNIQUE INDEX UX_organizations_slug ON dbo.organizations(slug);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_name')
+     CREATE UNIQUE INDEX UX_organizations_name ON dbo.organizations(name);`,
+
+  // Seed the two known organizations (idempotent). Technology Services is a
+  // placeholder org with NO users — only the org row is created here.
+  `IF NOT EXISTS (SELECT 1 FROM dbo.organizations WHERE slug = N'academics')
+     INSERT INTO dbo.organizations (slug, name) VALUES (N'academics', N'Academics');
+   IF NOT EXISTS (SELECT 1 FROM dbo.organizations WHERE slug = N'technology-services')
+     INSERT INTO dbo.organizations (slug, name) VALUES (N'technology-services', N'Technology Services');`,
+
   `IF OBJECT_ID('dbo.users', 'U') IS NULL
    CREATE TABLE dbo.users (
      id            INT IDENTITY(1,1) PRIMARY KEY,
@@ -170,6 +203,24 @@ export const DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.users', 'active') IS NULL
      ALTER TABLE dbo.users ADD active BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1;`,
 
+  // ---------------------------------------------------------------------
+  // Organizations — users.organization_id (1:1 tenant boundary).
+  // Nullable → backfill to Academics → NOT NULL. FK and index.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.users', 'organization_id') IS NULL
+     ALTER TABLE dbo.users ADD organization_id INT NULL;
+   IF EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
+     UPDATE u SET u.organization_id = o.id
+     FROM dbo.users u CROSS JOIN dbo.organizations o
+     WHERE o.slug = N'academics' AND u.organization_id IS NULL;
+   IF NOT EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
+     ALTER TABLE dbo.users ALTER COLUMN organization_id INT NOT NULL;
+   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_users_organization')
+     ALTER TABLE dbo.users ADD CONSTRAINT FK_users_organization
+       FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_users_organization')
+     CREATE INDEX IX_users_organization ON dbo.users(organization_id);`,
+
   `IF OBJECT_ID('dbo.forms', 'U') IS NULL
    CREATE TABLE dbo.forms (
      id          INT IDENTITY(1,1) PRIMARY KEY,
@@ -188,6 +239,24 @@ export const DDL_STATEMENTS: string[] = [
      CREATE INDEX IX_forms_school ON dbo.forms(school_id);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_status')
      CREATE INDEX IX_forms_status ON dbo.forms(status);`,
+
+  // ---------------------------------------------------------------------
+  // Organizations — forms.organization_id (tenant owner of the form).
+  // Nullable → backfill to Academics → NOT NULL. FK and index.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.forms', 'organization_id') IS NULL
+     ALTER TABLE dbo.forms ADD organization_id INT NULL;
+   IF EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
+     UPDATE f SET f.organization_id = o.id
+     FROM dbo.forms f CROSS JOIN dbo.organizations o
+     WHERE o.slug = N'academics' AND f.organization_id IS NULL;
+   IF NOT EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
+     ALTER TABLE dbo.forms ALTER COLUMN organization_id INT NOT NULL;
+   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_forms_organization')
+     ALTER TABLE dbo.forms ADD CONSTRAINT FK_forms_organization
+       FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_organization')
+     CREATE INDEX IX_forms_organization ON dbo.forms(organization_id);`,
 
   `IF OBJECT_ID('dbo.form_fields', 'U') IS NULL
    CREATE TABLE dbo.form_fields (
@@ -224,6 +293,26 @@ export const DDL_STATEMENTS: string[] = [
      CREATE INDEX IX_submissions_school_form ON dbo.submissions(school_id, form_id);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_submitted_at')
      CREATE INDEX IX_submissions_submitted_at ON dbo.submissions(submitted_at);`,
+
+  // ---------------------------------------------------------------------
+  // Organizations — submissions.organization_id (denormalized from its form
+  // for fast org scoping, mirroring school_id). Backfill from forms.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.submissions', 'organization_id') IS NULL
+     ALTER TABLE dbo.submissions ADD organization_id INT NULL;
+   IF EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL)
+     UPDATE s SET s.organization_id = f.organization_id
+     FROM dbo.submissions s JOIN dbo.forms f ON f.id = s.form_id
+     WHERE s.organization_id IS NULL;
+   IF NOT EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL AND form_id IS NOT NULL)
+     ALTER TABLE dbo.submissions ALTER COLUMN organization_id INT NOT NULL;
+   IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_submissions_organization')
+     ALTER TABLE dbo.submissions ADD CONSTRAINT FK_submissions_organization
+       FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
+   IF EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_school_form')
+     DROP INDEX IX_submissions_school_form ON dbo.submissions;
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_org_school_form')
+     CREATE INDEX IX_submissions_org_school_form ON dbo.submissions(organization_id, school_id, form_id);`,
 
   `IF OBJECT_ID('dbo.submission_values', 'U') IS NULL
    CREATE TABLE dbo.submission_values (

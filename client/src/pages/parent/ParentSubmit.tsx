@@ -7,10 +7,11 @@ type AnswerValue = string | number | boolean | string[] | null;
 
 export default function ParentSubmit() {
   const navigate = useNavigate();
-  const { formId } = useParams<{ formId: string }>();
+  const { formId, slug } = useParams<{ formId: string; slug: string }>();
   const [searchParams] = useSearchParams();
 
   const id = formId ? Number(formId) : searchParams.get("form") ? Number(searchParams.get("form")) : null;
+  const orgSlug = slug || undefined;
 
   const [form, setForm] = useState<PublicForm | null>(null);
   const [loading, setLoading] = useState(true);
@@ -25,11 +26,11 @@ export default function ParentSubmit() {
       return;
     }
     api
-      .getPublicForm(id)
+      .getPublicForm(id, orgSlug)
       .then((f) => setForm(f))
       .catch((err) => setError(err instanceof ApiError ? err.message : "Could not load form"))
       .finally(() => setLoading(false));
-  }, [id]);
+  }, [id, orgSlug]);
 
   const setAnswer = (fieldId: number, value: AnswerValue) => {
     setAnswers((prev) => ({ ...prev, [fieldId]: value }));
@@ -60,8 +61,8 @@ export default function ParentSubmit() {
     }
 
     try {
-      const result = await api.submitForm({ form_id: form.id, answers: payload });
-      navigate(`/submission/${result.public_id}`, { replace: false });
+      const result = await api.submitForm({ form_id: form.id, answers: payload }, orgSlug);
+      navigate(orgSlug ? `/org/${orgSlug}/submission/${result.public_id}` : `/submission/${result.public_id}`, { replace: false });
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not submit. Please try again.");
       setSubmitting(false);

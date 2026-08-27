@@ -5,6 +5,9 @@ import {
   getUserById,
   createUser,
   listSchools as defaultListSchools,
+  getDefaultOrganization,
+  getOrganizationById,
+  getOrganizationBySlug,
 } from "../db/queries.js";
 import {
   signAccessToken,
@@ -21,6 +24,21 @@ import type { Role } from "../db/schema.js";
 
 export const authRouter = Router();
 
+// Helper: build the client-facing user DTO, resolving the org slug so the
+// frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id).
+async function toUserDto(user: { id: number; email: string; role: Role; school_id: number | null; organization_id: number; display_name: string }) {
+  const org = await getOrganizationById(user.organization_id);
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    school_id: user.school_id,
+    organization_id: user.organization_id,
+    organization_slug: org?.slug ?? null,
+    display_name: user.display_name,
+  };
+}
+
 // -----------------------------------------------------------------------------
 // GET /api/auth/me — return current user (requires auth)
 // -----------------------------------------------------------------------------
@@ -31,13 +49,7 @@ authRouter.get("/me", requireAuth, async (req, res, next) => {
       res.status(404).json({ error: "User not found" });
       return;
     }
-    res.json({
-      id: user.id,
-      email: user.email,
-      role: user.role,
-      school_id: user.school_id,
-      display_name: user.display_name,
-    });
+    res.json(await toUserDto(user));
   } catch (err) {
     next(err);
   }
@@ -53,7 +65,7 @@ authRouter.post("/register", async (req, res, next) => {
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const { email, password, display_name, school_id, role } = parsed.data;
+    const { email, password, display_name, school_id, role, slug } = parsed.data;
 
     const existing = await getUserByEmail(email);
     if (existing) {
@@ -61,8 +73,19 @@ authRouter.post("/register", async (req, res, next) => {
       return;
     }
 
+    // Self-registration lands in the org identified by `slug` (default Academics).
+    const defaultOrg = await getDefaultOrganization();
+    let targetOrg = defaultOrg;
+    if (slug) {
+      const orgFromSlug = await getOrganizationBySlug(slug);
+      if (!orgFromSlug) {
+        res.status(400).json({ error: "Organization not found" });
+        return;
+      }
+      targetOrg = orgFromSlug;
+    }
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await createUser(email, passwordHash, role as Role, school_id, display_name);
+    const user = await createUser(email, passwordHash, role as Role, school_id, display_name, true, targetOrg.id);
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user.id);
@@ -71,13 +94,7 @@ authRouter.post("/register", async (req, res, next) => {
     res.status(201).json({
       access_token: accessToken,
       token_type: "bearer",
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        school_id: user.school_id,
-        display_name: user.display_name,
-      },
+      user: await toUserDto(user),
     });
   } catch (err) {
     next(err);
@@ -118,13 +135,7 @@ authRouter.post("/login", async (req, res, next) => {
     res.json({
       access_token: accessToken,
       token_type: "bearer",
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        school_id: user.school_id,
-        display_name: user.display_name,
-      },
+      user: await toUserDto(user),
     });
   } catch (err) {
     next(err);
@@ -158,13 +169,7 @@ authRouter.post("/refresh", async (req, res, next) => {
     res.json({
       access_token: accessToken,
       token_type: "bearer",
-      user: {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        school_id: user.school_id,
-        display_name: user.display_name,
-      },
+      user: await toUserDto(user),
     });
   } catch (err) {
     res.status(401).json({ error: "Invalid refresh token" });
@@ -213,8 +218,9 @@ authRouter.post("/seed-admin", async (req, res, next) => {
       return;
     }
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await createUser(email, passwordHash, "admin", null, "Admin");
-    res.status(201).json({ message: "Admin created", user: { id: user.id, email: user.email, role: user.role } });
+    const defaultOrg = await getDefaultOrganization();
+    const user = await createUser(email, passwordHash, "admin", null, "Admin", true, defaultOrg.id);
+    res.status(201).json({ message: "Admin created", user: await toUserDto(user) });
   } catch (err) {
     next(err);
   }
@@ -236,8 +242,9 @@ authRouter.post("/seed-staff", requireAuth, requireRoles("admin"), async (req, r
       return;
     }
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await createUser(email, passwordHash, "staff", school_id, display_name ?? "Staff");
-    res.status(201).json({ message: "Staff created", user: { id: user.id, email: user.email, role: user.role, school_id: user.school_id } });
+    const defaultOrg = await getDefaultOrganization();
+    const user = await createUser(email, passwordHash, "staff", school_id, display_name ?? "Staff", true, defaultOrg.id);
+    res.status(201).json({ message: "Staff created", user: await toUserDto(user) });
   } catch (err) {
     next(err);
   }

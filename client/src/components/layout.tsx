@@ -54,7 +54,7 @@ export function PageHead({
   actions,
 }: {
   title: string;
-  subtitle?: string;
+  subtitle?: ReactNode;
   actions?: ReactNode;
 }) {
   return (

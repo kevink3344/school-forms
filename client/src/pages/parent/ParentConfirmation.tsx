@@ -4,7 +4,7 @@ import { api } from "../../lib/api";
 import { StatusBadge } from "../../components/layout";
 
 export default function ParentConfirmation() {
-  const { publicId } = useParams<{ publicId: string }>();
+  const { publicId, slug } = useParams<{ publicId: string; slug: string }>();
   const navigate = useNavigate();
   const [info, setInfo] = useState<{ status: string; submitted_at: string; form_name: string } | null>(null);
   const [loading, setLoading] = useState(true);
@@ -13,11 +13,11 @@ export default function ParentConfirmation() {
   useEffect(() => {
     if (!publicId) return;
     api
-      .getSubmissionPublic(publicId)
+      .getSubmissionPublic(publicId, slug || undefined)
       .then((d) => setInfo({ status: d.status, submitted_at: d.submitted_at, form_name: d.form_name }))
       .catch(() => setError("We could not confirm this submission."))
       .finally(() => setLoading(false));
-  }, [publicId]);
+  }, [publicId, slug]);
 
   return (
     <div className="app-shell">
@@ -93,7 +93,7 @@ export default function ParentConfirmation() {
             ) : null}
 
             <div style={{ marginTop: 24, display: "flex", justifyContent: "center", gap: 10 }}>
-              <button className="primary-button" onClick={() => navigate("/submit")}>
+              <button className="primary-button" onClick={() => navigate(slug ? `/org/${slug}/submit` : "/submit")}>
                 Submit another
               </button>
             </div>

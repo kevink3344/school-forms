@@ -11,6 +11,7 @@ export interface AccessPayload {
   email: string;
   role: Role;
   school_id: number | null;
+  organization_id: number | null; // the user's single org (tenant boundary)
   type: "access";
 }
 
@@ -24,6 +25,7 @@ interface JwtUser {
   email: string;
   role: Role;
   school_id: number | null;
+  organization_id: number | null;
 }
 
 declare global {
@@ -34,12 +36,19 @@ declare global {
   }
 }
 
-export function signAccessToken(user: { id: number; email: string; role: Role; school_id: number | null }): string {
+export function signAccessToken(user: {
+  id: number;
+  email: string;
+  role: Role;
+  school_id: number | null;
+  organization_id: number | null;
+}): string {
   const payload: AccessPayload = {
     sub: user.id,
     email: user.email,
     role: user.role,
     school_id: user.school_id,
+    organization_id: user.organization_id,
     type: "access",
   };
   return jwt.sign(payload, env.auth.accessSecret, {
@@ -79,6 +88,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
       email: payload.email,
       role: payload.role,
       school_id: payload.school_id,
+      organization_id: payload.organization_id,
     };
     next();
   } catch {
@@ -114,6 +124,7 @@ export function optionalAuth(req: Request, _res: Response, next: NextFunction): 
         email: payload.email,
         role: payload.role,
         school_id: payload.school_id,
+        organization_id: payload.organization_id,
       };
     } catch {
       // Invalid/expired token — treat as anonymous rather than rejecting.

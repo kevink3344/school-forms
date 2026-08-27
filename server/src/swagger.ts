@@ -25,6 +25,15 @@ export function buildSwaggerSpec() {
         },
       },
       schemas: {
+        Organization: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            slug: { type: "string" },
+            name: { type: "string" },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
         School: {
           type: "object",
           properties: {
@@ -41,6 +50,7 @@ export function buildSwaggerSpec() {
             email: { type: "string", format: "email" },
             role: { type: "string", enum: ["admin", "staff"] },
             school_id: { type: "integer", nullable: true },
+            organization_id: { type: "integer", nullable: true },
             display_name: { type: "string" },
           },
         },
@@ -76,6 +86,7 @@ export function buildSwaggerSpec() {
             description: { type: "string", nullable: true },
             school_id: { type: "integer", nullable: true },
             designer_id: { type: "integer", nullable: true },
+            organization_id: { type: "integer", nullable: true },
             status: { type: "string", enum: ["draft", "published", "archived"] },
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
@@ -91,6 +102,7 @@ export function buildSwaggerSpec() {
             form_id: { type: "integer" },
             form_name: { type: "string" },
             school_id: { type: "integer", nullable: true },
+            organization_id: { type: "integer", nullable: true },
             status: { type: "string", enum: ["submitted", "in_review", "flagged", "resolved"] },
             submitted_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
@@ -279,6 +291,36 @@ export function buildSwaggerSpec() {
           },
         },
       },
+      "/api/organizations": {
+        get: {
+          tags: ["Organizations"],
+          summary: "List all organizations (admin)",
+          description: "Read-only coordinator list. Returns each org with its member count. Because admins are org-scoped, this is informational only.",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        slug: { type: "string" },
+                        name: { type: "string" },
+                        created_at: { type: "string", format: "date-time" },
+                        member_count: { type: "integer" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
       "/api/schools": {
         get: {
           tags: ["Schools"],
@@ -367,7 +409,11 @@ export function buildSwaggerSpec() {
         get: {
           tags: ["Forms"],
           summary: "List published forms (public, anonymous parent)",
+          description: "Org-scoped by URL. Pass `?org=<slug>` to return only that org's published forms.",
           security: [],
+          parameters: [
+            { name: "org", in: "query", schema: { type: "string" }, required: false, description: "Organization slug (e.g. academics)" },
+          ],
           responses: {
             "200": {
               description: "OK — published forms with staff-only fields stripped",
@@ -375,6 +421,7 @@ export function buildSwaggerSpec() {
                 "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Form" } } },
               },
             },
+            "404": { description: "Organization not found" },
           },
         },
       },
@@ -382,9 +429,11 @@ export function buildSwaggerSpec() {
         get: {
           tags: ["Forms"],
           summary: "Fetch a published form + fields (public, anonymous parent)",
+          description: "The form must belong to the org given by `?org=<slug>`.",
           security: [],
           parameters: [
             { name: "id", in: "path", required: true, schema: { type: "integer" } },
+            { name: "org", in: "query", schema: { type: "string" }, required: false, description: "Organization slug (e.g. academics)" },
           ],
           responses: {
             "200": {
@@ -402,7 +451,11 @@ export function buildSwaggerSpec() {
         post: {
           tags: ["Submissions"],
           summary: "Anonymous parent submission (no auth)",
+          description: "Org-scoped by URL. Pass `?org=<slug>` to target a specific organization's form.",
           security: [],
+          parameters: [
+            { name: "org", in: "query", schema: { type: "string" }, required: false, description: "Organization slug (e.g. academics)" },
+          ],
           requestBody: {
             required: true,
             content: {
@@ -511,6 +564,27 @@ export function buildSwaggerSpec() {
             "400": { description: "Validation error / form not accepting submissions" },
             "401": { description: "Invalid or missing webhook secret" },
             "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/public": {
+        get: {
+          tags: ["Submissions"],
+          summary: "Fetch a public submission confirmation (anonymous parent)",
+          description: "Org-scoped by URL. Pass `?org=<slug>` to verify the submission belongs to that org.",
+          security: [],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "org", in: "query", schema: { type: "string" }, required: false, description: "Organization slug (e.g. academics)" },
+          ],
+          responses: {
+            "200": {
+              description: "OK — submission with public values",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Submission" } },
+              },
+            },
+            "404": { description: "Not found" },
           },
         },
       },
