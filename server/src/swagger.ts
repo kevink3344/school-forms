@@ -1,0 +1,558 @@
+import { env } from "./config/env.js";
+
+export function buildSwaggerSpec() {
+  const bearerScheme = env.swagger.bearerScheme;
+  const baseUrl = env.publicBaseUrl;
+
+  return {
+    openapi: "3.0.3",
+    info: {
+      title: "School Forms API",
+      version: "1.0.0",
+      description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, view only their school's submissions, and add staff-only comments.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
+      contact: { name: "School Forms Team" },
+    },
+    servers: [
+      { url: baseUrl, description: "Development" },
+      { url: "https://your-school-forms-api.azurewebsites.net", description: "Azure" },
+    ],
+    components: {
+      securitySchemes: {
+        [bearerScheme]: {
+          type: "http",
+          scheme: "bearer",
+          bearerFormat: "JWT",
+        },
+      },
+      schemas: {
+        School: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            district: { type: "string", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
+        User: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            email: { type: "string", format: "email" },
+            role: { type: "string", enum: ["admin", "staff"] },
+            school_id: { type: "integer", nullable: true },
+            display_name: { type: "string" },
+          },
+        },
+        AuthResponse: {
+          type: "object",
+          properties: {
+            access_token: { type: "string" },
+            token_type: { type: "string", example: "bearer" },
+            user: { $ref: "#/components/schemas/User" },
+          },
+        },
+        FormField: {
+          type: "object",
+          required: ["id", "label", "type", "sort_order"],
+          properties: {
+            id: { type: "integer" },
+            form_id: { type: "integer" },
+            label: { type: "string" },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+            options: { type: "array", items: { type: "string" }, nullable: true },
+            required: { type: "boolean" },
+            staff_only: { type: "boolean" },
+            sort_order: { type: "integer" },
+            placeholder: { type: "string", nullable: true },
+          },
+        },
+        Form: {
+          type: "object",
+          required: ["id", "title", "status"],
+          properties: {
+            id: { type: "integer" },
+            title: { type: "string" },
+            description: { type: "string", nullable: true },
+            school_id: { type: "integer", nullable: true },
+            designer_id: { type: "integer", nullable: true },
+            status: { type: "string", enum: ["draft", "published", "archived"] },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            fields: { type: "array", items: { $ref: "#/components/schemas/FormField" } },
+          },
+        },
+        Submission: {
+          type: "object",
+          required: ["public_id", "form_id", "status"],
+          properties: {
+            id: { type: "integer" },
+            public_id: { type: "string" },
+            form_id: { type: "integer" },
+            form_name: { type: "string" },
+            school_id: { type: "integer", nullable: true },
+            status: { type: "string", enum: ["submitted", "in_review", "flagged", "resolved"] },
+            submitted_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            values: { type: "array", items: { $ref: "#/components/schemas/SubmissionValue" } },
+            comments: { type: "array", items: { $ref: "#/components/schemas/Comment" } },
+          },
+        },
+        SubmissionValue: {
+          type: "object",
+          properties: {
+            field_id: { type: "integer" },
+            field_label: { type: "string" },
+            field_type: { type: "string" },
+            staff_only: { type: "boolean" },
+            value: { type: "object", nullable: true },
+          },
+        },
+        Comment: {
+          type: "object",
+          required: ["id", "body"],
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            staff_id: { type: "integer" },
+            staff_name: { type: "string" },
+            body: { type: "string" },
+            visibility: { type: "string", enum: ["internal"] },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
+        SubmitSubmissionResponse: {
+          type: "object",
+          properties: {
+            public_id: { type: "string" },
+            message: { type: "string" },
+          },
+        },
+        ExportRow: {
+          type: "object",
+          properties: {
+            submission_id: { type: "string" },
+            submitted_at: { type: "string", format: "date-time" },
+            status: { type: "string" },
+          },
+        },
+        ExportPreview: {
+          type: "object",
+          properties: {
+            columns: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ExportColumn" },
+            },
+            rows: { type: "array", items: { $ref: "#/components/schemas/ExportRow" } },
+            total: { type: "integer" },
+          },
+        },
+        ExportColumn: {
+          type: "object",
+          properties: {
+            key: { type: "string" },
+            label: { type: "string" },
+            staff_only: { type: "boolean" },
+          },
+        },
+      },
+    },
+    paths: {
+      "/api/health": {
+        get: {
+          tags: ["System"],
+          summary: "Health check",
+          responses: {
+            "200": {
+              description: "Service status",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      ok: { type: "boolean" },
+                      dbReady: { type: "boolean" },
+                      uptime: { type: "number" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/auth/register": {
+        post: {
+          tags: ["Auth"],
+          summary: "Register a staff user",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "password", "display_name", "school_id"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    password: { type: "string", minLength: 8 },
+                    display_name: { type: "string" },
+                    school_id: { type: "integer" },
+                    role: { type: "string", enum: ["staff"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } },
+              },
+            },
+            "400": { description: "Validation error" },
+          },
+        },
+      },
+      "/api/auth/login": {
+        post: {
+          tags: ["Auth"],
+          summary: "Login (email + password)",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "password"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    password: { type: "string" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } },
+              },
+            },
+            "401": { description: "Invalid credentials" },
+          },
+        },
+      },
+      "/api/auth/me": {
+        get: {
+          tags: ["Auth"],
+          summary: "Get current user",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/User" } },
+              },
+            },
+            "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/auth/schools": {
+        get: {
+          tags: ["Auth"],
+          summary: "List schools for registration dropdown",
+          security: [],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { $ref: "#/components/schemas/School" } },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/schools": {
+        get: {
+          tags: ["Schools"],
+          summary: "List all schools",
+          security: [],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { $ref: "#/components/schemas/School" } },
+                },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ["Schools"],
+          summary: "Create a school (admin)",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["name"],
+                  properties: {
+                    name: { type: "string" },
+                    district: { type: "string", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/School" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/forms": {
+        get: {
+          tags: ["Forms"],
+          summary: "List forms (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Form" } } },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ["Forms"],
+          summary: "Create a form template (admin)",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/Form" },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Form" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/forms/public": {
+        get: {
+          tags: ["Forms"],
+          summary: "List published forms (public, anonymous parent)",
+          security: [],
+          responses: {
+            "200": {
+              description: "OK — published forms with staff-only fields stripped",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Form" } } },
+              },
+            },
+          },
+        },
+      },
+      "/api/forms/{id}/public": {
+        get: {
+          tags: ["Forms"],
+          summary: "Fetch a published form + fields (public, anonymous parent)",
+          security: [],
+          parameters: [
+            { name: "id", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": {
+              description: "OK — published form, staff-only fields stripped",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/Form" } },
+              },
+            },
+            "404": { description: "Not found" },
+            "400": { description: "Form is not accepting submissions" },
+          },
+        },
+      },
+      "/api/submissions": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Anonymous parent submission (no auth)",
+          security: [],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_id", "answers"],
+                  properties: {
+                    form_id: { type: "integer" },
+                    answers: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          field_id: { type: "integer" },
+                          value: { type: "object", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/SubmitSubmissionResponse" } },
+              },
+            },
+            "400": { description: "Validation error / form not accepting submissions" },
+            "404": { description: "Form not found" },
+          },
+        },
+        get: {
+          tags: ["Submissions"],
+          summary: "List submissions (admin: all, staff: own school)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "form_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+            { name: "from", in: "query", schema: { type: "string" }, required: false },
+            { name: "to", in: "query", schema: { type: "string" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Submission" } } },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhook/google": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Google Forms webhook — create submission (secret-guarded)",
+          description:
+            "Public intake endpoint for a Google Apps Script webhook. Guards the call with the " +
+            "X-Webhook-Secret header set via GOOGLE_FORMS_WEBHOOK_SECRET. Accepts the same body " +
+            "as POST /api/submissions.",
+          security: [],
+          parameters: [
+            {
+              name: "X-Webhook-Secret",
+              in: "header",
+              required: true,
+              schema: { type: "string" },
+              description: "Shared secret from GOOGLE_FORMS_WEBHOOK_SECRET.",
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_id", "answers"],
+                  properties: {
+                    form_id: { type: "integer" },
+                    answers: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: {
+                          field_id: { type: "integer" },
+                          value: { type: "object", nullable: true },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Submission created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/SubmitSubmissionResponse" } },
+              },
+            },
+            "400": { description: "Validation error / form not accepting submissions" },
+            "401": { description: "Invalid or missing webhook secret" },
+            "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/export/preview": {
+        get: {
+          tags: ["Export"],
+          summary: "Preview export columns + rows (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "form_id", in: "query", required: true, schema: { type: "integer" } },
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ExportPreview" } },
+              },
+            },
+          },
+        },
+      },
+      "/api/export/csv": {
+        get: {
+          tags: ["Export"],
+          summary: "Download CSV export (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "form_id", in: "query", required: true, schema: { type: "integer" } },
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+            { name: "include_staff_only", in: "query", schema: { type: "string" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "CSV download",
+              content: { "text/csv": { schema: { type: "string" } } },
+            },
+          },
+        },
+      },
+    },
+  };
+}

@@ -1,0 +1,230 @@
+import { Router } from "express";
+import bcrypt from "bcryptjs";
+import {
+  getUserByEmail,
+  getUserById,
+  createUser,
+  listSchools,
+} from "../db/queries.js";
+import {
+  signAccessToken,
+  signRefreshToken,
+  verifyRefreshToken,
+  setRefreshCookie,
+  clearRefreshCookie,
+  requireAuth,
+  requireRoles,
+} from "../auth.js";
+import { loginSchema, registerSchema } from "../schemas.js";
+import type { Role } from "../db/schema.js";
+
+export const authRouter = Router();
+
+// -----------------------------------------------------------------------------
+// GET /api/auth/me — return current user (requires auth)
+// -----------------------------------------------------------------------------
+authRouter.get("/me", requireAuth, async (req, res, next) => {
+  try {
+    const user = await getUserById(req.user!.id);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    res.json({
+      id: user.id,
+      email: user.email,
+      role: user.role,
+      school_id: user.school_id,
+      display_name: user.display_name,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/register — staff OR admin registration (admin seeded)
+// -----------------------------------------------------------------------------
+authRouter.post("/register", async (req, res, next) => {
+  try {
+    const parsed = registerSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const { email, password, display_name, school_id, role } = parsed.data;
+
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      res.status(409).json({ error: "Email already registered" });
+      return;
+    }
+
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await createUser(email, passwordHash, role as Role, school_id, display_name);
+
+    const accessToken = signAccessToken(user);
+    const refreshToken = signRefreshToken(user.id);
+    setRefreshCookie(res, refreshToken);
+
+    res.status(201).json({
+      access_token: accessToken,
+      token_type: "bearer",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        school_id: user.school_id,
+        display_name: user.display_name,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/login
+// -----------------------------------------------------------------------------
+authRouter.post("/login", async (req, res, next) => {
+  try {
+    const parsed = loginSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const { email, password } = parsed.data;
+
+    const user = await getUserByEmail(email);
+    if (!user) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) {
+      res.status(401).json({ error: "Invalid credentials" });
+      return;
+    }
+
+    const accessToken = signAccessToken(user);
+    const refreshToken = signRefreshToken(user.id);
+    setRefreshCookie(res, refreshToken);
+
+    res.json({
+      access_token: accessToken,
+      token_type: "bearer",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        school_id: user.school_id,
+        display_name: user.display_name,
+      },
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/refresh — exchange refresh cookie for a new access token
+// -----------------------------------------------------------------------------
+authRouter.post("/refresh", async (req, res, next) => {
+  try {
+    const cookieToken = req.cookies?.refreshToken;
+    const bodyToken = req.body?.refresh_token;
+    const token = cookieToken || bodyToken;
+    if (!token) {
+      res.status(401).json({ error: "Missing refresh token" });
+      return;
+    }
+    const payload = verifyRefreshToken(token);
+    const user = await getUserById(payload.sub);
+    if (!user) {
+      res.status(401).json({ error: "User not found" });
+      return;
+    }
+    const accessToken = signAccessToken(user);
+    setRefreshCookie(res, signRefreshToken(user.id));
+    res.json({
+      access_token: accessToken,
+      token_type: "bearer",
+      user: {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        school_id: user.school_id,
+        display_name: user.display_name,
+      },
+    });
+  } catch (err) {
+    res.status(401).json({ error: "Invalid refresh token" });
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/logout
+// -----------------------------------------------------------------------------
+authRouter.post("/logout", (_req, res) => {
+  clearRefreshCookie(res);
+  res.json({ message: "Logged out" });
+});
+
+// -----------------------------------------------------------------------------
+// GET /api/auth/schools — public list for registration school picker
+// -----------------------------------------------------------------------------
+authRouter.get("/schools", async (_req, res, next) => {
+  try {
+    const schools = await listSchools();
+    res.json(schools);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/seed-admin (dev only) — create the first admin
+// -----------------------------------------------------------------------------
+authRouter.post("/seed-admin", async (req, res, next) => {
+  try {
+    const { email, password } = req.body || {};
+    if (!email || !password) {
+      res.status(400).json({ error: "email and password required" });
+      return;
+    }
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      // Only allow seeding if the existing user is also admin
+      res.status(200).json({ message: "Already exists", user: { id: existing.id, email: existing.email, role: existing.role } });
+      return;
+    }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await createUser(email, passwordHash, "admin", null, "Admin");
+    res.status(201).json({ message: "Admin created", user: { id: user.id, email: user.email, role: user.role } });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/seed-staff (dev only) — create a staff user
+// -----------------------------------------------------------------------------
+authRouter.post("/seed-staff", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const { email, password, school_id, display_name } = req.body || {};
+    if (!email || !password || !school_id) {
+      res.status(400).json({ error: "email, password and school_id required" });
+      return;
+    }
+    const existing = await getUserByEmail(email);
+    if (existing) {
+      res.status(409).json({ error: "Email already registered" });
+      return;
+    }
+    const passwordHash = await bcrypt.hash(password, 12);
+    const user = await createUser(email, passwordHash, "staff", school_id, display_name ?? "Staff");
+    res.status(201).json({ message: "Staff created", user: { id: user.id, email: user.email, role: user.role, school_id: user.school_id } });
+  } catch (err) {
+    next(err);
+  }
+});

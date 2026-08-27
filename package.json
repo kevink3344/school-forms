@@ -1,0 +1,26 @@
+{
+  "name": "school-forms",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "server",
+    "client"
+  ],
+  "scripts": {
+    "dev": "npm-run-all --parallel dev:server dev:client",
+    "dev:server": "npm --workspace server run dev",
+    "dev:client": "npm --workspace client run dev",
+    "build": "npm-run-all build:server build:client",
+    "build:server": "npm --workspace server run build",
+    "build:client": "npm --workspace client run build",
+    "typecheck": "npm-run-all typecheck:server typecheck:client",
+    "typecheck:server": "npm --workspace server run typecheck",
+    "typecheck:client": "npm --workspace client run typecheck",
+    "seed": "npm --workspace server run seed"
+  },
+  "devDependencies": {
+    "@types/cookie-parser": "^1.4.10",
+    "@types/mssql": "^12.3.0",
+    "npm-run-all": "^4.1.5"
+  }
+}
