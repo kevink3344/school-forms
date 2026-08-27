@@ -125,11 +125,17 @@ exportRouter.get("/csv", requireAuth, requireRoles("admin"), async (req, res, ne
     const submissions = await listSubmissions({ schoolId, formId, status });
     const rows = await buildExportRows(formId, columns, submissions);
 
-    // Build CSV
-    const headers = ["submission_public_id", "submitted_at", "status", ...columns.map((c) => c.key)];
-    const csvLines = [headers.join(",")];
+    // Build CSV — use the field label as the visible header, but look up each
+    // value by its internal `key` (e.g. field_9) so the columns still resolve.
+    const headers = [
+      { header: "submission_public_id", key: "submission_public_id" },
+      { header: "submitted_at", key: "submitted_at" },
+      { header: "status", key: "status" },
+      ...columns.map((c) => ({ header: c.label, key: c.key })),
+    ];
+    const csvLines = [headers.map((h) => csvEscape(h.header)).join(",")];
     for (const row of rows) {
-      csvLines.push(headers.map((h) => csvEscape(row[h])).join(","));
+      csvLines.push(headers.map((h) => csvEscape(row[h.key])).join(","));
     }
     const csv = "\uFEFF" + csvLines.join("\r\n");
 
