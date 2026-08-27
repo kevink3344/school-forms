@@ -7,6 +7,7 @@ import type {
   Submission,
   SubmissionValue,
   Comment,
+  AdhocField,
   Role,
 } from "./schema.js";
 
@@ -141,7 +142,7 @@ export async function listFormFields(formId: number): Promise<FormField[]> {
 // an already-array value (the runtime DB returns a string, but the FormField type
 // declares an array). Returns null for empty, invalid, or non-array payloads so
 // callers never crash on a malformed value.
-function parseFormFieldOptions(raw: string[] | null | undefined): string[] | null {
+function parseFormFieldOptions(raw: string[] | string | null | undefined): string[] | null {
   if (raw == null) return null;
   // Already an array (defensive against callers that pass a typed-array value).
   if (Array.isArray(raw)) return raw.map(String);
@@ -331,12 +332,16 @@ async function reconcileFormFields(
 // -----------------------------------------------------------------------------
 export interface SubmissionRow extends Submission {
   form_name: string;
+  // The first non-staff-only field value (conventionally the Student Name), used
+  // to render a clickable name in the staff queue. Falls back to a placeholder.
+  student_name: string | null;
 }
 
 export interface SubmissionValueRow extends SubmissionValue {
   field_label: string;
   field_type: string;
   staff_only: boolean;
+  options: string[] | null;
 }
 
 export interface CommentRow extends Comment {
@@ -346,6 +351,8 @@ export interface CommentRow extends Comment {
 export interface SubmissionDetail extends SubmissionRow {
   values: SubmissionValueRow[];
   comments: CommentRow[];
+  // Staff-only fields added ad-hoc to this submission (not part of the fixed form).
+  adhocFields: AdhocFieldRow[];
 }
 
 export async function listSubmissions(params: {
@@ -380,7 +387,12 @@ export async function listSubmissions(params: {
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.status, s.submitted_at, s.updated_at,
-            f.title AS form_name
+            f.title AS form_name,
+            (SELECT TOP 1 sv.value
+             FROM dbo.submission_values sv
+             JOIN dbo.form_fields ff ON ff.id = sv.field_id
+             WHERE sv.submission_id = s.id AND ff.staff_only = 0 AND sv.value IS NOT NULL
+             ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      ${where}
@@ -392,7 +404,12 @@ export async function listSubmissions(params: {
 export async function getSubmissionByPublicId(publicId: string): Promise<SubmissionRow | null> {
   const rows = await execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.status, s.submitted_at, s.updated_at,
-            f.title AS form_name
+            f.title AS form_name,
+            (SELECT TOP 1 sv.value
+             FROM dbo.submission_values sv
+             JOIN dbo.form_fields ff ON ff.id = sv.field_id
+             WHERE sv.submission_id = s.id AND ff.staff_only = 0 AND sv.value IS NOT NULL
+             ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      WHERE s.public_id = @publicId`,
@@ -402,15 +419,30 @@ export async function getSubmissionByPublicId(publicId: string): Promise<Submiss
 }
 
 export async function listSubmissionValues(submissionId: number): Promise<SubmissionValueRow[]> {
-  return execute<SubmissionValueRow>(
+  interface RawValueRow extends Omit<SubmissionValueRow, "options"> {
+    rawOptions: string | null;
+  }
+  const rows = await execute<RawValueRow>(
     `SELECT sv.id, sv.submission_id, sv.field_id, sv.value,
-            ff.label AS field_label, ff.type AS field_type, ff.staff_only AS staff_only
+            ff.label AS field_label, ff.type AS field_type, ff.staff_only AS staff_only,
+            ff.options AS rawOptions
      FROM dbo.submission_values sv
      JOIN dbo.form_fields ff ON ff.id = sv.field_id
      WHERE sv.submission_id = @submissionId
      ORDER BY ff.sort_order`,
     { submissionId }
   );
+  // Convert the stored JSON-string options (rawOptions) into a parsed array.
+  return rows.map((r) => ({
+    id: r.id,
+    submission_id: r.submission_id,
+    field_id: r.field_id,
+    value: r.value,
+    field_label: r.field_label,
+    field_type: r.field_type,
+    staff_only: r.staff_only,
+    options: parseFormFieldOptions(r.rawOptions),
+  }));
 }
 
 export async function listComments(submissionId: number): Promise<CommentRow[]> {
@@ -430,7 +462,8 @@ export async function getSubmissionDetail(publicId: string): Promise<SubmissionD
   if (!submission) return null;
   const values = await listSubmissionValues(submission.id);
   const comments = await listComments(submission.id);
-  return { ...submission, values, comments };
+  const adhocFields = await listAdhocFields(submission.id);
+  return { ...submission, values, comments, adhocFields };
 }
 
 export async function createSubmission(
@@ -475,6 +508,42 @@ export async function updateSubmissionStatus(id: number, status: string): Promis
 }
 
 // -----------------------------------------------------------------------------
+// Submission value editing (staff/admin)
+// -----------------------------------------------------------------------------
+// Upsert the supplied answers against the submission. Existing rows (matched by
+// submission_id + field_id) are updated; new fields are inserted; fields present
+// in the DB but absent from the incoming payload are left untouched.
+export async function updateSubmissionValues(
+  submissionId: number,
+  answers: { field_id: number; value: string | number | boolean | string[] | null }[]
+): Promise<void> {
+  for (const a of answers) {
+    const serialized =
+      a.value === null ? null :
+      typeof a.value === "string" ? a.value :
+      typeof a.value === "number" ? String(a.value) :
+      typeof a.value === "boolean" ? (a.value ? "1" : "0") :
+      JSON.stringify(a.value);
+
+    await execute(
+      `IF EXISTS (SELECT 1 FROM dbo.submission_values WHERE submission_id = @submissionId AND field_id = @fieldId)
+         UPDATE dbo.submission_values SET value = @value
+         WHERE submission_id = @submissionId AND field_id = @fieldId
+       ELSE
+         INSERT INTO dbo.submission_values (submission_id, field_id, value)
+         VALUES (@submissionId, @fieldId, @value);`,
+      { submissionId, fieldId: a.field_id, value: serialized }
+    );
+  }
+
+  // Touch the submission's updated_at so the list orders reflect the change.
+  await execute(
+    `UPDATE dbo.submissions SET updated_at = SYSUTCDATETIME() WHERE id = @id`,
+    { id: submissionId }
+  );
+}
+
+// -----------------------------------------------------------------------------
 // Comments
 // -----------------------------------------------------------------------------
 export async function createComment(
@@ -491,6 +560,130 @@ export async function createComment(
     { submissionId, staffId, body, visibility }
   );
   return rows[0];
+}
+
+// -----------------------------------------------------------------------------
+// Submission ad-hoc staff-only fields
+// -----------------------------------------------------------------------------
+export interface AdhocFieldRow {
+  id: number;
+  submission_id: number;
+  label: string;
+  type: string;
+  options: string[] | null;
+  value: string | number | boolean | string[] | null;
+  sort_order: number;
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface RawAdhocRow {
+  id: number;
+  submission_id: number;
+  label: string;
+  type: string;
+  options: string | null;
+  value: string | null;
+  sort_order: number;
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Parse stored JSON-string options (same rule as form_fields.options).
+function parseAdhocOptions(raw: string | null): string[] | null {
+  if (raw == null) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Serialize a scalar/array value into the storage format (same as submission values).
+function serializeValue(value: string | number | boolean | string[] | null): string | null {
+  if (value === null) return null;
+  if (typeof value === "string") return value;
+  if (typeof value === "number") return String(value);
+  if (typeof value === "boolean") return value ? "1" : "0";
+  return JSON.stringify(value);
+}
+
+export async function listAdhocFields(submissionId: number): Promise<AdhocFieldRow[]> {
+  const rows = await execute<RawAdhocRow>(`
+    SELECT id, submission_id, label, type, options, value, sort_order, created_by, created_at, updated_at
+    FROM dbo.submission_adhoc_fields
+    WHERE submission_id = @submissionId
+    ORDER BY sort_order, id`, { submissionId });
+
+  return rows.map((r) => ({ ...r, options: parseAdhocOptions(r.options) }));
+}
+
+export async function getAdhocField(id: number): Promise<AdhocFieldRow | null> {
+  const rows = await execute<RawAdhocRow>(`
+    SELECT id, submission_id, label, type, options, value, sort_order, created_by, created_at, updated_at
+    FROM dbo.submission_adhoc_fields
+    WHERE id = @id`, { id });
+  return rows[0] ? { ...rows[0], options: parseAdhocOptions(rows[0].options) } : null;
+}
+
+export async function createAdhocField(input: {
+  submissionId: number;
+  label: string;
+  type: string;
+  options: string[] | null;
+  value: string | number | boolean | string[] | null;
+  sortOrder: number;
+  createdBy: number | null;
+}): Promise<AdhocFieldRow> {
+  const rows = await execute<RawAdhocRow>(`
+    INSERT INTO dbo.submission_adhoc_fields (submission_id, label, type, options, value, sort_order, created_by)
+    OUTPUT INSERTED.id, INSERTED.submission_id, INSERTED.label, INSERTED.type, INSERTED.options,
+           INSERTED.value, INSERTED.sort_order, INSERTED.created_by, INSERTED.created_at, INSERTED.updated_at
+    VALUES (@submissionId, @label, @type, @options, @value, @sortOrder, @createdBy)`,
+    {
+      submissionId: input.submissionId,
+      label: input.label,
+      type: input.type,
+      options: input.options && input.options.length ? JSON.stringify(input.options) : null,
+      value: serializeValue(input.value),
+      sortOrder: input.sortOrder,
+      createdBy: input.createdBy,
+    });
+  const created = rows[0];
+  const detailed = await getAdhocField(created.id);
+  if (!detailed) throw new Error("Failed to read back created ad-hoc field");
+  return detailed;
+}
+
+export async function updateAdhocField(
+  id: number,
+  input: {
+    label: string;
+    type: string;
+    options: string[] | null;
+    value: string | number | boolean | string[] | null;
+  }
+): Promise<AdhocFieldRow | null> {
+  await execute(`
+    UPDATE dbo.submission_adhoc_fields
+    SET label = @label, type = @type, options = @options, value = @value,
+        updated_at = SYSUTCDATETIME()
+    WHERE id = @id`,
+    {
+      id,
+      label: input.label,
+      type: input.type,
+      options: input.options && input.options.length ? JSON.stringify(input.options) : null,
+      value: serializeValue(input.value),
+    });
+  return getAdhocField(id);
+}
+
+export async function deleteAdhocField(id: number): Promise<void> {
+  await execute(`DELETE FROM dbo.submission_adhoc_fields WHERE id = @id`, { id });
 }
 
 // -----------------------------------------------------------------------------

@@ -98,6 +98,23 @@ export interface Comment {
   created_at: Date;
 }
 
+// A staff-only field that has been added ad-hoc to a *specific* submission.
+// Deliberately lives in its own table so the published form definition
+// (dbo.form_fields) stays completely fixed — staff can extend a submission
+// without mutating the parent template.
+export interface AdhocField {
+  id: number;
+  submission_id: number;
+  label: string;
+  type: FieldType;
+  options: string[] | null;
+  value: string | number | boolean | string[] | null;
+  sort_order: number;
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
 // -----------------------------------------------------------------------------
 // SQL Server DDL — executed once at startup (idempotent CREATE IF NOT EXISTS)
 // -----------------------------------------------------------------------------
@@ -211,6 +228,26 @@ export const DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_comments_submission')
      CREATE INDEX IX_comments_submission ON dbo.comments(submission_id);`,
+
+  // Staff-only ad-hoc fields on a specific submission. Kept out of form_fields
+  // so the published template stays fixed while staff extend individual records.
+  `IF OBJECT_ID('dbo.submission_adhoc_fields', 'U') IS NULL
+   CREATE TABLE dbo.submission_adhoc_fields (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     submission_id INT NOT NULL,
+     label         NVARCHAR(200) NOT NULL,
+     type          NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email')),
+     options       NVARCHAR(MAX) NULL,
+     value         NVARCHAR(MAX) NULL,
+     sort_order    INT NOT NULL CONSTRAINT DF_adhoc_fields_sort_order DEFAULT 0,
+     created_by    INT NULL,
+     created_at    DATETIME2 NOT NULL CONSTRAINT DF_adhoc_fields_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at    DATETIME2 NOT NULL CONSTRAINT DF_adhoc_fields_updated_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_adhoc_fields_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
+     CONSTRAINT FK_adhoc_fields_creator FOREIGN KEY (created_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+   );
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_adhoc_fields_submission')
+     CREATE INDEX IX_adhoc_fields_submission ON dbo.submission_adhoc_fields(submission_id);`,
 ];
 
 // -----------------------------------------------------------------------------

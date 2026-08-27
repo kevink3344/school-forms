@@ -6,13 +6,21 @@ import {
   listSubmissionValues,
   listComments,
   updateSubmissionStatus,
+  updateSubmissionValues,
   createComment,
+  createAdhocField,
+  updateAdhocField,
+  deleteAdhocField,
+  listAdhocFields,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import {
   createSubmissionSchema,
   updateSubmissionStatusSchema,
+  updateSubmissionValuesSchema,
   createCommentSchema,
+  createAdhocFieldSchema,
+  updateAdhocFieldSchema,
 } from "../schemas.js";
 import { newPublicId } from "../db/schema.js";
 import { getForm } from "../db/queries.js";
@@ -157,6 +165,37 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
 });
 
 // -----------------------------------------------------------------------------
+// STAFF: PUT /api/submissions/:publicId/values — edit submission answers
+// (staff/admin correcting parent input across all fields, incl. staff-only)
+// -----------------------------------------------------------------------------
+submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const parsed = updateSubmissionValuesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const submission = await getSubmissionDetail(req.params.publicId);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    await updateSubmissionValues(submission.id, parsed.data.answers);
+    const updated = await getSubmissionDetail(req.params.publicId);
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
 // STAFF: POST /api/submissions/:publicId/comments — add staff-only comment
 // -----------------------------------------------------------------------------
 submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
@@ -186,6 +225,140 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
     );
     const comments = await listComments(submission.id);
     res.status(201).json({ comment, comments });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/:publicId/adhoc — list staff-only ad-hoc fields
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    const fields = await listAdhocFields(submission.id);
+    res.json(fields);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: POST /api/submissions/:publicId/adhoc — add a staff-only ad-hoc field
+// -----------------------------------------------------------------------------
+submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const parsed = createAdhocFieldSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const submission = await getSubmissionDetail(req.params.publicId);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    const existing = await listAdhocFields(submission.id);
+    const nextSort = existing.length ? Math.max(...existing.map((f) => f.sort_order)) + 1 : 0;
+    const field = await createAdhocField({
+      submissionId: submission.id,
+      label: parsed.data.label,
+      type: parsed.data.type,
+      options: parsed.data.options ?? null,
+      value: parsed.data.value ?? null,
+      sortOrder: nextSort,
+      createdBy: req.user!.id,
+    });
+    res.status(201).json(field);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: PUT /api/submissions/:publicId/adhoc/:fieldId — update an ad-hoc field
+// -----------------------------------------------------------------------------
+submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const parsed = updateAdhocFieldSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const submission = await getSubmissionDetail(req.params.publicId);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    const fieldId = Number(req.params.fieldId);
+    const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+    if (!current) {
+      res.status(404).json({ error: "Ad-hoc field not found on this submission" });
+      return;
+    }
+    const updated = await updateAdhocField(fieldId, {
+      label: parsed.data.label,
+      type: parsed.data.type,
+      options: parsed.data.options ?? null,
+      value: parsed.data.value ?? null,
+    });
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: DELETE /api/submissions/:publicId/adhoc/:fieldId — remove an ad-hoc field
+// -----------------------------------------------------------------------------
+submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    const fieldId = Number(req.params.fieldId);
+    const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+    if (!current) {
+      res.status(404).json({ error: "Ad-hoc field not found on this submission" });
+      return;
+    }
+    await deleteAdhocField(fieldId);
+    const fields = await listAdhocFields(submission.id);
+    res.json(fields);
   } catch (err) {
     next(err);
   }

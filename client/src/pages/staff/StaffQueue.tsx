@@ -4,11 +4,17 @@ import { api } from "../../lib/api";
 import type { SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
 
+type ViewMode = "table" | "cards";
+
 export default function StaffQueue() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
+  // Default to card view on small screens; tablet/desktop defaults to table.
+  const [viewMode, setViewMode] = useState<ViewMode>(
+    typeof window !== "undefined" && window.innerWidth < 768 ? "cards" : "table"
+  );
 
   const load = (status: string) => {
     setLoading(true);
@@ -31,11 +37,42 @@ export default function StaffQueue() {
     resolved: rows.filter((r) => r.status === "resolved").length,
   };
 
+  const openSubmission = (publicId: string) => navigate(`/staff/${publicId}`);
+
   return (
     <div>
       <PageHead
         title="My School's Submissions"
         subtitle="Submissions from your school, ready for you to review and comment."
+        actions={
+          <div className="view-toggle">
+            <button
+              className={viewMode === "table" ? "active" : ""}
+              onClick={() => setViewMode("table")}
+              title="Table view"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="18" height="16" rx="1" />
+                <line x1="3" y1="10" x2="21" y2="10" />
+                <line x1="9" y1="4" x2="9" y2="20" />
+              </svg>
+              Table
+            </button>
+            <button
+              className={viewMode === "cards" ? "active" : ""}
+              onClick={() => setViewMode("cards")}
+              title="Card view"
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <rect x="3" y="4" width="8" height="7" rx="1" />
+                <rect x="13" y="4" width="8" height="7" rx="1" />
+                <rect x="3" y="13" width="8" height="7" rx="1" />
+                <rect x="13" y="13" width="8" height="7" rx="1" />
+              </svg>
+              Cards
+            </button>
+          </div>
+        }
       />
 
       <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
@@ -76,11 +113,40 @@ export default function StaffQueue() {
           </div>
         ) : rows.length === 0 ? (
           <div className="empty-state">No submissions for your school yet.</div>
+        ) : viewMode === "cards" ? (
+          <div className="queue-list" style={{ padding: 16 }}>
+            {rows.map((s) => (
+              <div className="queue-item" key={s.public_id} onClick={() => openSubmission(s.public_id)}>
+                <div className="qi-main">
+                  <div className="qi-top">
+                    <StatusBadge status={s.status} />
+                    <span className="badge badge-slate">{s.form_name}</span>
+                  </div>
+                  <div className="qi-title">
+                    <a
+                      href={`/staff/${s.public_id}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        e.stopPropagation();
+                        openSubmission(s.public_id);
+                      }}
+                    >
+                      {s.student_name || "Unnamed submission"}
+                    </a>
+                  </div>
+                  <div className="qi-meta">{s.student_name ? s.form_name : `Form: ${s.form_name}`}</div>
+                </div>
+                <div className="qi-right">
+                  <span className="qi-time">{formatDate(s.submitted_at)}</span>
+                </div>
+              </div>
+            ))}
+          </div>
         ) : (
           <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th>Form</th>
+                <th>Student / Form</th>
                 <th>Submission ID</th>
                 <th>Status</th>
                 <th>Submitted</th>
@@ -90,17 +156,28 @@ export default function StaffQueue() {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.public_id}>
-                  <td className="cell-strong">{s.form_name}</td>
+                  <td className="cell-strong">
+                    <a
+                      className="link-name"
+                      href={`/staff/${s.public_id}`}
+                      onClick={(e) => {
+                        e.preventDefault();
+                        openSubmission(s.public_id);
+                      }}
+                    >
+                      {s.student_name || "Unnamed submission"}
+                    </a>
+                    <span className="cell-mono" style={{ marginLeft: 8 }}>
+                      {s.form_name}
+                    </span>
+                  </td>
                   <td className="cell-mono">{shortId(s.public_id)}</td>
                   <td>
                     <StatusBadge status={s.status} />
                   </td>
                   <td className="cell-mono">{formatDate(s.submitted_at)}</td>
                   <td>
-                    <button
-                      className="badge-button"
-                      onClick={() => navigate(`/staff/${s.public_id}`)}
-                    >
+                    <button className="badge-button" onClick={() => openSubmission(s.public_id)}>
                       Review
                     </button>
                   </td>

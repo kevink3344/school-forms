@@ -78,6 +78,28 @@ export const updateSubmissionStatusSchema = z.object({
   status: z.enum(SUBMISSION_STATUS),
 });
 
+// Editing a submission's answers (staff/admin correcting parent input).
+export const updateSubmissionValuesSchema = z.object({
+  answers: z.array(submissionAnswerSchema).min(1),
+});
+
+// -----------------------------------------------------------------------------
+// Submission ad-hoc staff-only fields (staff/extended on a specific submission)
+// -----------------------------------------------------------------------------
+export const createAdhocFieldSchema = z.object({
+  label: z.string().min(1).max(200),
+  type: fieldTypeEnum,
+  options: z.array(z.string().min(1).max(200)).optional().nullable(),
+  value: answerValue,
+});
+
+export const updateAdhocFieldSchema = z.object({
+  label: z.string().min(1).max(200),
+  type: fieldTypeEnum,
+  options: z.array(z.string().min(1).max(200)).optional().nullable(),
+  value: answerValue,
+});
+
 // -----------------------------------------------------------------------------
 // Comments (Staff-only)
 // -----------------------------------------------------------------------------

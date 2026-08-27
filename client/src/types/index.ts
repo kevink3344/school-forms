@@ -77,11 +77,12 @@ export interface SubmissionValue {
   value: string | number | boolean | string[] | null;
 }
 
-// Value enriched with the field's label/type/staff_only flag (from the detail endpoint).
+// Value enriched with the field's label/type/staff_only/options (from the detail endpoint).
 export interface SubmissionValueRow extends SubmissionValue {
   field_label: string;
   field_type: string;
   staff_only: boolean;
+  options: string[] | null;
 }
 
 export interface Comment {
@@ -96,12 +97,34 @@ export interface Comment {
 
 export interface SubmissionRow extends Submission {
   form_name: string;
+  student_name: string | null;
+}
+
+export interface SubmissionAnswer {
+  field_id: number;
+  value: string | number | boolean | string[] | null;
+}
+
+// A staff-only field added ad-hoc to a specific submission (not part of the fixed form).
+export interface AdhocField {
+  id: number;
+  submission_id: number;
+  label: string;
+  type: FieldType;
+  options: string[] | null;
+  value: string | number | boolean | string[] | null;
+  sort_order: number;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
 }
 
 export interface SubmissionDetail extends Submission {
   form_name: string;
+  student_name: string | null;
   values: SubmissionValueRow[];
   comments: Comment[];
+  adhocFields: AdhocField[];
 }
 
 export interface AuthResponse {

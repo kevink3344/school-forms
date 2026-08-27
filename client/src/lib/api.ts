@@ -1,11 +1,13 @@
 import type {
   AuthResponse,
+  AdhocField,
   Comment,
   ExportPreview,
   Form,
   FormWithFields,
   PublicForm,
   School,
+  SubmissionAnswer,
   SubmissionDetail,
   SubmissionRow,
   SubmissionStatus,
@@ -224,6 +226,64 @@ export const api = {
       method: "POST",
       auth: true,
       body: { body, visibility: "internal" },
+    });
+  },
+
+  async updateSubmissionValues(
+    publicId: string,
+    answers: SubmissionAnswer[]
+  ): Promise<SubmissionDetail> {
+    return request<SubmissionDetail>(`/api/submissions/${publicId}/values`, {
+      method: "PUT",
+      auth: true,
+      body: { answers },
+    });
+  },
+
+  // -------------------------------------------------------------------------
+  // Submission ad-hoc staff-only fields
+  // -------------------------------------------------------------------------
+  async listAdhocFields(publicId: string): Promise<AdhocField[]> {
+    return request<AdhocField[]>(`/api/submissions/${publicId}/adhoc`, { auth: true });
+  },
+
+  async createAdhocField(
+    publicId: string,
+    input: {
+      label: string;
+      type: string;
+      options?: string[] | null;
+      value: string | number | boolean | string[] | null;
+    }
+  ): Promise<AdhocField> {
+    return request<AdhocField>(`/api/submissions/${publicId}/adhoc`, {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  async updateAdhocField(
+    publicId: string,
+    fieldId: number,
+    input: {
+      label: string;
+      type: string;
+      options?: string[] | null;
+      value: string | number | boolean | string[] | null;
+    }
+  ): Promise<AdhocField> {
+    return request<AdhocField>(`/api/submissions/${publicId}/adhoc/${fieldId}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
+  },
+
+  async deleteAdhocField(publicId: string, fieldId: number): Promise<AdhocField[]> {
+    return request<AdhocField[]>(`/api/submissions/${publicId}/adhoc/${fieldId}`, {
+      method: "DELETE",
+      auth: true,
     });
   },
 
