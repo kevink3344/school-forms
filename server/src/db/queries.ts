@@ -371,6 +371,7 @@ async function reconcileFormFields(
          WHERE id=@id AND form_id=@formId`,
         {
           id: f.id,
+          formId,
           label: f.label,
           type: f.type,
           options,
