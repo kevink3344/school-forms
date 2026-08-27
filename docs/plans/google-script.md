@@ -10,10 +10,11 @@
 // title -> field_id by fetching the published form's field list.
 
 // NOTE: Google Apps Script runs on Google's servers, so it CANNOT reach localhost.
-// Use the public tunnel URL below (a stable Azure URL is better for production).
-// The localtunnel URL changes every time the tunnel restarts; recreate it and
-// re-paste it here if it stops working. Never use http://localhost:4000 here.
-const API_BASE = 'https://quick-owls-train.loca.lt';
+// Use the public Azure URL below (stable for production). The localtunnel URL
+// (quick-owls-train.loca.lt) is now DEPRECATED and changes every restart — if
+// you ever fall back to it, recreate it and re-paste it here. Never use
+// http://localhost:4000 here.
+const API_BASE = 'https://webform-sandbox-addph8hsd9feghdp.eastus2-01.azurewebsites.net';
 const FORM_ID = 1;                       // numeric DB form_id, NOT a string
 const WEBHOOK_SECRET = 'ebbe86f0c8e2e1aeceeb6aa1583a3b15a11eea87e6caeffc6b55c4ff4fa54714dad5737567c7003e4b638d40e42334b2'; // must match GOOGLE_FORMS_WEBHOOK_SECRET
 
