@@ -195,7 +195,6 @@ export default function AdminDashboard() {
         <SpreadsheetGrid
           columns={preview.columns}
           rows={preview.rows}
-          schoolName={schoolName}
           selectedForm={selectedForm?.title || ""}
         />
       ) : (
@@ -220,12 +219,10 @@ export default function AdminDashboard() {
 function SpreadsheetGrid({
   columns,
   rows,
-  schoolName,
   selectedForm,
 }: {
   columns: ExportPreview["columns"];
   rows: Record<string, unknown>[];
-  schoolName: (id: number | null) => string;
   selectedForm: string;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -260,7 +257,6 @@ function SpreadsheetGrid({
                 onChange={toggleAll}
               />
             </th>
-            <th>School</th>
             {columns.map((c) => (
               <th key={c.key}>{c.label}</th>
             ))}
@@ -279,7 +275,6 @@ function SpreadsheetGrid({
                   onChange={() => toggle(String(r.submission_public_id))}
                 />
               </td>
-              <td>{schoolName(Number(r.school_id ?? null))}</td>
               {columns.map((c) => (
                 <td key={c.key}>{formatCell(r[c.key])}</td>
               ))}
