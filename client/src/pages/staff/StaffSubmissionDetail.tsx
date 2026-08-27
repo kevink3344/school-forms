@@ -339,13 +339,13 @@ export default function StaffSubmissionDetail() {
                 <div className="section-label">Submission</div>
                 <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "8px 0" }}>
                   <div className="field">
-                    <span className="f-label">Submission ID</span>
+                    <span className="f-label">Submission ID:</span>{" "}
                     <span className="f-value cell-mono" style={{ fontSize: 12 }}>
                       {detail.public_id}
                     </span>
                   </div>
                   <div className="field">
-                    <span className="f-label">Submission Time</span>
+                    <span className="f-label">Submission Time:</span>{" "}
                     <span className="f-value cell-mono" style={{ fontSize: 12 }}>
                       {new Date(detail.submitted_at).toLocaleString()}
                     </span>
@@ -562,46 +562,6 @@ export default function StaffSubmissionDetail() {
             )}
           </div>
         </section>
-
-        {/* Right panel: submission metadata */}
-        <aside style={{ position: "sticky", top: 20 }}>
-          <div className="card">
-            <div className="card-head">
-              <h3>Submission detail</h3>
-              <span className="badge badge-orange" style={{ marginLeft: "auto" }}>
-                {detail.form_name}
-              </span>
-            </div>
-            <div className="card-body">
-              <div className="section-label">Submission</div>
-              <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "8px 0" }}>
-                <div className="field">
-                  <span className="f-label">Submission ID</span>
-                  <span className="f-value cell-mono" style={{ fontSize: 12 }}>
-                    {detail.public_id}
-                  </span>
-                </div>
-                <div className="field">
-                  <span className="f-label">Submission Time</span>
-                  <span className="f-value cell-mono" style={{ fontSize: 12 }}>
-                    {new Date(detail.submitted_at).toLocaleString()}
-                  </span>
-                </div>
-              </div>
-
-              <div className="divider" />
-              <div className="section-label">Key fields</div>
-              <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "10px 0" }}>
-                {parentFields.slice(0, 5).map((v) => (
-                  <div className="field" key={v.field_id}>
-                    <span className="f-label">{v.field_label}</span>
-                    <span className="f-value">{formatValue(v.value)}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </div>
-        </aside>
       </div>
 
       {/* Comment thread (full width at the bottom) */}
@@ -691,7 +651,7 @@ function Field({
   if (!editing) {
     return (
       <div className="field">
-        <span className="f-label">{label}</span>
+        <span className="f-label">{label}:</span>{" "}
         <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value)}</span>
       </div>
     );
