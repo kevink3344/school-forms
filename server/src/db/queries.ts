@@ -123,11 +123,35 @@ export async function getForm(id: number): Promise<Form | null> {
 }
 
 export async function listFormFields(formId: number): Promise<FormField[]> {
-  return execute<FormField>(
+  const rows = await execute<FormField>(
     `SELECT id, form_id, label, type, options, required, staff_only, sort_order, placeholder
      FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
+  // `options` is stored as a JSON string (NVARCHAR) but the API contract exposes
+  // an array. Parse it back so every consumer (admin designer, parent submit,
+  // public form) receives `string[] | null` and can safely call .join()/.map().
+  return rows.map((f) => ({
+    ...f,
+    options: parseFormFieldOptions(f.options),
+  }));
+}
+
+// Parse the stored JSON-string options into an array. Accepts a JSON string or
+// an already-array value (the runtime DB returns a string, but the FormField type
+// declares an array). Returns null for empty, invalid, or non-array payloads so
+// callers never crash on a malformed value.
+function parseFormFieldOptions(raw: string[] | null | undefined): string[] | null {
+  if (raw == null) return null;
+  // Already an array (defensive against callers that pass a typed-array value).
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw !== "string") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch {
+    return null;
+  }
 }
 
 export async function getFormWithFields(id: number): Promise<FormWithFields | null> {
