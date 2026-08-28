@@ -48,6 +48,7 @@ export interface User {
   email: string;
   role: Role;
   school_id: number | null;
+  school_name: string | null;
   organization_id: number | null;
   organization_slug: string | null;
   display_name: string;

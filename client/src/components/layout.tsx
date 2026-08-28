@@ -125,7 +125,10 @@ export function AppShell({ children }: { children: ReactNode }) {
           {user && (
             <div className="user-chip">
               <div className="avatar">{initials(user.display_name || user.email)}</div>
-              <div className="u-name">{user.display_name || user.email}</div>
+              <div className="u-meta">
+                <div className="u-name">{user.display_name || user.email}</div>
+                {user.school_name && <div className="u-school">{user.school_name}</div>}
+              </div>
             </div>
           )}
           <button className="icon-button" title="Log out" onClick={handleLogout}>

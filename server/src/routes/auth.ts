@@ -8,6 +8,7 @@ import {
   getDefaultOrganization,
   getOrganizationById,
   getOrganizationBySlug,
+  getSchool,
   listUsersForSelect,
 } from "../db/queries.js";
 import {
@@ -26,14 +27,19 @@ import type { Role } from "../db/schema.js";
 export const authRouter = Router();
 
 // Helper: build the client-facing user DTO, resolving the org slug so the
-// frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id).
+// frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id)
+// and the school's display name so the sidebar can show it under the user.
 async function toUserDto(user: { id: number; email: string; role: Role; school_id: number | null; organization_id: number; display_name: string }) {
-  const org = await getOrganizationById(user.organization_id);
+  const [org, school] = await Promise.all([
+    getOrganizationById(user.organization_id),
+    user.school_id ? getSchool(user.school_id) : Promise.resolve(null),
+  ]);
   return {
     id: user.id,
     email: user.email,
     role: user.role,
     school_id: user.school_id,
+    school_name: school?.name ?? null,
     organization_id: user.organization_id,
     organization_slug: org?.slug ?? null,
     display_name: user.display_name,

@@ -75,7 +75,9 @@ p { margin: 0; }
   width: 28px; height: 28px; border-radius: 50%; background: var(--accent); display: flex;
   align-items: center; justify-content: center; font-size: 12px; font-weight: 700;
 }
-.banner .user-chip .u-name { font-size: 13px; font-weight: 600; }
+.banner .user-chip .u-name { font-size: 13px; font-weight: 600; line-height: 1.2; }
+.banner .user-chip .u-meta { display: flex; flex-direction: column; line-height: 1.2; }
+.banner .user-chip .u-school { font-size: 11px; color: rgba(255,255,255,0.72); }
 
 /* Body layout */
 .body-flex { display: flex; flex: 1; min-height: 0; }
