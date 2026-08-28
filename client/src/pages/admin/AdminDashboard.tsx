@@ -21,6 +21,8 @@ export default function AdminDashboard() {
   const [schools, setSchools] = useState<School[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
+  // Which columns the selected form's grid should show (empty => all, from View Columns config).
+  const [viewKeys, setViewKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -67,17 +69,25 @@ export default function AdminDashboard() {
 
     if (formId) {
       // Use the export preview endpoint as the spreadsheet source so the grid
-      // exactly matches what's exportable.
-      api
-        .exportPreview({ form_id: formId, school_id: schoolId, status })
-        .then((p) => {
-          if (!cancelled) setPreview(p);
+      // exactly matches what's exportable. Load the per-form View Columns config
+      // to decide which columns to actually render on-screen.
+      Promise.all([
+        api.exportPreview({ form_id: formId, school_id: schoolId, status }),
+        api.getFormViewColumns(formId),
+      ])
+        .then(([p, vc]) => {
+          if (cancelled) return;
+          setPreview(p);
+          setViewKeys(vc.viewKeys);
         })
         .catch(() => {
-          if (!cancelled) setPreview(null);
+          if (cancelled) return;
+          setPreview(null);
+          setViewKeys([]);
         });
     } else {
       setPreview(null);
+      setViewKeys([]);
       api
         .listSubmissions({ school_id: schoolId, status, from, to })
         .then((s) => {
@@ -207,6 +217,7 @@ export default function AdminDashboard() {
           columns={preview.columns}
           rows={preview.rows}
           selectedForm={selectedForm?.title || ""}
+          viewKeys={viewKeys}
           onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
         />
       ) : (
@@ -236,14 +247,23 @@ function SpreadsheetGrid({
   columns,
   rows,
   selectedForm,
+  viewKeys,
   onOpen,
 }: {
   columns: ExportPreview["columns"];
   rows: Record<string, unknown>[];
   selectedForm: string;
+  viewKeys: string[];
   onOpen: (publicId: string) => void;
 }) {
   const [selected, setSelected] = useState<Set<string>>(new Set());
+
+  // Only render the columns the admin opted into via View Columns config.
+  // When viewKeys is empty (form not configured), show all columns.
+  const visibleColumns =
+    viewKeys.length > 0
+      ? columns.filter((c) => viewKeys.includes(c.key))
+      : columns;
 
   const toggle = (publicId: string) =>
     setSelected((prev) => {
@@ -275,7 +295,7 @@ function SpreadsheetGrid({
                 onChange={toggleAll}
               />
             </th>
-            {columns.map((c) => (
+            {visibleColumns.map((c) => (
               <th key={c.key}>{c.label}</th>
             ))}
             <th>Status</th>
@@ -298,7 +318,7 @@ function SpreadsheetGrid({
                   onClick={(e) => e.stopPropagation()}
                 />
               </td>
-              {columns.map((c) => (
+              {visibleColumns.map((c) => (
                 <td key={c.key}>{formatCell(r[c.key])}</td>
               ))}
               <td>
@@ -313,9 +333,7 @@ function SpreadsheetGrid({
         <span>
           {rows.length} result{rows.length !== 1 ? "s" : ""}
         </span>
-        <span className="muted-note">
-          {selected.size} selected · {selectedForm}
-        </span>
+        <span className="muted-note">{selectedForm}</span>
       </div>
     </div>
   );

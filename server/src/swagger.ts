@@ -167,6 +167,20 @@ export function buildSwaggerSpec() {
             staff_only: { type: "boolean" },
           },
         },
+        ViewColumnsConfig: {
+          type: "object",
+          properties: {
+            columns: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ExportColumn" },
+            },
+            viewKeys: {
+              type: "array",
+              description: "The subset of column keys currently displayed in the Submissions grid. When unconfigured, this equals all column keys.",
+              items: { type: "string" },
+            },
+          },
+        },
       },
     },
     paths: {
@@ -591,6 +605,59 @@ export function buildSwaggerSpec() {
             },
             "404": { description: "Not found" },
             "400": { description: "Form is not accepting submissions" },
+          },
+        },
+      },
+      "/api/forms/{id}/columns": {
+        get: {
+          tags: ["Forms"],
+          summary: "Get a form's view-columns config (admin)",
+          description: "Returns the full column list plus the subset of `viewKeys` currently shown in the Submissions grid. This is independent of Export — Export always uses all columns.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK — columns + viewKeys",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ViewColumnsConfig" } },
+              },
+            },
+            "404": { description: "Form not found" },
+          },
+        },
+        put: {
+          tags: ["Forms"],
+          summary: "Save a form's view-columns config (admin)",
+          description: "`view_keys` must be an array of `field_N` strings. Stored per-form and only affects the Submissions grid display — Export is unchanged.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["view_keys"],
+                  properties: {
+                    view_keys: {
+                      type: "array",
+                      description: "e.g. [\"field_1\", \"field_3\"]",
+                      items: { type: "string" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK — updated columns + viewKeys",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ViewColumnsConfig" } },
+              },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Form not found" },
           },
         },
       },

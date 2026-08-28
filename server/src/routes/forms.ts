@@ -6,6 +6,8 @@ import {
   updateForm,
   execute,
   getOrganizationBySlug,
+  getViewColumnsConfig,
+  setViewColumns,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { createFormSchema, updateFormSchema } from "../schemas.js";
@@ -173,6 +175,45 @@ formsRouter.patch("/:id/status", requireAuth, requireRoles("admin"), async (req,
       { id, status }
     );
     res.json(await getFormWithFields(id, req.user!.organization_id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: get a form's view-columns config (which columns the Submissions grid
+// shows). This is separate from Export — Export columns are always all fields.
+// Returns the full column list plus the subset of keys currently displayed.
+formsRouter.get("/:id/columns", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await getFormWithFields(id, req.user!.organization_id);
+    if (!existing) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    res.json(await getViewColumnsConfig(id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: save a form's view-columns config. body.view_keys must be an array of
+// `field_N` strings. We only persist the config — Export is left untouched.
+formsRouter.put("/:id/columns", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await getFormWithFields(id, req.user!.organization_id);
+    if (!existing) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const viewKeys = req.body?.view_keys;
+    if (!Array.isArray(viewKeys) || viewKeys.some((k) => typeof k !== "string" || !/^field_\d+$/.test(k))) {
+      res.status(400).json({ error: "view_keys must be an array of field_N strings" });
+      return;
+    }
+    await setViewColumns(id, viewKeys);
+    res.json(await getViewColumnsConfig(id));
   } catch (err) {
     next(err);
   }

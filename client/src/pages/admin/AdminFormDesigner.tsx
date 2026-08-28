@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import type { FormField, FieldType, FormWithFields } from "../../types";
+import type { FormField, FieldType, FormWithFields, ViewColumnsConfig } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
 
@@ -34,6 +34,12 @@ export default function AdminFormDesigner() {
   // Editor state for the field list
   const [fields, setFields] = useState<FormField[]>([]);
 
+  // View-columns config (which columns the admin Submissions grid shows).
+  const [viewColumns, setViewColumns] = useState<ViewColumnsConfig | null>(null);
+  const [viewKeys, setViewKeys] = useState<string[]>([]);
+  const [savingView, setSavingView] = useState(false);
+  const [viewMessage, setViewMessage] = useState("");
+
   // Editable form-level metadata (title / description)
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
@@ -53,6 +59,20 @@ export default function AdminFormDesigner() {
       .finally(() => {
         if (!cancelled) setLoading(false);
       });
+
+    // Load the saved view-columns config alongside the form.
+    Promise.all([api.getFormViewColumns(formId)])
+      .then(([vc]) => {
+        if (cancelled) return;
+        setViewColumns(vc);
+        setViewKeys(vc.viewKeys);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setViewColumns(null);
+        setViewKeys([]);
+      });
+
     return () => {
       cancelled = true;
     };
@@ -152,6 +172,27 @@ export default function AdminFormDesigner() {
       setForm(updated);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not update status");
+    }
+  };
+
+  // Toggle a single column on/off in the view-columns selection.
+  const toggleViewKey = (key: string) =>
+    setViewKeys((prev) =>
+      prev.includes(key) ? prev.filter((k) => k !== key) : [...prev, key]
+    );
+
+  const handleSaveViewColumns = async () => {
+    setSavingView(true);
+    setViewMessage("");
+    try {
+      const updated = await api.setFormViewColumns(formId, viewKeys);
+      setViewColumns(updated);
+      setViewKeys(updated.viewKeys);
+      setViewMessage(updated.viewKeys.length ? "View columns saved." : "All columns will be shown.");
+    } catch (err) {
+      setViewMessage(err instanceof ApiError ? err.message : "Could not save view columns");
+    } finally {
+      setSavingView(false);
     }
   };
 
@@ -321,6 +362,70 @@ export default function AdminFormDesigner() {
             </svg>
             Add {activeTab === "staff" ? "Staff Only" : "Form"} Field
           </button>
+        </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <h3>View Columns</h3>
+          <span className="sub">
+            Choose which columns appear in the Submissions grid. Export is unchanged and always includes every field.
+          </span>
+        </div>
+        <div className="card-body">
+          <div className="sub" style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+            {viewColumns && viewColumns.columns.length === 0
+              ? "This form has no fields yet."
+              : "Unchecking every column shows all columns."}
+          </div>
+          {viewColumns && viewColumns.columns.length > 0 ? (
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(220px, 1fr))", gap: 8 }}>
+              {viewColumns.columns.map((c) => (
+                <label
+                  key={c.key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    fontSize: 13,
+                    cursor: "pointer",
+                    padding: "8px 10px",
+                    border: "1px solid var(--border)",
+                    borderRadius: "var(--radius)",
+                    background: "var(--panel-bg)",
+                  }}
+                >
+                  <input
+                    type="checkbox"
+                    checked={viewKeys.includes(c.key)}
+                    onChange={() => toggleViewKey(c.key)}
+                  />
+                  <span style={{ flex: 1 }}>{c.label}</span>
+                  {c.staff_only && (
+                    <span className="badge badge-orange" style={{ fontSize: 10 }}>
+                      Staff
+                    </span>
+                  )}
+                </label>
+              ))}
+            </div>
+          ) : (
+            <div className="empty-state" style={{ padding: "16px" }}>
+              Add fields above to configure which columns display.
+            </div>
+          )}
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginTop: 14 }}>
+            <button
+              className="secondary-button"
+              onClick={handleSaveViewColumns}
+              disabled={savingView || !viewColumns || viewColumns.columns.length === 0}
+            >
+              {savingView ? "Saving..." : "Save View Columns"}
+            </button>
+            {viewMessage && (
+              <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{viewMessage}</span>
+            )}
+          </div>
         </div>
       </div>
 

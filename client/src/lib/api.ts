@@ -18,6 +18,7 @@ import type {
   SubmissionRow,
   SubmissionStatus,
   User,
+  ViewColumnsConfig,
 } from "../types";
 
 // Use API base from env or dev proxy (vite proxy sends /api to backend).
@@ -354,6 +355,20 @@ export const api = {
       method: "PATCH",
       auth: true,
       body: { status },
+    });
+  },
+
+  // View-columns config (which columns the admin Submissions grid shows).
+  // Independent of Export — Export always uses all columns.
+  async getFormViewColumns(id: number): Promise<ViewColumnsConfig> {
+    return request<ViewColumnsConfig>(`/api/forms/${id}/columns`, { auth: true });
+  },
+
+  async setFormViewColumns(id: number, viewKeys: string[]): Promise<ViewColumnsConfig> {
+    return request<ViewColumnsConfig>(`/api/forms/${id}/columns`, {
+      method: "PUT",
+      auth: true,
+      body: { view_keys: viewKeys },
     });
   },
 

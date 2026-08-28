@@ -345,7 +345,7 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
-            f.status, f.created_at, f.updated_at
+            f.status, f.view_columns, f.created_at, f.updated_at
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
   );
@@ -362,7 +362,7 @@ export async function getForm(id: number, organizationId?: number | null): Promi
     params.organizationId = organizationId;
   }
   const rows = await execute<Form>(
-    `SELECT id, title, description, school_id, designer_id, organization_id, status, created_at, updated_at
+    `SELECT id, title, description, school_id, designer_id, organization_id, status, view_columns, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -1012,4 +1012,74 @@ export async function getExportColumns(formId: number): Promise<ExportColumn[]> 
     label: r.label,
     staff_only: Boolean(r.staff_only),
   }));
+}
+
+// -----------------------------------------------------------------------------
+// View Columns config (admin Submissions grid display, per-form).
+// Deliberately separate from getExportColumns — the Export feature must stay
+// unchanged. This config only controls which columns the on-screen grid shows.
+// -----------------------------------------------------------------------------
+export interface ViewColumnsConfig {
+  columns: ExportColumn[];
+  viewKeys: string[];
+}
+
+// Read the form's field columns + the stored view_columns preference. When
+// view_columns is unset (NULL) or empty, returns all columns so the grid falls
+// back to showing everything. Configured keys that no longer match an existing
+// field (deleted fields) are dropped so the config never references ghosts.
+export async function getViewColumnsConfig(formId: number): Promise<ViewColumnsConfig> {
+  const columns = await getExportColumns(formId);
+  const rows = await execute<{ view_columns: string | null }>(
+    `SELECT view_columns FROM dbo.forms WHERE id = @formId`,
+    { formId }
+  );
+  const raw = rows[0]?.view_columns ?? null;
+  if (!raw) {
+    return { columns, viewKeys: columns.map((c) => c.key) };
+  }
+  let configured: unknown[] = [];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    configured = Array.isArray(parsed) ? parsed : [];
+  } catch {
+    configured = [];
+  }
+  // Normalize each stored entry to its `field_N` key. The stored array may
+  // contain numeric ids (e.g. 10 -> field_10, as written by setViewColumns) or
+  // already-normalized `field_N` strings. Unparseable/ghost entries are skipped.
+  // If every configured entry was a ghost, fall back to all columns so the grid
+  // never renders empty.
+  const existing = new Set(columns.map((c) => c.key));
+  const toKey = (k: unknown): string | null => {
+    if (typeof k === "number" && Number.isInteger(k) && k >= 1) return `field_${k}`;
+    if (typeof k === "string") {
+      const m = k.match(/^field_(\d+)$/);
+      if (m) return `field_${m[1]}`;
+      if (/^\d+$/.test(k)) return `field_${Number(k)}`;
+    }
+    return null;
+  };
+  const viewKeys = configured
+    .map(toKey)
+    .filter((k): k is string => k !== null && existing.has(k));
+  if (viewKeys.length === 0) {
+    return { columns, viewKeys: columns.map((c) => c.key) };
+  }
+  return { columns, viewKeys };
+}
+
+// Persist the admin's column selection. viewKeys are `field_N` strings; stored
+// as a JSON array of the numeric ids (e.g. [1,3,4]). An empty array collapses
+// to NULL so the grid falls back to showing all columns.
+export async function setViewColumns(formId: number, viewKeys: string[]): Promise<void> {
+  const ids = viewKeys
+    .map((k) => k.match(/^field_(\d+)$/))
+    .filter((m): m is RegExpMatchArray => Boolean(m))
+    .map((m) => Number(m[1]));
+  const value = ids.length ? JSON.stringify(ids) : null;
+  await execute(
+    `UPDATE dbo.forms SET view_columns = @value, updated_at = SYSUTCDATETIME() WHERE id = @formId`,
+    { value, formId }
+  );
 }

@@ -69,6 +69,7 @@ export interface Form {
   designer_id: number | null;
   organization_id: number;
   status: FormStatus;
+  view_columns: string | null;
   created_at: Date;
   updated_at: Date;
 }
@@ -267,6 +268,13 @@ export const DDL_STATEMENTS: string[] = [
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_organization')
      CREATE INDEX IX_forms_organization ON dbo.forms(organization_id);`,
+
+  // View Columns feature — per-form configuration of which columns the admin
+  // Submissions grid displays. NULL/empty => show all columns (backward
+  // compatible); non-empty => JSON array of field ids, e.g. [1,3,4].
+  // This is a separate batch so SQL Server binds the ALTER before any index.
+  `IF COL_LENGTH('dbo.forms', 'view_columns') IS NULL
+     ALTER TABLE dbo.forms ADD view_columns NVARCHAR(MAX) NULL;`,
 
   `IF OBJECT_ID('dbo.form_fields', 'U') IS NULL
    CREATE TABLE dbo.form_fields (

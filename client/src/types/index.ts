@@ -194,3 +194,11 @@ export interface ExportPreview {
   rows: Record<string, unknown>[];
   total: number;
 }
+
+// Per-form config returned by GET/PUT /api/forms/:id/columns — which subset of
+// columns the admin Submissions grid shows. `viewKeys` defaults to all keys when
+// the form has no saved config. Export is separate and always shows all columns.
+export interface ViewColumnsConfig {
+  columns: ExportColumn[];
+  viewKeys: string[];
+}
