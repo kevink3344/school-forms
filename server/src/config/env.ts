@@ -83,7 +83,7 @@ export const env = {
 
   rateLimit: {
     windowMs: int("RATE_LIMIT_WINDOW_MS", 900000),
-    max: int("RATE_LIMIT_MAX", 100),
+    max: int("RATE_LIMIT_MAX", 300),
   },
 
   // School import: a public ArcGIS GeoJSON feed + the table columns to render.
