@@ -160,12 +160,12 @@ export default function AdminForms() {
             <tbody>
               {forms.map((f) => (
                 <tr key={f.id}>
-                  <td className="cell-strong">{f.title}</td>
-                  <td>
+                  <td className="cell-strong" data-label="Title">{f.title}</td>
+                  <td data-label="Status">
                     <FormStatusBadge status={f.status} />
                   </td>
-                  <td>{f.id ? "—" : "—"}</td>
-                  <td className="cell-mono">{formatDate(f.created_at)}</td>
+                  <td data-label="Fields">{f.id ? "—" : "—"}</td>
+                  <td className="cell-mono" data-label="Created">{formatDate(f.created_at)}</td>
                   <td>
                     <div style={{ display: "flex", gap: 8 }}>
                       <button className="badge-button" onClick={() => navigate(`/admin/forms/${f.id}`)}>

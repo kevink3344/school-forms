@@ -529,7 +529,7 @@ function FieldRow({
         </button>
       </div>
 
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+      <div className="field-edit-grid">
         <div className="filter-group" style={{ minWidth: 0 }}>
           <label>Label</label>
           <input

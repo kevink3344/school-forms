@@ -181,7 +181,7 @@ export default function StaffQueue() {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.public_id}>
-                  <td className="cell-strong">
+                  <td className="cell-strong" data-label="Student / Form">
                     <a
                       className="link-name"
                       href={`/staff/${s.public_id}`}
@@ -196,11 +196,11 @@ export default function StaffQueue() {
                       {s.form_name}
                     </span>
                   </td>
-                  <td className="cell-mono">{shortId(s.public_id)}</td>
-                  <td>
+                  <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
+                  <td data-label="Status">
                     <StatusBadge status={s.status} />
                   </td>
-                  <td className="cell-mono">{formatDate(s.submitted_at)}</td>
+                  <td className="cell-mono" data-label="Submitted">{formatDate(s.submitted_at)}</td>
                   <td>
                     <button className="badge-button" onClick={() => openSubmission(s.public_id)}>
                       Review

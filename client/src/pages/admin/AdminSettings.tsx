@@ -347,14 +347,14 @@ export default function AdminSettings() {
                   const badge = roleBadge(u.role);
                   return (
                     <tr key={u.id}>
-                      <td className="cell-strong">{u.display_name}</td>
-                      <td>{u.email}</td>
-                      <td>
+                      <td className="cell-strong" data-label="Name">{u.display_name}</td>
+                      <td data-label="Email">{u.email}</td>
+                      <td data-label="Role">
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       </td>
-                      <td>{u.organization_name ?? "—"}</td>
-                      <td>{u.school_name ?? "—"}</td>
-                      <td>
+                      <td data-label="Organization">{u.organization_name ?? "—"}</td>
+                      <td data-label="School">{u.school_name ?? "—"}</td>
+                      <td data-label="Status">
                         <span className={`badge ${u.active ? "badge-green" : "badge-gray"}`}>
                           {u.active ? "Active" : "Inactive"}
                         </span>
@@ -498,9 +498,9 @@ export default function AdminSettings() {
               ) : (
                 orgs.map((o) => (
                   <tr key={o.id}>
-                    <td className="cell-strong">{o.name}</td>
-                    <td className="cell-mono">{o.slug}</td>
-                    <td>{o.member_count} user{o.member_count === 1 ? "" : "s"}</td>
+                    <td className="cell-strong" data-label="Name">{o.name}</td>
+                    <td className="cell-mono" data-label="Slug">{o.slug}</td>
+                    <td data-label="Members">{o.member_count} user{o.member_count === 1 ? "" : "s"}</td>
                   </tr>
                 ))
               )}

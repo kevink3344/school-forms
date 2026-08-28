@@ -255,6 +255,9 @@ p { margin: 0; }
 .filter-spacer { flex: 1; }
 .filter-bar .clear { font-size: 12px; color: var(--accent); background: none; border: none; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; padding: 4px; }
 
+/* Form designer field editor: Label/Type pair (collapses to 1 col on mobile) */
+.field-edit-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+
 /* Spreadsheet / table */
 .grid-wrap { border: 1px solid var(--border); border-radius: var(--radius); background: var(--card-bg); overflow-x: auto; }
 table.grid { width: 100%; min-width: 100%; border-collapse: collapse; font-size: 13px; }
@@ -452,9 +455,284 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
 .icon-btn:hover { border-color: var(--accent); color: var(--accent); }
 .icon-btn.danger:hover { border-color: var(--danger, #d13438); color: var(--danger, #d13438); }
 
-/* Responsive: default to card view on < 768px */
+/* Submission detail: status track + layout */
+.status-track { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.detail-layout > section { min-width: 0; }
+
+/* ===== Responsive: default to card view on < 768px ===== */
 @media (max-width: 768px) {
   .view-mode-table { display: none; }
   .view-mode-cards { display: block; }
   .adhoc-composer .composer-grid { grid-template-columns: 1fr; }
 }
+
+/* =========================================================================
+   Mobile-first (max-width: 768px)
+   ========================================================================= */
+@media (max-width: 768px) {
+  /* Shell: turn the fixed sidebar into an off-canvas drawer */
+  .banner {
+    padding: 0 12px;
+    gap: 8px;
+    height: 52px;
+  }
+  .banner .logo {
+    gap: 8px;
+    font-size: 14px;
+  }
+  .banner .logo .logo-badge {
+    width: 26px;
+    height: 26px;
+    font-size: 12px;
+  }
+  .banner .actions {
+    gap: 6px;
+  }
+  .banner .user-chip {
+    padding: 4px 8px 4px 4px;
+  }
+  .banner .user-chip .u-school,
+  .banner .user-chip .u-name {
+    display: none;
+  }
+  .banner .user-chip {
+    background: transparent;
+    border: none;
+    padding: 0;
+  }
+  .banner .user-chip .avatar {
+    width: 34px;
+    height: 34px;
+    font-size: 14px;
+  }
+
+  .body-flex {
+    position: relative;
+  }
+
+  /* Sidebar as a slide-in drawer (desktop always-visible stays as-is) */
+  .sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    width: min(75vw, 280px);
+    height: 100vh;
+    z-index: 200;
+    transform: translateX(-100%);
+    transition: transform 0.25s ease;
+    overflow-y: auto;
+    padding-top: 16px;
+  }
+  .sidebar.mobile-open {
+    transform: translateX(0);
+    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
+  }
+  /* On mobile the sidebar is always full-width; ignore the collapsed pill state */
+  .sidebar.collapsed {
+    width: min(75vw, 280px);
+    padding: 16px 10px 16px;
+  }
+  .sidebar.collapsed .sidebar-link {
+    justify-content: flex-start;
+    padding: 12px;
+  }
+  .sidebar.collapsed .sidebar-link .s-label,
+  .sidebar.collapsed .nav-label {
+    display: revert;
+  }
+
+  /* Dimmed backdrop behind the open drawer */
+  .sidebar-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.45);
+    z-index: 199;
+    opacity: 0;
+    visibility: hidden;
+    transition: opacity 0.2s ease;
+  }
+  .sidebar-overlay.open {
+    opacity: 1;
+    visibility: visible;
+  }
+
+  .main {
+    padding: 16px 14px;
+  }
+
+  /* Page head: stack title and actions */
+  .page-head {
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 14px;
+  }
+  .page-head .head-actions {
+    margin-left: 0;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .page-head .head-actions > * {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+  .page-head .title-block h1 {
+    font-size: 20px;
+  }
+
+  /* Filter bar: full-width fields */
+  .filter-bar {
+    padding: 12px;
+    gap: 10px;
+  }
+  .filter-group {
+    min-width: 0;
+    width: 100%;
+    flex: 1 1 100%;
+  }
+
+  /* Tables → stacked cards on mobile (uses data-label on each td) */
+  .grid-wrap {
+    overflow-x: visible;
+  }
+  table.grid {
+    display: block;
+    width: 100% !important;
+    min-width: 0 !important;
+    border: none;
+    background: transparent;
+  }
+  table.grid thead {
+    display: none;
+  }
+  table.grid tbody {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 12px;
+  }
+  table.grid tbody tr {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow-card);
+    padding: 12px 14px;
+  }
+  table.grid tbody td {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    padding: 2px 0 !important;
+    border: none !important;
+    text-align: right;
+  }
+  table.grid tbody td::before {
+    content: attr(data-label);
+    flex: 0 0 auto;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--text-muted);
+    text-align: left;
+    line-height: 1.5;
+  }
+  /* Cells without a data-label (e.g. action rows) take the full width */
+  table.grid tbody td:not([data-label]) {
+    justify-content: flex-start;
+    text-align: left;
+    margin-top: 6px;
+    padding-top: 10px !important;
+    border-top: 1px solid var(--border) !important;
+  }
+  table.grid tbody td:not([data-label])::before {
+    content: none;
+  }
+
+  /* Cards */
+  .card-head {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+  .card-head h3 {
+    font-size: 14px;
+  }
+  .card-body {
+    padding: 14px;
+  }
+  .card-foot {
+    flex-wrap: wrap;
+  }
+
+  /* Form grid → single column (already handled by existing rule, keep here) */
+  .form-grid {
+    grid-template-columns: 1fr;
+  }
+  .field-edit-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Modal / drawer: full-screen-ish */
+  .modal {
+    width: 100vw;
+    max-height: 100vh;
+    border-radius: 0;
+  }
+  .modal-head,
+  .modal-foot {
+    padding: 14px 16px;
+  }
+  .modal-body {
+    padding: 16px;
+  }
+  .drawer {
+    width: 100vw;
+  }
+  .drawer-head,
+  .drawer-foot {
+    padding: 14px 16px;
+  }
+  .drawer-body {
+    padding: 16px;
+  }
+
+  /* Submission answers: stack label above value */
+  .field {
+    grid-template-columns: 1fr;
+    gap: 2px;
+  }
+  .field .f-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-weight: 600;
+  }
+
+  /* Settings login-mode tiles stack */
+  .collapse-body {
+    padding: 14px;
+  }
+
+  /* Status track buttons wrap */
+  .status-track {
+    flex-wrap: wrap;
+  }
+
+  /* Buttons: allow full-width in card foots/actions for thumb reach */
+  .modal-foot .primary-button,
+  .modal-foot .secondary-button {
+    flex: 1;
+    justify-content: center;
+  }
+  .field-actions .primary-button {
+    width: 100%;
+    justify-content: center;
+  }
+}
+

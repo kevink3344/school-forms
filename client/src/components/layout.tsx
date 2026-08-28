@@ -1,5 +1,5 @@
-import { useState, type ReactNode } from "react";
-import { NavLink, Navigate, useNavigate } from "react-router-dom";
+import { useState, useEffect, type ReactNode } from "react";
+import { NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import type { Role } from "../types";
 
@@ -87,9 +87,32 @@ export function FormStatusBadge({ status }: { status: string }) {
 export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  // Desktop icon-only collapse.
   const [collapsed, setCollapsed] = useState(false);
+  // Mobile off-canvas drawer state.
+  const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Close the mobile drawer whenever the route changes.
+  useEffect(() => {
+    setMobileOpen(false);
+  }, [location.pathname]);
+
+  // Lock body scroll while the mobile drawer is open.
+  useEffect(() => {
+    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    return () => {
+      document.body.style.overflow = "";
+    };
+  }, [mobileOpen]);
+
+  const handleToggle = () => {
+    if (window.innerWidth < 768) setMobileOpen((o) => !o);
+    else setCollapsed((c) => !c);
+  };
 
   const handleLogout = async () => {
+    setMobileOpen(false);
     await logout();
     navigate("/login");
   };
@@ -97,14 +120,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <div className="app-shell">
       <header className="banner">
-        <div className="logo">
-          <div className="logo-badge">SF</div>
-          School Forms
-        </div>
         <button
           className="icon-button banner-toggle"
           title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={() => setCollapsed((c) => !c)}
+          onClick={handleToggle}
           aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
         >
           {collapsed ? (
@@ -114,13 +133,17 @@ export function AppShell({ children }: { children: ReactNode }) {
               <path d="m14 9 3 3-3 3" />
             </svg>
           ) : (
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-              <rect width="18" height="18" x="3" y="3" rx="2" />
-              <path d="M9 3v18" />
-              <path d="m16 15-3-3 3-3" />
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round">
+              <line x1="3" y1="6" x2="21" y2="6" />
+              <line x1="3" y1="12" x2="21" y2="12" />
+              <line x1="3" y1="18" x2="21" y2="18" />
             </svg>
           )}
         </button>
+        <div className="logo">
+          <div className="logo-badge">SF</div>
+          <span className="logo-text">School Forms</span>
+        </div>
         <div className="actions">
           {user && (
             <div className="user-chip">
@@ -142,11 +165,18 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <div className="body-flex">
-        <nav className={`sidebar${collapsed ? " collapsed" : ""}`}>
+        {/* Mobile drawer overlay */}
+        <div
+          className={`sidebar-overlay${mobileOpen ? " open" : ""}`}
+          onClick={() => setMobileOpen(false)}
+          aria-hidden="true"
+        />
+
+        <nav className={`sidebar${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`}>
           <div className="nav-label">{collapsed ? "" : "Menu"}</div>
           {user?.role === "admin" && (
             <>
-              <NavLink to="/admin" className="sidebar-link" end title={collapsed ? "Dashboard" : undefined}>
+              <NavLink to="/admin" className="sidebar-link" end title={collapsed ? "Dashboard" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <rect x="3" y="3" width="7" height="9" />
                   <rect x="14" y="3" width="7" height="5" />
@@ -155,7 +185,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </svg>
                 <span className="s-label">Dashboard</span>
               </NavLink>
-              <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined}>
+              <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
                   <polyline points="14 2 14 8 20 8" />
@@ -164,7 +194,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </svg>
                 <span className="s-label">Forms</span>
               </NavLink>
-              <NavLink to="/admin/schools" className="sidebar-link" title={collapsed ? "Schools" : undefined}>
+              <NavLink to="/admin/schools" className="sidebar-link" title={collapsed ? "Schools" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M3 21h18" />
                   <path d="M5 21V7l7-4 7 4v14" />
@@ -172,7 +202,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </svg>
                 <span className="s-label">Schools</span>
               </NavLink>
-              <NavLink to="/admin/settings" className="sidebar-link" title={collapsed ? "Settings" : undefined}>
+              <NavLink to="/admin/settings" className="sidebar-link" title={collapsed ? "Settings" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <circle cx="12" cy="12" r="3" />
                   <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z" />
@@ -183,7 +213,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           {user?.role === "staff" && (
             <>
-              <NavLink to="/staff" className="sidebar-link" end title={collapsed ? "Submissions" : undefined}>
+              <NavLink to="/staff" className="sidebar-link" end title={collapsed ? "Submissions" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" />
                 </svg>

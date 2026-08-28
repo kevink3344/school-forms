@@ -145,7 +145,7 @@ export default function LoginPage() {
   if (effectiveMode === null) {
     return (
       <Centered>
-        <div className="card" style={{ width: 400, padding: 32 }}>
+        <div className="card" style={{ width: "100%", maxWidth: 400, padding: 32 }}>
           <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
             Loading…
           </p>
@@ -156,7 +156,7 @@ export default function LoginPage() {
 
   return (
     <Centered>
-      <div className="card" style={{ width: 400, padding: 32, boxShadow: "var(--shadow-card)" }}>
+      <div className="card" style={{ width: "100%", maxWidth: 400, padding: 32, boxShadow: "var(--shadow-card)" }}>
         <div style={{ marginBottom: 6 }}>
           <p
             style={{
@@ -337,6 +337,8 @@ function Centered({ children }: { children: React.ReactNode }) {
         alignItems: "center",
         justifyContent: "center",
         background: "var(--app-bg)",
+        padding: 16,
+        boxSizing: "border-box",
       }}
     >
       {children}

@@ -1,7 +1,7 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import type { ExportPreview, Form, School, SubmissionRow } from "../../types";
+import type { Form, School, SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
 import { useAuth } from "../../context/AuthContext";
@@ -20,9 +20,6 @@ export default function AdminDashboard() {
   const [forms, setForms] = useState<Form[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
-  const [preview, setPreview] = useState<ExportPreview | null>(null);
-  // Which columns the selected form's grid should show (empty => all, from View Columns config).
-  const [viewKeys, setViewKeys] = useState<string[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
 
@@ -42,10 +39,6 @@ export default function AdminDashboard() {
         if (cancelled) return;
         setForms(f);
         setSchools(s);
-        // Default to first form so the spreadsheet & export preview work immediately
-        if (f.length > 0) {
-          setFilters((prev) => ({ ...prev, form_id: String(f[0].id) }));
-        }
       })
       .catch(() => {
         // ignore
@@ -58,54 +51,28 @@ export default function AdminDashboard() {
     };
   }, []);
 
-  // Load either the export preview grid (when a form is chosen) or the metadata list
+  // Load submissions, respecting all filters. Uses the same list endpoint as the
+  // staff queue so the grid is identical (student/form, id, status, submitted).
   useEffect(() => {
     let cancelled = false;
-    const formId = filters.form_id ? Number(filters.form_id) : undefined;
-    const schoolId = filters.school_id ? Number(filters.school_id) : undefined;
-    const status = filters.status || undefined;
-    const from = filters.from || undefined;
-    const to = filters.to || undefined;
-
-    if (formId) {
-      // Use the export preview endpoint as the spreadsheet source so the grid
-      // exactly matches what's exportable. Load the per-form View Columns config
-      // to decide which columns to actually render on-screen.
-      Promise.all([
-        api.exportPreview({ form_id: formId, school_id: schoolId, status }),
-        api.getFormViewColumns(formId),
-      ])
-        .then(([p, vc]) => {
-          if (cancelled) return;
-          setPreview(p);
-          setViewKeys(vc.viewKeys);
-        })
-        .catch(() => {
-          if (cancelled) return;
-          setPreview(null);
-          setViewKeys([]);
-        });
-    } else {
-      setPreview(null);
-      setViewKeys([]);
-      api
-        .listSubmissions({ school_id: schoolId, status, from, to })
-        .then((s) => {
-          if (!cancelled) setSubmissions(s);
-        })
-        .catch(() => {
-          if (!cancelled) setSubmissions([]);
-        });
-    }
+    api
+      .listSubmissions({
+        school_id: filters.school_id ? Number(filters.school_id) : undefined,
+        form_id: filters.form_id ? Number(filters.form_id) : undefined,
+        status: filters.status || undefined,
+        from: filters.from || undefined,
+        to: filters.to || undefined,
+      })
+      .then((s) => {
+        if (!cancelled) setSubmissions(s);
+      })
+      .catch(() => {
+        if (!cancelled) setSubmissions([]);
+      });
     return () => {
       cancelled = true;
     };
-  }, [filters.form_id, filters.school_id, filters.status, filters.from, filters.to]);
-
-  const selectedForm = useMemo(
-    () => forms.find((f) => String(f.id) === filters.form_id),
-    [forms, filters.form_id]
-  );
+  }, [filters.school_id, filters.form_id, filters.status, filters.from, filters.to]);
 
   const setFilter = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -118,9 +85,6 @@ export default function AdminDashboard() {
       from: "",
       to: "",
     }));
-
-  const schoolName = (id: number | null) =>
-    schools.find((s) => s.id === id)?.name || "—";
 
   return (
     <div>
@@ -212,18 +176,9 @@ export default function AdminDashboard() {
         <div className="loading-state">
           <div className="spinner" /> Loading submissions...
         </div>
-      ) : preview ? (
-        <SpreadsheetGrid
-          columns={preview.columns}
-          rows={preview.rows}
-          selectedForm={selectedForm?.title || ""}
-          viewKeys={viewKeys}
-          onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
-        />
       ) : (
-        <MetaGrid
+        <SubmissionsGrid
           rows={submissions}
-          schoolName={schoolName}
           onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
         />
       )}
@@ -241,145 +196,66 @@ export default function AdminDashboard() {
 }
 
 // ---------------------------------------------------------------------------
-// Spreadsheet grid for the selected form (uses export/preview columns + rows)
+// Submissions grid — shares the same layout/CSS as the staff "My School
+// Submissions" table: Student/Form, Submission ID, Status, Submitted, Actions.
 // ---------------------------------------------------------------------------
-function SpreadsheetGrid({
-  columns,
+function SubmissionsGrid({
   rows,
-  selectedForm,
-  viewKeys,
-  onOpen,
-}: {
-  columns: ExportPreview["columns"];
-  rows: Record<string, unknown>[];
-  selectedForm: string;
-  viewKeys: string[];
-  onOpen: (publicId: string) => void;
-}) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-
-  // Only render the columns the admin opted into via View Columns config.
-  // When viewKeys is empty (form not configured), show all columns.
-  const visibleColumns =
-    viewKeys.length > 0
-      ? columns.filter((c) => viewKeys.includes(c.key))
-      : columns;
-
-  const toggle = (publicId: string) =>
-    setSelected((prev) => {
-      const next = new Set(prev);
-      if (next.has(publicId)) next.delete(publicId);
-      else next.add(publicId);
-      return next;
-    });
-
-  const toggleAll = () => {
-    if (selected.size === rows.length) setSelected(new Set());
-    else setSelected(new Set(rows.map((r) => String(r.submission_public_id))));
-  };
-
-  if (!rows.length) {
-    return <div className="empty-state">No submissions for the selected filters.</div>;
-  }
-
-  return (
-    <div className="grid-wrap">
-      <table className="grid">
-        <thead>
-          <tr>
-            <th className="col-check">
-              <input
-                type="checkbox"
-                className="row-check"
-                checked={selected.size === rows.length && rows.length > 0}
-                onChange={toggleAll}
-              />
-            </th>
-            {visibleColumns.map((c) => (
-              <th key={c.key}>{c.label}</th>
-            ))}
-            <th>Status</th>
-            <th>Submitted</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((r) => (
-            <tr
-              key={String(r.submission_public_id)}
-              className="grid-row"
-              onClick={() => onOpen(String(r.submission_public_id))}
-            >
-              <td className="col-check">
-                <input
-                  type="checkbox"
-                  className="row-check"
-                  checked={selected.has(String(r.submission_public_id))}
-                  onChange={() => toggle(String(r.submission_public_id))}
-                  onClick={(e) => e.stopPropagation()}
-                />
-              </td>
-              {visibleColumns.map((c) => (
-                <td key={c.key}>{formatCell(r[c.key])}</td>
-              ))}
-              <td>
-                <StatusBadge status={String(r.status || "submitted")} />
-              </td>
-              <td className="cell-mono">{formatDate(r.submitted_at)}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-      <div className="grid-footer">
-        <span>
-          {rows.length} result{rows.length !== 1 ? "s" : ""}
-        </span>
-        <span className="muted-note">{selectedForm}</span>
-      </div>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Metadata-only grid (used when "All forms" is selected — no column preview)
-// ---------------------------------------------------------------------------
-function MetaGrid({
-  rows,
-  schoolName,
   onOpen,
 }: {
   rows: SubmissionRow[];
-  schoolName: (id: number | null) => string;
   onOpen: (publicId: string) => void;
 }) {
   if (!rows.length) {
     return <div className="empty-state">No submissions for the selected filters.</div>;
   }
+
   return (
-    <div className="grid-wrap">
-      <table className="grid">
+    <div className="card">
+      <div className="card-head">
+        <h3>Submissions</h3>
+        <span className="sub" style={{ marginLeft: "auto" }}>
+          {rows.length} result{rows.length !== 1 ? "s" : ""}
+        </span>
+      </div>
+      <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
+            <th>Student / Form</th>
             <th>Submission ID</th>
-            <th>Form</th>
-            <th>School</th>
             <th>Status</th>
             <th>Submitted</th>
+            <th style={{ width: 120 }}>Actions</th>
           </tr>
         </thead>
         <tbody>
           {rows.map((s) => (
-            <tr
-              key={s.public_id}
-              className="grid-row"
-              onClick={() => onOpen(s.public_id)}
-            >
-              <td className="cell-mono">{s.public_id}</td>
-              <td className="cell-strong">{s.form_name}</td>
-              <td>{schoolName(s.school_id)}</td>
-              <td>
+            <tr key={s.public_id}>
+              <td className="cell-strong" style={{ whiteSpace: "nowrap" }} data-label="Student / Form">
+                <a
+                  className="link-name"
+                  href={`/admin/submissions/${s.public_id}`}
+                  onClick={(e) => {
+                    e.preventDefault();
+                    onOpen(s.public_id);
+                  }}
+                >
+                  {s.student_name || "Unnamed submission"}
+                </a>
+                <span className="cell-mono" style={{ marginLeft: 8, whiteSpace: "nowrap" }}>
+                  {s.form_name}
+                </span>
+              </td>
+              <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
+              <td data-label="Status">
                 <StatusBadge status={s.status} />
               </td>
-              <td className="cell-mono">{formatDate(s.submitted_at)}</td>
+              <td className="cell-mono" data-label="Submitted">{formatDate(s.submitted_at)}</td>
+              <td>
+                <button className="badge-button" onClick={() => onOpen(s.public_id)}>
+                  Review
+                </button>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -391,16 +267,20 @@ function MetaGrid({
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-function formatCell(v: unknown): ReactNode {
-  if (v === null || v === undefined || v === "") return <span style={{ color: "var(--text-muted)" }}>—</span>;
-  if (Array.isArray(v)) return v.join(", ");
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
+function shortId(id: string): string {
+  if (id.length <= 10) return id;
+  return `${id.slice(0, 8)}…`;
 }
 
-function formatDate(v: unknown): string {
+function formatDate(v: string | null): string {
   if (!v) return "—";
-  const d = new Date(String(v));
-  if (Number.isNaN(d.getTime())) return String(v);
-  return d.toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" });
+  const d = new Date(v);
+  if (Number.isNaN(d.getTime())) return v;
+  return d.toLocaleString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "numeric",
+    minute: "2-digit",
+  });
 }

@@ -133,7 +133,7 @@ export default function AdminSchools() {
                 rows.map((school) => (
                   <tr key={school.id}>
                     {(columns.length ? columns : ["Name"]).map((label) => (
-                      <td key={label}>{valueFor(school, label)}</td>
+                      <td key={label} data-label={label}>{valueFor(school, label)}</td>
                     ))}
                   </tr>
                 ))

@@ -71,11 +71,13 @@ export default function RegisterPage() {
         alignItems: "center",
         justifyContent: "center",
         background: "var(--app-bg)",
+        padding: 16,
+        boxSizing: "border-box",
       }}
     >
       <div
         className="card"
-        style={{ width: 440, padding: 32, boxShadow: "var(--shadow-card)" }}
+        style={{ width: "100%", maxWidth: 440, padding: 32, boxShadow: "var(--shadow-card)" }}
       >
         <div style={{ marginBottom: 8 }}>
           <h1 style={{ fontSize: 22, fontWeight: 700 }}>Staff Registration</h1>
