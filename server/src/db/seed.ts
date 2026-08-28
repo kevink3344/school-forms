@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { initDb, getPool } from "./pool.js";
-import { newPublicId } from "./schema.js";
+import { formatSubmissionPublicId } from "./schema.js";
 import { env } from "../config/env.js";
 
 /**
@@ -53,9 +53,9 @@ async function seed() {
     .input("orgId", orgId)
     .query(
       `IF NOT EXISTS (SELECT 1 FROM dbo.forms WHERE title = N'CDM')
-         INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status)
-         VALUES (N'CDM', N'Child Development Monitor form (reference)', @schoolId, NULL, @orgId, 'published');
-       SELECT id FROM dbo.forms WHERE title = N'CDM';`
+         INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code)
+         VALUES (N'CDM', N'Child Development Monitor form (reference)', @schoolId, NULL, @orgId, 'published', 'CDM');
+       SELECT id, code FROM dbo.forms WHERE title = N'CDM';`
     );
   const FORM_ID = formExists.recordset[0].id as number;
 
@@ -87,7 +87,10 @@ async function seed() {
   }
 
   // 5. Reference submission (from plan) — Johnny Smith
-  const PUBLIC_ID = "7bea2443-a5bb-4e40-a5c2-95034718fdd3";
+  // The reference row uses the new incremental id format `CDM-00001`, with the
+  // numeric portion stored in submission_seq so the per-form counter continues
+  // from the correct value for subsequent (real) submissions.
+  const PUBLIC_ID = "CDM-00001";
   const submissionExists = await pool.request()
     .input("publicId", PUBLIC_ID)
     .query(`SELECT id FROM dbo.submissions WHERE public_id = @publicId`);
@@ -98,11 +101,18 @@ async function seed() {
       .input("schoolId", school.id)
       .input("orgId", orgId)
       .query(
-        `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status)
+        `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq)
          OUTPUT INSERTED.id
-         VALUES (@publicId, @formId, @schoolId, @orgId, 'submitted');`
+         VALUES (@publicId, @formId, @schoolId, @orgId, 'submitted', 1);`
       );
     const submissionId = sub.recordset[0].id;
+    // Ensure the form counter accounts for the seeded reference submission so the
+    // next real submission for this form allocates `CDM-00002`.
+    await pool.request()
+      .input("formId", FORM_ID)
+      .query(
+        `UPDATE dbo.forms SET submission_seq = submission_seq + 1 WHERE id = @formId AND submission_seq < 1;`
+      );
 
     // Map field labels to their ids
     const fieldRows = await pool.request()
@@ -136,7 +146,7 @@ async function seed() {
 
   // eslint-disable-next-line no-console
   console.log(
-    `[seed] Done. Admin: ${adminEmail} (${adminPassword}). CDM form seeded. ` +
+    `[seed] Done. Admin: ${adminEmail} (${adminPassword}). CDM form seeded (code=CDM). ` +
       `Reference submission ${PUBLIC_ID} present.`
   );
   await pool.close();

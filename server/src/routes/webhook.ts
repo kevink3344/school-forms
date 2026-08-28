@@ -2,7 +2,6 @@ import { Router } from "express";
 import crypto from "node:crypto";
 import { createSubmissionSchema } from "../schemas.js";
 import { getForm, createSubmission } from "../db/queries.js";
-import { newPublicId } from "../db/schema.js";
 import { env } from "../config/env.js";
 
 export const webhookRouter = Router();
@@ -45,8 +44,7 @@ webhookRouter.post("/google", async (req, res, next) => {
       return;
     }
 
-    const publicId = newPublicId();
-    const submission = await createSubmission(form, publicId, answers);
+    const submission = await createSubmission(form, answers);
 
     res.status(201).json({
       public_id: submission.public_id,

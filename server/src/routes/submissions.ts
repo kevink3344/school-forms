@@ -24,7 +24,6 @@ import {
   createAdhocFieldSchema,
   updateAdhocFieldSchema,
 } from "../schemas.js";
-import { newPublicId } from "../db/schema.js";
 
 export const submissionsRouter = Router();
 
@@ -55,8 +54,7 @@ submissionsRouter.post("/", async (req, res, next) => {
       return;
     }
 
-    const publicId = newPublicId();
-    const submission = await createSubmission(form, publicId, answers);
+    const submission = await createSubmission(form, answers);
 
     res.status(201).json({
       public_id: submission.public_id,

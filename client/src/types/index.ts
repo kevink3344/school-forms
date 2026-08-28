@@ -95,6 +95,8 @@ export interface Form {
   designer_id: number | null;
   organization_id: number | null;
   status: FormStatus;
+  code: string | null;
+  submission_seq: number;
   created_at: string;
   updated_at: string;
 }
@@ -115,6 +117,7 @@ export interface Submission {
   school_id: number | null;
   organization_id: number | null;
   status: SubmissionStatus;
+  submission_seq: number | null;
   submitted_at: string;
   updated_at: string;
 }

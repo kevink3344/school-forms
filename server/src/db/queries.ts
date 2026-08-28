@@ -1,4 +1,6 @@
 import { getPool } from "./pool.js";
+import sql, { type Transaction } from "mssql";
+import { formatSubmissionPublicId } from "./schema.js";
 import type {
   School,
   User,
@@ -21,6 +23,21 @@ export async function execute<T = unknown>(
 ): Promise<T[]> {
   const pool = await getPool();
   const request = pool.request();
+  for (const [name, value] of Object.entries(params)) {
+    request.input(name, value as never);
+  }
+  const result = await request.query(query);
+  return (result.recordset ?? []) as T[];
+}
+
+// Run a query within an explicit transaction. Used for the atomic per-form
+// counter increment that allocates incremental submission ids.
+async function executeInTransaction<T = unknown>(
+  transaction: Transaction,
+  query: string,
+  params: Record<string, unknown> = {}
+): Promise<T[]> {
+  const request = transaction.request();
   for (const [name, value] of Object.entries(params)) {
     request.input(name, value as never);
   }
@@ -345,7 +362,7 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
-            f.status, f.view_columns, f.created_at, f.updated_at
+            f.status, f.view_columns, f.code, f.submission_seq, f.created_at, f.updated_at
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
   );
@@ -362,7 +379,8 @@ export async function getForm(id: number, organizationId?: number | null): Promi
     params.organizationId = organizationId;
   }
   const rows = await execute<Form>(
-    `SELECT id, title, description, school_id, designer_id, organization_id, status, view_columns, created_at, updated_at
+    `SELECT id, title, description, school_id, designer_id, organization_id, status,
+            view_columns, code, submission_seq, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -408,6 +426,24 @@ export async function getFormWithFields(id: number, organizationId?: number | nu
   return { ...form, fields };
 }
 
+// Derive a short, globally-unique form code from a title (e.g. "Child Development
+// Monitor" => "CDM", "IEP" => "IEP"). The code is NOT editable by admins, so the
+// title is the only input. Uppercase, strip non-alphanumeric, truncate to 8 chars,
+// then append a numeric suffix on collision (CDM, CDM2, CDM3, ...) to preserve the
+// global-unique invariant enforced by UX_forms_code.
+export async function generateFormCode(title: string): Promise<string> {
+  const base =
+    title.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "FORM";
+  const existing = await execute<{ code: string }>(
+    "SELECT code FROM dbo.forms WHERE code IS NOT NULL"
+  );
+  const taken = new Set(existing.map((r) => r.code.toUpperCase()));
+  if (!taken.has(base)) return base;
+  let n = 2;
+  while (taken.has(`${base}${n}`)) n += 1;
+  return `${base}${n}`;
+}
+
 export async function createForm(
   {
     title,
@@ -432,14 +468,18 @@ export async function createForm(
     placeholder?: string | null;
   }[]
 ): Promise<FormWithFields> {
+  // Derive a short, globally-unique form code from the title. The code prefixes
+  // submission ids (`CDM-1001`); it is intentionally not editable.
+  const code = await generateFormCode(title);
   // Insert form
   const forms = await execute<Form>(
-    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status)
+    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq)
      OUTPUT INSERTED.id, INSERTED.title, INSERTED.description, INSERTED.school_id,
             INSERTED.designer_id, INSERTED.organization_id, INSERTED.status,
+            INSERTED.code, INSERTED.submission_seq,
             INSERTED.created_at, INSERTED.updated_at
-     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft')`,
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId }
+     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0)`,
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -644,7 +684,8 @@ export async function listSubmissions(params: {
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<SubmissionRow>(
-    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status, s.submitted_at, s.updated_at,
+    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
+            s.submission_seq, s.submitted_at, s.updated_at,
             f.title AS form_name,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
@@ -670,7 +711,8 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
     params.organizationId = organizationId;
   }
   const rows = await execute<SubmissionRow>(
-    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status, s.submitted_at, s.updated_at,
+    `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
+            s.submission_seq, s.submitted_at, s.updated_at,
             f.title AS form_name, f.organization_id AS form_organization_id,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
@@ -775,16 +817,45 @@ export async function resolveSubmissionSchoolId(
 
 export async function createSubmission(
   form: Form,
-  publicId: string,
   answers: { field_id: number; value: string | number | boolean | string[] | null }[]
 ): Promise<SubmissionDetail> {
+  // Allocate the next incremental submission id for this form inside a transaction.
+  // `UPDATE ... OUTPUT` takes a row lock and returns the incremented value
+  // atomically, so concurrent submissions to the same form can never collide.
+  const pool = await getPool();
+  const transaction = new sql.Transaction(pool);
+  await transaction.begin();
+  let publicId: string;
+  let submissionSeq: number;
+  try {
+    const allocated = await executeInTransaction<{ submission_seq: number }>(
+      transaction,
+      `UPDATE dbo.forms
+       SET submission_seq = submission_seq + 1, updated_at = SYSUTCDATETIME()
+       OUTPUT INSERTED.submission_seq
+       WHERE id = @formId`,
+      { formId: form.id }
+    );
+    const row = allocated[0];
+    if (!row) {
+      throw new Error(`Form ${form.id} not found while allocating submission id`);
+    }
+    submissionSeq = row.submission_seq;
+    publicId = formatSubmissionPublicId(form.code, submissionSeq);
+    await transaction.commit();
+  } catch (err) {
+    await transaction.rollback();
+    throw err;
+  }
+
   const schoolId = await resolveSubmissionSchoolId(form, answers);
   const subs = await execute<Submission>(
-    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status)
+    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq)
      OUTPUT INSERTED.id, INSERTED.public_id, INSERTED.form_id, INSERTED.school_id,
-            INSERTED.organization_id, INSERTED.status, INSERTED.submitted_at, INSERTED.updated_at
-     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted')`,
-    { publicId, formId: form.id, schoolId, organizationId: form.organization_id }
+            INSERTED.organization_id, INSERTED.status, INSERTED.submission_seq,
+            INSERTED.submitted_at, INSERTED.updated_at
+     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq)`,
+    { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq }
   );
   const submission = subs[0];
   for (const a of answers) {

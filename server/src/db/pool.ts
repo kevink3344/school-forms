@@ -1,6 +1,6 @@
 import sql, { type ConnectionPool } from "mssql";
 import { env } from "../config/env.js";
-import { DDL_STATEMENTS } from "./schema.js";
+import { DDL_STATEMENTS, formatSubmissionPublicId } from "./schema.js";
 
 let pool: ConnectionPool | null = null;
 let dbReady = false;
@@ -75,6 +75,61 @@ async function runDdl(): Promise<void> {
   const request = db.request();
   for (const statement of DDL_STATEMENTS) {
     await request.batch(statement);
+  }
+  await backfillSubmissionIds(db);
+}
+
+// One-time migration: convert legacy hex submission ids (`7bea...`) into the new
+// incremental format (`CDM-00001`). It computes a per-form counter from the
+// existing submission order and stamps both `public_id` and `submission_seq`.
+// Guarded by `submission_seq IS NULL` (legacy rows only) so re-running is a no-op
+// and never renumbers rows that already carry an incremental id.
+async function backfillSubmissionIds(db: ConnectionPool): Promise<void> {
+  const forms = await db.request().query(
+    `SELECT id, code, submission_seq FROM dbo.forms ORDER BY id`
+  );
+  let backfilled = 0;
+  for (const f of forms.recordset) {
+    // Legacy rows are those not yet stamped with a submission_seq (the current
+    // code stamps this column on insert, so new-format rows are excluded).
+    const subs = await db.request()
+      .input("formId", f.id)
+      .query(
+        `SELECT id FROM dbo.submissions
+         WHERE form_id = @formId AND submission_seq IS NULL
+         ORDER BY submitted_at ASC, id ASC`
+      );
+    if (!subs.recordset.length) continue;
+
+    // Continue numbering from the form's current counter so we never collide
+    // with already-allocated ids. The counter is the last number handed out.
+    let seq = (f.submission_seq as number) || 0;
+    for (const s of subs.recordset) {
+      seq += 1;
+      const publicId = formatSubmissionPublicId(f.code, seq);
+      await db.request()
+        .input("id", s.id)
+        .input("seq", seq)
+        .input("publicId", publicId)
+        .query(
+          `UPDATE dbo.submissions
+           SET public_id = @publicId, submission_seq = @seq
+           WHERE id = @id`
+        );
+      backfilled += 1;
+    }
+    // Advance the form counter to the last allocated number so the next real
+    // submission continues from here.
+    if (seq > (f.submission_seq as number)) {
+      await db.request()
+        .input("formId", f.id)
+        .input("seq", seq)
+        .query(`UPDATE dbo.forms SET submission_seq = @seq WHERE id = @formId`);
+    }
+  }
+  if (backfilled > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[db] Backfilled ${backfilled} legacy submission id(s) to incremental format.`);
   }
 }
 

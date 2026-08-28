@@ -1,5 +1,3 @@
-import { randomBytes } from "node:crypto";
-
 // -----------------------------------------------------------------------------
 // Enum values (kept in TS; validated at the app layer)
 // -----------------------------------------------------------------------------
@@ -70,6 +68,12 @@ export interface Form {
   organization_id: number;
   status: FormStatus;
   view_columns: string | null;
+  // Short, human-readable, globally-unique code used as the prefix of submission
+  // ids (e.g. `CDM`). Nullable — forms without a code fall back to `SUB`.
+  code: string | null;
+  // Per-form, monotonic counter used to allocate incremental submission ids
+  // (`CDM-1001`, `CDM-1002`, ...). Incremented under a row lock in `createSubmission`.
+  submission_seq: number;
   created_at: Date;
   updated_at: Date;
 }
@@ -93,6 +97,7 @@ export interface Submission {
   school_id: number | null;
   organization_id: number;
   status: SubmissionStatus;
+  submission_seq: number;
   submitted_at: Date;
   updated_at: Date;
 }
@@ -276,6 +281,32 @@ export const DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.forms', 'view_columns') IS NULL
      ALTER TABLE dbo.forms ADD view_columns NVARCHAR(MAX) NULL;`,
 
+  // ---------------------------------------------------------------------
+  // Incremental Submission IDs — forms.code (short, globally-unique prefix,
+  // e.g. "CDM"). Nullable; forms without a code fall back to `SUB` and the
+  // unique index ignores NULLs (filtered) so multiple uncoded forms coexist.
+  // Separate batch so the ALTER bounds before the index is created.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.forms', 'code') IS NULL
+     ALTER TABLE dbo.forms ADD code NVARCHAR(20) NULL;`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_forms_code')
+     CREATE UNIQUE INDEX UX_forms_code ON dbo.forms(code) WHERE code IS NOT NULL;`,
+
+  // Per-form monotonic counter used to allocate incremental submission ids.
+  `IF COL_LENGTH('dbo.forms', 'submission_seq') IS NULL
+     ALTER TABLE dbo.forms ADD submission_seq INT NOT NULL
+       CONSTRAINT DF_forms_submission_seq DEFAULT 0;`,
+
+  // ---------------------------------------------------------------------
+  // Incremental Submission IDs — submissions.submission_seq. Stored so the
+  // numeric portion is queryable without parsing public_id. Nullable: it is
+  // only populated by the new-format insert and the one-time backfill, so
+  // legacy hex rows retain NULL here until backfilled.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.submissions', 'submission_seq') IS NULL
+     ALTER TABLE dbo.submissions ADD submission_seq INT NULL;`,
+
   `IF OBJECT_ID('dbo.form_fields', 'U') IS NULL
    CREATE TABLE dbo.form_fields (
      id          INT IDENTITY(1,1) PRIMARY KEY,
@@ -398,6 +429,11 @@ export const DDL_STATEMENTS: string[] = [
 // -----------------------------------------------------------------------------
 // Helpers
 // -----------------------------------------------------------------------------
-export function newPublicId(): string {
-  return randomBytes(16).toString("hex");
+// Build a human-readable, incremental submission id: `{FORM_CODE}-{SEQUENCE}`,
+// e.g. `CDM-1001`. The code is uppercased and sanitized to A-Z/0-9 so it is
+// always URL/path-safe; forms without a code fall back to `SUB`. The sequence
+// is zero-padded to 5 digits to stay readable across large volumes.
+export function formatSubmissionPublicId(code: string | null | undefined, seq: number): string {
+  const prefix = (code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "SUB";
+  return `${prefix}-${String(seq).padStart(5, "0")}`;
 }
