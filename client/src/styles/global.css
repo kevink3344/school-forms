@@ -159,6 +159,21 @@ p { margin: 0; }
 .card-head .sub { font-size: 12px; color: var(--text-muted); margin: 0; }
 .card-body { padding: 18px; }
 
+/* Collapsible card section (Settings) */
+.card + .card { margin-top: 18px; } /* spacing between sections */
+.collapse-head {
+  display: flex; align-items: center; justify-content: space-between; gap: 12px;
+  width: 100%; padding: 14px 18px; background: transparent; border: none;
+  cursor: pointer; text-align: left; border-radius: var(--radius); font-family: inherit;
+}
+.collapse-head:hover { background: var(--panel-bg); }
+.collapse-title-wrap { display: flex; flex-direction: column; gap: 2px; }
+.collapse-title { font-size: 15px; font-weight: 700; color: var(--text); }
+.collapse-title-wrap .sub { font-size: 12px; color: var(--text-muted); }
+.collapse-chevron { flex-shrink: 0; color: var(--text-muted); transition: transform .15s ease; }
+.collapse-chevron.open { transform: rotate(180deg); }
+.collapse-body { border-top: 1px solid var(--border); padding: 18px; }
+
 /* Field-group tabs (Form Designer: parent-facing vs staff-only) */
 .tabs {
   display: inline-flex; gap: 4px; padding: 4px; background: var(--panel-bg);

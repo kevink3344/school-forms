@@ -58,6 +58,58 @@ function roleBadge(role: Role): { cls: string; label: string } {
 }
 
 // ---------------------------------------------------------------------------
+// Collapsible card section (Settings) — clickable header toggles the body
+// ---------------------------------------------------------------------------
+function CollapsibleSection({
+  title,
+  subtitle,
+  children,
+  defaultOpen = false,
+  bodyStyle,
+}: {
+  title: string;
+  subtitle: string;
+  children: React.ReactNode;
+  defaultOpen?: boolean;
+  bodyStyle?: React.CSSProperties;
+}) {
+  const [open, setOpen] = useState(defaultOpen);
+  return (
+    <div className="card">
+      <button
+        type="button"
+        className="collapse-head"
+        onClick={() => setOpen((o) => !o)}
+        aria-expanded={open}
+      >
+        <span className="collapse-title-wrap">
+          <span className="collapse-title">{title}</span>
+          <span className="sub">{subtitle}</span>
+        </span>
+        <svg
+          className={`collapse-chevron${open ? " open" : ""}`}
+          width="16"
+          height="16"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        >
+          <polyline points="6 9 12 15 18 9" />
+        </svg>
+      </button>
+      {open && (
+        <div className="collapse-body" style={bodyStyle}>
+          {children}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
 // Create / Edit modal
 // ---------------------------------------------------------------------------
 interface FormState {
@@ -260,24 +312,21 @@ export default function AdminSettings() {
         </div>
       )}
 
-      <div className="card">
-        <div className="card-head">
-          <h3>Users</h3>
-          <span className="sub">
-            {users.length} user{users.length === 1 ? "" : "s"} · {users.filter((u) => u.active).length} active
-          </span>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Email</th>
-                <th>Role</th>
-                <th>Organization</th>
-                <th>School</th>
-                <th>Status</th>
-                <th style={{ textAlign: "right" }}>Actions</th>
+      <CollapsibleSection
+        title="Users"
+        subtitle={`${users.length} user${users.length === 1 ? "" : "s"} · ${users.filter((u) => u.active).length} active`}
+        bodyStyle={{ padding: 0 }}
+      >
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Email</th>
+              <th>Role</th>
+              <th>Organization</th>
+              <th>School</th>
+              <th>Status</th>
+              <th style={{ textAlign: "right" }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -335,16 +384,13 @@ export default function AdminSettings() {
               )}
             </tbody>
           </table>
-        </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Login Mode panel */}
-      <div className="card">
-        <div className="card-head">
-          <h3>Login Mode</h3>
-          <span className="sub">Control how users sign in to School Forms</span>
-        </div>
-        <div className="card-body">
+      <CollapsibleSection
+        title="Login Mode"
+        subtitle="Control how users sign in to School Forms"
+      >
           {loginModeOverride && (
             <div
               style={{
@@ -426,24 +472,22 @@ export default function AdminSettings() {
               Save Maintenance Message
             </button>
           </div>
-        </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Organizations panel */}
-      <div className="card">
-        <div className="card-head">
-          <h3>Organizations</h3>
-          <span className="sub">Tenant boundaries — schools are shared across all organizations</span>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <table className="grid">
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Slug</th>
-                <th>Members</th>
-              </tr>
-            </thead>
+      <CollapsibleSection
+        title="Organizations"
+        subtitle="Tenant boundaries — schools are shared across all organizations"
+        bodyStyle={{ padding: 0 }}
+      >
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Slug</th>
+              <th>Members</th>
+            </tr>
+          </thead>
             <tbody>
               {orgs.length === 0 ? (
                 <tr>
@@ -462,8 +506,7 @@ export default function AdminSettings() {
               )}
             </tbody>
           </table>
-        </div>
-      </div>
+      </CollapsibleSection>
 
       {/* Create / edit modal */}
       <div className={`modal-overlay ${modalOpen ? "open" : ""}`} onClick={closeModal}>
