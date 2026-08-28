@@ -278,62 +278,62 @@ export default function StaffSubmissionDetail() {
       </div>
 
       {/* Staff-only fields — always editable (the form's staff_only form fields) */}
-      <div className="staff-only-box" style={{ marginTop: 18, border: "1px dashed var(--accent)", background: "#eff7fe" }}>
-        <div className="so-head">
-          <span className="lock-badge">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-              <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-              <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-            </svg>
-            Staff-only fields
-          </span>
-          <span className="muted-note" style={{ fontSize: 12 }}>
-            Fill in the values for this submission
-          </span>
+      <div style={{ marginTop: 18 }}>
+        <div className="card">
+          <div className="card-head">
+            <h3>Staff-only fields</h3>
+            <span className="sub">Fill in the values for this submission</span>
+            <span className="lock-tag" style={{ marginLeft: "auto" }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
+                <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
+                <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
+              </svg>
+              Staff only
+            </span>
+          </div>
+          <div className="card-body">
+            {detail.staffOnlyFields.length === 0 ? (
+              <div className="muted-note">This form has no staff-only fields defined.</div>
+            ) : (
+              <div className="field-list">
+                {detail.staffOnlyFields.map((f) => {
+                  const existing = detail.values.find((v) => v.field_id === f.id);
+                  return (
+                    <Field
+                      key={f.id}
+                      v={{
+                        id: existing?.id ?? f.id,
+                        submission_id: detail.id,
+                        field_id: f.id,
+                        value: staffDraft[f.id] ?? existing?.value ?? null,
+                        field_label: f.label,
+                        field_type: f.type,
+                        staff_only: true,
+                        options: f.options,
+                      }}
+                      editing={true}
+                      value={staffDraft[f.id] ?? existing?.value ?? null}
+                      onChange={(val) => setStaffDraftValue(f.id, val)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+
+            {detail.staffOnlyFields.length > 0 && (
+              <div className="field-actions" style={{ marginTop: 14 }}>
+                <button
+                  type="button"
+                  className="primary-button"
+                  onClick={handleSaveStaff}
+                  disabled={savingStaff}
+                >
+                  {savingStaff ? "Saving..." : "Save staff fields"}
+                </button>
+              </div>
+            )}
+          </div>
         </div>
-
-        {detail.staffOnlyFields.length === 0 ? (
-          <div className="muted-note" style={{ marginTop: 8 }}>
-            This form has no staff-only fields defined.
-          </div>
-        ) : (
-          <div className="field-list" style={{ marginTop: 12 }}>
-            {detail.staffOnlyFields.map((f) => {
-              const existing = detail.values.find((v) => v.field_id === f.id);
-              return (
-                <Field
-                  key={f.id}
-                  v={{
-                    id: existing?.id ?? f.id,
-                    submission_id: detail.id,
-                    field_id: f.id,
-                    value: staffDraft[f.id] ?? existing?.value ?? null,
-                    field_label: f.label,
-                    field_type: f.type,
-                    staff_only: true,
-                    options: f.options,
-                  }}
-                  editing={true}
-                  value={staffDraft[f.id] ?? existing?.value ?? null}
-                  onChange={(val) => setStaffDraftValue(f.id, val)}
-                />
-              );
-            })}
-          </div>
-        )}
-
-        {detail.staffOnlyFields.length > 0 && (
-          <div className="field-actions" style={{ marginTop: 14 }}>
-            <button
-              type="button"
-              className="primary-button"
-              onClick={handleSaveStaff}
-              disabled={savingStaff}
-            >
-              {savingStaff ? "Saving..." : "Save staff fields"}
-            </button>
-          </div>
-        )}
       </div>
 
       {/* Comment thread (full width at the bottom) */}
