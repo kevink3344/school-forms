@@ -464,6 +464,17 @@ function FieldRow({
   onRemove: () => void;
   onMove: (dir: -1 | 1) => void;
 }) {
+  // Hold the raw options text while the user types, so commas aren't stripped by
+  // the array→string round-trip on every keystroke. Synced from field.options
+  // whenever it changes externally (e.g. loading the form, or a different field).
+  const isOptionsField = field.type === "select" || field.type === "radio" || field.type === "checkbox";
+  const [optionsText, setOptionsText] = useState(isOptionsField ? (field.options || []).join(", ") : "");
+  useEffect(() => {
+    if (field.type === "select" || field.type === "radio" || field.type === "checkbox") {
+      setOptionsText((field.options || []).join(", "));
+    }
+  }, [field.options, field.type]);
+
   return (
     <div
       style={{
@@ -544,13 +555,17 @@ function FieldRow({
           <label>Options (comma separated)</label>
           <input
             type="text"
-            value={(field.options || []).join(", ")}
-            onChange={(e) =>
+            value={optionsText}
+            onChange={(e) => setOptionsText(e.target.value)}
+            onBlur={() =>
               onChange({
-                options: e.target.value.split(",").map((s) => s.trim()).filter(Boolean),
+                options: optionsText.split(",").map((s) => s.trim()).filter(Boolean),
               })
             }
           />
+          <div className="filter-hint" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+            Separate each option with a comma (e.g. Option A, Option B, Option C).
+          </div>
         </div>
       )}
 

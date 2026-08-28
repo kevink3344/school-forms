@@ -646,6 +646,10 @@ export interface SubmissionDetail extends SubmissionRow {
   // The form's own staff-only field definitions — these are always shown on the
   // detail page so staff can fill them in one by one (even before a value exists).
   staffOnlyFields: FormField[];
+  // The form's non-staff-only field definitions — always shown so unanswered
+  // optional fields (e.g. "Course choice #3 (optional)") still render and are
+  // editable, even when no submission_values row exists yet.
+  parentFields: FormField[];
 }
 
 export async function listSubmissions(params: {
@@ -776,7 +780,8 @@ export async function getSubmissionDetail(publicId: string, organizationId?: num
   // staff-only field (including ones not yet answered) for one-by-one filling.
   const formFields = await listFormFields(submission.form_id);
   const staffOnlyFields = formFields.filter((f) => f.staff_only);
-  return { ...submission, values, comments, adhocFields, staffOnlyFields };
+  const parentFields = formFields.filter((f) => !f.staff_only);
+  return { ...submission, values, comments, adhocFields, staffOnlyFields, parentFields };
 }
 
 // Resolve which school a submission belongs to. District-wide forms (e.g. CDM)

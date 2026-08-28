@@ -23,7 +23,7 @@ async function buildExportRows(
     const values = await listSubmissionValues(s.id);
     const row: Record<string, unknown> = {
       submission_public_id: s.public_id,
-      submitted_at: s.submitted_at,
+      submitted_at: formatSubmittedAt(s.submitted_at),
       status: s.status,
     };
     for (const v of values) {
@@ -35,6 +35,22 @@ async function buildExportRows(
     rows.push(row);
   }
   return rows;
+}
+
+// Date formatter — renders submission timestamps as "8/27/2026, 9:52:20 AM"
+// in the school's local timezone (America/New_York), independent of the
+// server's configured timezone (Azure may run in UTC).
+const submittedAtFormatter = new Intl.DateTimeFormat("en-US", {
+  timeZone: "America/New_York",
+  month: "numeric",
+  day: "numeric",
+  year: "numeric",
+  hour: "numeric",
+  minute: "2-digit",
+  second: "2-digit",
+});
+function formatSubmittedAt(value: Date): string {
+  return submittedAtFormatter.format(value);
 }
 
 // CSV escaping helper
@@ -56,12 +72,20 @@ function csvEscape(value: unknown): string {
 
 // -----------------------------------------------------------------------------
 // GET /api/export/preview?form_id=&status=&school_id= — column preview for UI
+// Available to admin AND staff. Staff are always scoped to their own school and
+// can never see staff-only columns.
 // -----------------------------------------------------------------------------
-exportRouter.get("/preview", requireAuth, requireRoles("admin"), async (req, res, next) => {
+exportRouter.get("/preview", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
-    const schoolId = req.query.school_id ? Number(req.query.school_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
+    const isStaff = req.user!.role === "staff";
+    // Admin may filter by school; staff are locked to their own school.
+    const schoolId = isStaff
+      ? req.user!.school_id ?? undefined
+      : req.query.school_id
+        ? Number(req.query.school_id)
+        : undefined;
 
     if (!formId) {
       res.status(400).json({ error: "form_id is required" });
@@ -73,7 +97,11 @@ exportRouter.get("/preview", requireAuth, requireRoles("admin"), async (req, res
       return;
     }
 
-    const rawColumns = await getExportColumns(formId);
+    let rawColumns = await getExportColumns(formId);
+    // Staff must never see staff-only columns, even in the preview.
+    if (isStaff) {
+      rawColumns = rawColumns.filter((c) => !c.staff_only);
+    }
     const columns = rawColumns.map((c) => {
       const m = /^field_(\d+)$/.exec(c.key);
       return { ...c, field_id: m ? Number(m[1]) : 0 };
@@ -94,14 +122,22 @@ exportRouter.get("/preview", requireAuth, requireRoles("admin"), async (req, res
 
 // -----------------------------------------------------------------------------
 // GET /api/export/csv?form_id=&status=&school_id=&include_staff_only=0|1 —
-// returns a CSV download
+// returns a CSV download. Available to admin AND staff. Staff are always scoped
+// to their own school; the include_staff_only flag is only honored for admins.
 // -----------------------------------------------------------------------------
-exportRouter.get("/csv", requireAuth, requireRoles("admin"), async (req, res, next) => {
+exportRouter.get("/csv", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
-    const schoolId = req.query.school_id ? Number(req.query.school_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
-    const includeStaffOnly = req.query.include_staff_only === "1";
+    const isStaff = req.user!.role === "staff";
+    // Admin may filter by school; staff are locked to their own school.
+    const schoolId = isStaff
+      ? req.user!.school_id ?? undefined
+      : req.query.school_id
+        ? Number(req.query.school_id)
+        : undefined;
+    // Staff-only columns are only exposed to admins, regardless of the flag.
+    const includeStaffOnly = !isStaff && req.query.include_staff_only === "1";
 
     if (!formId) {
       res.status(400).json({ error: "form_id is required" });
@@ -114,7 +150,9 @@ exportRouter.get("/csv", requireAuth, requireRoles("admin"), async (req, res, ne
     }
 
     let rawColumns = await getExportColumns(formId);
-    if (!includeStaffOnly) {
+    if (isStaff) {
+      rawColumns = rawColumns.filter((c) => !c.staff_only);
+    } else if (!includeStaffOnly) {
       rawColumns = rawColumns.filter((c) => !c.staff_only);
     }
     const columns = rawColumns.map((c) => {

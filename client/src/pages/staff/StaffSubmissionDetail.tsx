@@ -105,10 +105,15 @@ export default function StaffSubmissionDetail() {
     setSaving(true);
     setError("");
     try {
-      const answers = detail.values.map((v) => ({
-        field_id: v.field_id,
-        value: draft[v.field_id] ?? v.value,
-      }));
+      // Persist every parent field (including optional ones that had no stored
+      // value yet), so newly-filled fields are saved.
+      const answers = detail.parentFields.map((f) => {
+        const existing = detail.values.find((v) => v.field_id === f.id);
+        return {
+          field_id: f.id,
+          value: draft[f.id] ?? existing?.value ?? null,
+        };
+      });
       const updated = await api.updateSubmissionValues(publicId, answers);
       setDetail(updated);
       setDraft(valuesToDraft(updated.values));
@@ -167,7 +172,11 @@ export default function StaffSubmissionDetail() {
     );
   }
 
-  const parentFields = detail.values.filter((v) => !v.staff_only);
+  const parentFields = detail.parentFields;
+
+  // Build a value lookup across the submission's stored values.
+  const valuesByField = new Map<number, SubmissionValueRow>();
+  for (const v of detail.values) valuesByField.set(v.field_id, v);
 
   return (
     <div>
@@ -243,17 +252,16 @@ export default function StaffSubmissionDetail() {
                 )}
               </div>
               <div className="card-body">
-                <div className="section-label">Submission</div>
                 <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "8px 0" }}>
                   <div className="field">
                     <span className="f-label">Submission ID</span>
-                    <span className="f-value cell-mono" style={{ fontSize: 12 }}>
+                    <span className="f-value">
                       {detail.public_id}
                     </span>
                   </div>
                   <div className="field">
                     <span className="f-label">Submission Time</span>
-                    <span className="f-value cell-mono" style={{ fontSize: 12 }}>
+                    <span className="f-value">
                       {new Date(detail.submitted_at).toLocaleString()}
                     </span>
                   </div>
@@ -261,15 +269,28 @@ export default function StaffSubmissionDetail() {
 
                 <div className="divider" />
                 <div className="field-list">
-                  {parentFields.map((v) => (
-                    <Field
-                      key={v.field_id}
-                      v={v}
-                      editing={editing}
-                      value={editing ? (draft[v.field_id] ?? v.value) : v.value}
-                      onChange={(val) => setDraftValue(v.field_id, val)}
-                    />
-                  ))}
+                  {parentFields.map((f) => {
+                    const existing = valuesByField.get(f.id);
+                    const value = editing ? (draft[f.id] ?? existing?.value ?? null) : (existing?.value ?? null);
+                    return (
+                      <Field
+                        key={f.id}
+                        v={{
+                          id: existing?.id ?? f.id,
+                          submission_id: detail.id,
+                          field_id: f.id,
+                          value,
+                          field_label: f.label,
+                          field_type: f.type,
+                          staff_only: false,
+                          options: f.options,
+                        }}
+                        editing={editing}
+                        value={value}
+                        onChange={(val) => setDraftValue(f.id, val)}
+                      />
+                    );
+                  })}
                 </div>
               </div>
             </div>
@@ -565,7 +586,9 @@ function toStr(v: string | number | boolean | string[] | null): string {
 }
 
 function formatValue(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "Not provided";
+  // Unanswered optional fields (e.g. "Course choice #3 (optional)") should render
+  // as blank rather than a placeholder, per the product requirement.
+  if (v === null || v === undefined || v === "") return "";
   if (Array.isArray(v)) return v.join(", ");
   return String(v);
 }

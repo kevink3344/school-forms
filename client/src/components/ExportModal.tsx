@@ -9,6 +9,9 @@ interface Props {
   forms: Form[];
   schoolId?: string;
   status?: string;
+  /** When true, the "include staff-only fields" toggle is hidden and staff-only
+   *  columns are never selectable. Defaults to false (i.e. admin). */
+  isStaff?: boolean;
 }
 
 export default function ExportModal({
@@ -18,6 +21,7 @@ export default function ExportModal({
   forms,
   schoolId,
   status,
+  isStaff = false,
 }: Props) {
   const [selectedFormId, setSelectedFormId] = useState(formId);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
@@ -126,9 +130,9 @@ export default function ExportModal({
   };
 
   return (
-    <div className="modal-overlay open" onClick={onClose}>
-      <div className="modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-head">
+    <div className="drawer-overlay open" onClick={onClose}>
+      <div className="drawer" onClick={(e) => e.stopPropagation()}>
+        <div className="drawer-head">
           <h2>Export Submissions</h2>
           <button className="icon-button close" onClick={onClose}>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -138,7 +142,7 @@ export default function ExportModal({
           </button>
         </div>
 
-        <div className="modal-body">
+        <div className="drawer-body">
           {forms.length > 1 && (
             <div className="filter-group" style={{ minWidth: 0, marginBottom: 16 }}>
               <label>Form</label>
@@ -223,16 +227,18 @@ export default function ExportModal({
                 </div>
               </div>
 
-              <div className="file-note" style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                  <input
-                    type="checkbox"
-                    checked={includeStaffOnly}
-                    onChange={(e) => setIncludeStaffOnly(e.target.checked)}
-                  />
-                  Include staff-only fields (admin only)
-                </label>
-              </div>
+              {!isStaff && (
+                <div className="file-note" style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
+                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={includeStaffOnly}
+                      onChange={(e) => setIncludeStaffOnly(e.target.checked)}
+                    />
+                    Include staff-only fields
+                  </label>
+                </div>
+              )}
 
               {preview && (
                 <div className="export-preview" style={{ marginTop: 16 }}>
@@ -263,7 +269,7 @@ export default function ExportModal({
           )}
         </div>
 
-        <div className="modal-foot">
+        <div className="drawer-foot">
           <span className="file-note" style={{ marginTop: 0 }}>
             CSV will download as <code>submissions-export.csv</code>
           </span>

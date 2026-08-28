@@ -179,6 +179,9 @@ export interface SubmissionDetail extends Submission {
   adhocFields: AdhocField[];
   // The form's own staff-only field definitions (always shown on the detail page).
   staffOnlyFields: FormField[];
+  // The form's non-staff-only field definitions (always shown so unanswered
+  // optional fields render + are editable even without a stored value).
+  parentFields: FormField[];
 }
 
 export interface AuthResponse {

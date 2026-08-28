@@ -1,14 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import type { SubmissionRow } from "../../types";
+import type { Form, SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
+import ExportModal from "../../components/ExportModal";
 
 type ViewMode = "table" | "cards";
 
 export default function StaffQueue() {
   const navigate = useNavigate();
   const [rows, setRows] = useState<SubmissionRow[]>([]);
+  const [forms, setForms] = useState<Form[]>([]);
+  const [exportOpen, setExportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
   // Default to card view on small screens; tablet/desktop defaults to table.
@@ -30,6 +33,20 @@ export default function StaffQueue() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
+  // Load forms so the Export drawer can present a form selector (scoped to school).
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listForms()
+      .then((f) => {
+        if (!cancelled) setForms(f);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const counts = {
     submitted: rows.filter((r) => r.status === "submitted").length,
     in_review: rows.filter((r) => r.status === "in_review").length,
@@ -45,33 +62,41 @@ export default function StaffQueue() {
         title="My School's Submissions"
         subtitle="Submissions from your school, ready for you to review and comment."
         actions={
-          <div className="view-toggle">
-            <button
-              className={viewMode === "table" ? "active" : ""}
-              onClick={() => setViewMode("table")}
-              title="Table view"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="4" width="18" height="16" rx="1" />
-                <line x1="3" y1="10" x2="21" y2="10" />
-                <line x1="9" y1="4" x2="9" y2="20" />
+          <>
+            <button className="primary-button" onClick={() => setExportOpen(true)}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
+                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
-              Table
+              Export
             </button>
-            <button
-              className={viewMode === "cards" ? "active" : ""}
-              onClick={() => setViewMode("cards")}
-              title="Card view"
-            >
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <rect x="3" y="4" width="8" height="7" rx="1" />
-                <rect x="13" y="4" width="8" height="7" rx="1" />
-                <rect x="3" y="13" width="8" height="7" rx="1" />
-                <rect x="13" y="13" width="8" height="7" rx="1" />
-              </svg>
-              Cards
-            </button>
-          </div>
+            <div className="view-toggle">
+              <button
+                className={viewMode === "table" ? "active" : ""}
+                onClick={() => setViewMode("table")}
+                title="Table view"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="18" height="16" rx="1" />
+                  <line x1="3" y1="10" x2="21" y2="10" />
+                  <line x1="9" y1="4" x2="9" y2="20" />
+                </svg>
+                Table
+              </button>
+              <button
+                className={viewMode === "cards" ? "active" : ""}
+                onClick={() => setViewMode("cards")}
+                title="Card view"
+              >
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <rect x="3" y="4" width="8" height="7" rx="1" />
+                  <rect x="13" y="4" width="8" height="7" rx="1" />
+                  <rect x="3" y="13" width="8" height="7" rx="1" />
+                  <rect x="13" y="13" width="8" height="7" rx="1" />
+                </svg>
+                Cards
+              </button>
+            </div>
+          </>
         }
       />
 
@@ -187,6 +212,14 @@ export default function StaffQueue() {
           </table>
         )}
       </div>
+
+      <ExportModal
+        open={exportOpen}
+        onClose={() => setExportOpen(false)}
+        formId={forms[0] ? String(forms[0].id) : ""}
+        forms={forms}
+        isStaff
+      />
     </div>
   );
 }

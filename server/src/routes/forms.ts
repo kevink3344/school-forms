@@ -70,9 +70,13 @@ formsRouter.get("/:id/public", async (req, res, next) => {
 });
 
 // Admin: list forms (optionally filter by school) — scoped to the admin's org
-formsRouter.get("/", requireAuth, requireRoles("admin"), async (req, res, next) => {
+formsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const schoolId = req.query.school_id ? Number(req.query.school_id) : undefined;
+    const isStaff = req.user!.role === "staff";
+    // Admins may filter by school; staff see all org forms (templates are
+    // org-wide and shared across schools, so school-scoping would hide forms
+    // their school contributes to).
+    const schoolId = !isStaff && req.query.school_id ? Number(req.query.school_id) : undefined;
     const forms = await listForms(schoolId, req.user!.organization_id);
     res.json(forms);
   } catch (err) {
