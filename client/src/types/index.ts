@@ -152,6 +152,7 @@ export interface Comment {
 
 export interface SubmissionRow extends Submission {
   form_name: string;
+  school_name: string | null;
   student_name: string | null;
 }
 

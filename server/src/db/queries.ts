@@ -644,6 +644,9 @@ async function reconcileFormFields(
 // -----------------------------------------------------------------------------
 export interface SubmissionRow extends Submission {
   form_name: string;
+  // The submitting school's display name (LEFT JOIN so a NULL school_id still
+  // renders a row). Used in the grid first column as "Student / School".
+  school_name: string | null;
   // The first non-staff-only field value (conventionally the Student Name), used
   // to render a clickable name in the staff queue. Falls back to a placeholder.
   student_name: string | null;
@@ -717,6 +720,7 @@ export async function listSubmissions(params: {
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name,
+            sch.name AS school_name,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
              JOIN dbo.form_fields ff ON ff.id = sv.field_id
@@ -724,6 +728,7 @@ export async function listSubmissions(params: {
              ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
+     LEFT JOIN dbo.schools sch ON sch.id = s.school_id
      LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
      ${where}
      ORDER BY s.submitted_at DESC`,

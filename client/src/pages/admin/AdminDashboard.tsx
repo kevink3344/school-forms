@@ -197,7 +197,7 @@ export default function AdminDashboard() {
 
 // ---------------------------------------------------------------------------
 // Submissions grid — shares the same layout/CSS as the staff "My School
-// Submissions" table: Student/Form, Submission ID, Status, Submitted, Actions.
+// Submissions" table: Student/School, Submission ID, Status, Submitted, Actions.
 // ---------------------------------------------------------------------------
 function SubmissionsGrid({
   rows,
@@ -221,7 +221,7 @@ function SubmissionsGrid({
       <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
         <thead>
           <tr>
-            <th>Student / Form</th>
+            <th>Student / School</th>
             <th>Submission ID</th>
             <th>Status</th>
             <th>Submitted</th>
@@ -231,7 +231,7 @@ function SubmissionsGrid({
         <tbody>
           {rows.map((s) => (
             <tr key={s.public_id}>
-              <td className="cell-strong" style={{ whiteSpace: "nowrap" }} data-label="Student / Form">
+              <td className="cell-strong" style={{ whiteSpace: "nowrap" }} data-label="Student / School">
                 <a
                   className="link-name"
                   href={`/admin/submissions/${s.public_id}`}
@@ -243,7 +243,7 @@ function SubmissionsGrid({
                   {s.student_name || "Unnamed submission"}
                 </a>
                 <span className="cell-mono" style={{ marginLeft: 8, whiteSpace: "nowrap" }}>
-                  {s.form_name}
+                  {s.school_name ?? "—"}
                 </span>
               </td>
               <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>

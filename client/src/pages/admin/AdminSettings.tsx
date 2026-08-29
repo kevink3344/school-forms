@@ -120,6 +120,7 @@ interface FormState {
   role: Role;
   school_id: string; // "" = no school
   organization_id: string; // "" = default to current admin's org
+  active: boolean;
 }
 
 const EMPTY: FormState = {
@@ -130,6 +131,7 @@ const EMPTY: FormState = {
   role: "staff",
   school_id: "",
   organization_id: "",
+  active: true,
 };
 
 export default function AdminSettings() {
@@ -201,6 +203,7 @@ export default function AdminSettings() {
       role: u.role,
       school_id: u.school_id === null ? "" : String(u.school_id),
       organization_id: u.organization_id === null ? "" : String(u.organization_id),
+      active: u.active,
     });
     setModalOpen(true);
     setSaveError("");
@@ -234,6 +237,7 @@ export default function AdminSettings() {
           role: form.role,
           school_id: form.school_id ? Number(form.school_id) : null,
           organization_id: form.organization_id ? Number(form.organization_id) : null,
+          active: form.active,
         });
         setMessage("User updated.");
       }
@@ -243,17 +247,6 @@ export default function AdminSettings() {
       setSaveError(err instanceof ApiError ? err.message : "Could not save user");
     } finally {
       setSaving(false);
-    }
-  };
-
-  const toggleActive = async (u: AdminUser, active: boolean) => {
-    setError("");
-    try {
-      const updated = await api.updateUser(u.id, { active });
-      setUsers((prev) => prev.map((x) => (x.id === updated.id ? { ...x, active: updated.active } : x)));
-      setMessage(`${u.display_name || u.email} is now ${active ? "active" : "inactive"}.`);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not update user");
     }
   };
 
@@ -317,28 +310,27 @@ export default function AdminSettings() {
         subtitle={`${users.length} user${users.length === 1 ? "" : "s"} · ${users.filter((u) => u.active).length} active`}
         bodyStyle={{ padding: 0 }}
       >
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>Name</th>
-              <th>Email</th>
-              <th>Role</th>
-              <th>Organization</th>
-              <th>School</th>
-              <th>Status</th>
-              <th style={{ textAlign: "right" }}>Actions</th>
+        <div className="grid-wrap">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Name</th>
+                <th>Email</th>
+                <th>Role</th>
+                <th>School</th>
+                <th>Status</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={5} style={{ textAlign: "center", padding: 24 }}>
                     Loading…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={7} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={5} style={{ textAlign: "center", padding: 24 }}>
                     No users yet. Click <strong>Add User</strong> to create one.
                   </td>
                 </tr>
@@ -346,36 +338,16 @@ export default function AdminSettings() {
                 users.map((u) => {
                   const badge = roleBadge(u.role);
                   return (
-                    <tr key={u.id}>
+                    <tr key={u.id} className="grid-row" onClick={() => openEdit(u)} title="Edit user">
                       <td className="cell-strong" data-label="Name">{u.display_name}</td>
                       <td data-label="Email">{u.email}</td>
                       <td data-label="Role">
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
                       </td>
-                      <td data-label="Organization">{u.organization_name ?? "—"}</td>
                       <td data-label="School">{u.school_name ?? "—"}</td>
                       <td data-label="Status">
                         <span className={`badge ${u.active ? "badge-green" : "badge-gray"}`}>
                           {u.active ? "Active" : "Inactive"}
-                        </span>
-                      </td>
-                      <td style={{ textAlign: "right", whiteSpace: "nowrap" }}>
-                        <span style={{ display: "inline-flex", alignItems: "center", gap: 10 }}>
-                          <button
-                            className="badge-button"
-                            onClick={() => openEdit(u)}
-                            title="Edit user"
-                          >
-                            Edit
-                          </button>
-                          <Toggle
-                            checked={u.active}
-                            disabled={false}
-                            onChange={(v) => void toggleActive(u, v)}
-                          />
-                          <span style={{ fontSize: 11, color: "var(--text-muted)" }}>
-                            {u.active ? "on" : "off"}
-                          </span>
                         </span>
                       </td>
                     </tr>
@@ -384,6 +356,7 @@ export default function AdminSettings() {
               )}
             </tbody>
           </table>
+        </div>
       </CollapsibleSection>
 
       {/* Login Mode panel */}
@@ -508,10 +481,10 @@ export default function AdminSettings() {
           </table>
       </CollapsibleSection>
 
-      {/* Create / edit modal */}
-      <div className={`modal-overlay ${modalOpen ? "open" : ""}`} onClick={closeModal}>
-        <div className="modal" onClick={(e) => e.stopPropagation()}>
-          <div className="modal-head">
+      {/* Create / edit user — right slide-out drawer */}
+      <div className={`drawer-overlay ${modalOpen ? "open" : ""}`} onClick={closeModal}>
+        <div className="drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="drawer-head">
             <h2>{form.id === null ? "Add User" : "Edit User"}</h2>
             <button className="icon-button close" onClick={closeModal} title="Close">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
@@ -520,7 +493,7 @@ export default function AdminSettings() {
               </svg>
             </button>
           </div>
-          <div className="modal-body">
+          <div className="drawer-body">
             {saveError && (
               <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
                 {saveError}
@@ -595,9 +568,25 @@ export default function AdminSettings() {
                   ))}
                 </select>
               </Field>
+
+              {form.id !== null && (
+                <Field label="Active">
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <Toggle
+                      checked={form.active}
+                      disabled={form.id === user?.id}
+                      onChange={(v) => setForm((f) => ({ ...f, active: v }))}
+                    />
+                    <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                      {form.active ? "Active" : "Inactive"}
+                      {form.id === user?.id ? " (you)" : ""}
+                    </span>
+                  </div>
+                </Field>
+              )}
             </div>
           </div>
-          <div className="modal-foot">
+          <div className="drawer-foot">
             <span className="muted-note">{form.id === null ? "New account" : "Editing account"}</span>
             <button className="secondary-button" onClick={closeModal} disabled={saving}>
               Cancel

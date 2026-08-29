@@ -145,7 +145,7 @@ export default function StaffQueue() {
                 <div className="qi-main">
                   <div className="qi-top">
                     <StatusBadge status={s.status} />
-                    <span className="badge badge-slate">{s.form_name}</span>
+                    <span className="badge badge-slate">{s.school_name ?? "—"}</span>
                   </div>
                   <div className="qi-title">
                     <a
@@ -159,7 +159,7 @@ export default function StaffQueue() {
                       {s.student_name || "Unnamed submission"}
                     </a>
                   </div>
-                  <div className="qi-meta">{s.student_name ? s.form_name : `Form: ${s.form_name}`}</div>
+                  <div className="qi-meta">{s.school_name ?? "No school"}</div>
                 </div>
                 <div className="qi-right">
                   <span className="qi-time">{formatDate(s.submitted_at)}</span>
@@ -171,7 +171,7 @@ export default function StaffQueue() {
           <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
             <thead>
               <tr>
-                <th>Student / Form</th>
+                <th>Student / School</th>
                 <th>Submission ID</th>
                 <th>Status</th>
                 <th>Submitted</th>
@@ -181,7 +181,7 @@ export default function StaffQueue() {
             <tbody>
               {rows.map((s) => (
                 <tr key={s.public_id}>
-                  <td className="cell-strong" data-label="Student / Form">
+                  <td className="cell-strong" data-label="Student / School">
                     <a
                       className="link-name"
                       href={`/staff/${s.public_id}`}
@@ -193,7 +193,7 @@ export default function StaffQueue() {
                       {s.student_name || "Unnamed submission"}
                     </a>
                     <span className="cell-mono" style={{ marginLeft: 8 }}>
-                      {s.form_name}
+                      {s.school_name ?? "—"}
                     </span>
                   </td>
                   <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
