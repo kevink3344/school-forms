@@ -625,6 +625,8 @@ export interface SubmissionRow extends Submission {
   // The first non-staff-only field value (conventionally the Student Name), used
   // to render a clickable name in the staff queue. Falls back to a placeholder.
   student_name: string | null;
+  // Display name of the staff member who last saved the staff-only fields.
+  staff_fields_updated_by_name: string | null;
 }
 
 export interface SubmissionValueRow extends SubmissionValue {
@@ -690,6 +692,8 @@ export async function listSubmissions(params: {
   return execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
+            s.staff_fields_updated_by, s.staff_fields_updated_at,
+            su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
@@ -698,6 +702,7 @@ export async function listSubmissions(params: {
              ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
+     LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
      ${where}
      ORDER BY s.submitted_at DESC`,
     p
@@ -717,6 +722,8 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
   const rows = await execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
+            s.staff_fields_updated_by, s.staff_fields_updated_at,
+            su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
             (SELECT TOP 1 sv.value
              FROM dbo.submission_values sv
@@ -725,6 +732,7 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
              ORDER BY ff.sort_order) AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
+     LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
      WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -898,7 +906,8 @@ export async function updateSubmissionStatus(id: number, status: string): Promis
 // in the DB but absent from the incoming payload are left untouched.
 export async function updateSubmissionValues(
   submissionId: number,
-  answers: { field_id: number; value: string | number | boolean | string[] | null }[]
+  answers: { field_id: number; value: string | number | boolean | string[] | null }[],
+  opts?: { staffOnly?: boolean; updaterId?: number }
 ): Promise<void> {
   for (const a of answers) {
     const serialized =
@@ -924,6 +933,20 @@ export async function updateSubmissionValues(
     `UPDATE dbo.submissions SET updated_at = SYSUTCDATETIME() WHERE id = @id`,
     { id: submissionId }
   );
+
+  // Staff-only save: record which staff member saved these fields and when, so
+  // the detail page can display an audit line. Only applies to explicit
+  // staff-only batches (not general parent-field edits).
+  if (opts?.staffOnly && opts.updaterId !== undefined) {
+    await execute(
+      `UPDATE dbo.submissions
+       SET staff_fields_updated_by = @updaterId,
+           staff_fields_updated_at = SYSUTCDATETIME(),
+           updated_at = SYSUTCDATETIME()
+       WHERE id = @id`,
+      { id: submissionId, updaterId: opts.updaterId }
+    );
+  }
 }
 
 // -----------------------------------------------------------------------------

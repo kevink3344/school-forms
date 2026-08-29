@@ -189,7 +189,10 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
         return;
       }
     }
-    await updateSubmissionValues(submission.id, parsed.data.answers);
+    await updateSubmissionValues(submission.id, parsed.data.answers, {
+      staffOnly: parsed.data.staff_only === true,
+      updaterId: req.user!.id,
+    });
     const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     res.json(updated);
   } catch (err) {

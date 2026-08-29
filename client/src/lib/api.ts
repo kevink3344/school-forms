@@ -417,12 +417,13 @@ export const api = {
 
   async updateSubmissionValues(
     publicId: string,
-    answers: SubmissionAnswer[]
+    answers: SubmissionAnswer[],
+    options?: { staffOnly?: boolean }
   ): Promise<SubmissionDetail> {
     return request<SubmissionDetail>(`/api/submissions/${publicId}/values`, {
       method: "PUT",
       auth: true,
-      body: { answers },
+      body: { answers, staff_only: options?.staffOnly ?? false },
     });
   },
 

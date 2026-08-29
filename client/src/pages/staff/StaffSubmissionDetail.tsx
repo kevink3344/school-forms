@@ -135,7 +135,7 @@ export default function StaffSubmissionDetail() {
         field_id: f.id,
         value: staffDraft[f.id] ?? null,
       }));
-      await api.updateSubmissionValues(publicId, answers);
+      await api.updateSubmissionValues(publicId, answers, { staffOnly: true });
       const refreshed = await api.getSubmission(publicId);
       setDetail(refreshed);
       setStaffDraft(valuesToDraft(refreshed.values));
@@ -351,6 +351,13 @@ export default function StaffSubmissionDetail() {
                 >
                   {savingStaff ? "Saving..." : "Save staff fields"}
                 </button>
+              </div>
+            )}
+
+            {detail.staff_fields_updated_by_name && detail.staff_fields_updated_at && (
+              <div className="muted-note" style={{ marginTop: 12 }}>
+                Last saved by <strong>{detail.staff_fields_updated_by_name}</strong> on{" "}
+                {new Date(detail.staff_fields_updated_at).toLocaleString()}
               </div>
             )}
           </div>

@@ -120,6 +120,9 @@ export interface Submission {
   submission_seq: number | null;
   submitted_at: string;
   updated_at: string;
+  // Staff-only fields audit trail (null until a staff-only save happens).
+  staff_fields_updated_by: number | null;
+  staff_fields_updated_at: string | null;
 }
 
 export interface SubmissionValue {
@@ -177,6 +180,8 @@ export interface SubmissionDetail extends Submission {
   values: SubmissionValueRow[];
   comments: Comment[];
   adhocFields: AdhocField[];
+  // Display name of the staff member who last saved the staff-only fields.
+  staff_fields_updated_by_name: string | null;
   // The form's own staff-only field definitions (always shown on the detail page).
   staffOnlyFields: FormField[];
   // The form's non-staff-only field definitions (always shown so unanswered

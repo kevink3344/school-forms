@@ -115,8 +115,11 @@ export const updateSubmissionStatusSchema = z.object({
 });
 
 // Editing a submission's answers (staff/admin correcting parent input).
+// `staff_only` marks an explicit save of the staff-only fields, which records
+// the auditor (who + when) on the submission.
 export const updateSubmissionValuesSchema = z.object({
   answers: z.array(submissionAnswerSchema).min(1),
+  staff_only: z.boolean().optional(),
 });
 
 // -----------------------------------------------------------------------------

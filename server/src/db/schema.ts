@@ -100,6 +100,10 @@ export interface Submission {
   submission_seq: number;
   submitted_at: Date;
   updated_at: Date;
+  // Staff-only fields audit trail — which staff last saved the submission's
+  // staff-only fields, and when. NULL until a staff-only save happens.
+  staff_fields_updated_by: number | null;
+  staff_fields_updated_at: Date | null;
 }
 
 export interface SubmissionValue {
@@ -365,6 +369,16 @@ export const DDL_STATEMENTS: string[] = [
      DROP INDEX IX_submissions_school_form ON dbo.submissions;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_org_school_form')
      CREATE INDEX IX_submissions_org_school_form ON dbo.submissions(organization_id, school_id, form_id);`,
+
+  // ---------------------------------------------------------------------
+  // Staff-only fields audit trail — which staff last saved the submission's
+  // staff-only fields, and when. Populated by PUT /values when staff_only=true.
+  // (Separate batch: the submissions table must already exist for COL_LENGTH.)
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.submissions', 'staff_fields_updated_by') IS NULL
+     ALTER TABLE dbo.submissions ADD staff_fields_updated_by INT NULL;
+   IF COL_LENGTH('dbo.submissions', 'staff_fields_updated_at') IS NULL
+     ALTER TABLE dbo.submissions ADD staff_fields_updated_at DATETIME2 NULL;`,
 
   `IF OBJECT_ID('dbo.submission_values', 'U') IS NULL
    CREATE TABLE dbo.submission_values (
