@@ -580,4 +580,14 @@ export const api = {
       auth: true,
     });
   },
+
+  // Force a brand-new document from the submission's CURRENT values, even if a
+  // Completed one already exists. Creates a fresh Pending row synchronously and
+  // returns the newest document row for the submission.
+  async regenerateDocument(id: number): Promise<DocumentRow> {
+    return request<DocumentRow>(`/api/documents/${id}/regenerate`, {
+      method: "POST",
+      auth: true,
+    });
+  },
 };

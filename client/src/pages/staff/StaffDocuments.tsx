@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import type { DocumentRow } from "../../types";
 import { PageHead } from "../../components/layout";
 
@@ -19,9 +18,11 @@ function docStatusBadge(status: string): { cls: string; label: string } {
 }
 
 export default function StaffDocuments() {
-  const navigate = useNavigate();
   const [rows, setRows] = useState<DocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
+  const [selected, setSelected] = useState<DocumentRow | null>(null);
+  const [regenerating, setRegenerating] = useState(false);
+  const [panelError, setPanelError] = useState("");
 
   const load = () => {
     setLoading(true);
@@ -36,7 +37,34 @@ export default function StaffDocuments() {
     load();
   }, []);
 
-  const openSubmission = (publicId: string) => navigate(`/staff/${publicId}`);
+  const openPanel = (row: DocumentRow) => {
+    setSelected(row);
+    setPanelError("");
+  };
+
+  const closePanel = () => {
+    setSelected(null);
+    setPanelError("");
+  };
+
+  // Regenerate a document from the submission's CURRENT values. The backend
+  // creates a fresh Pending row synchronously and returns the newest document
+  // for the submission, so we refresh both the list and the open panel.
+  const handleRegenerate = async () => {
+    if (!selected) return;
+    setRegenerating(true);
+    setPanelError("");
+    try {
+      const refreshed = await api.regenerateDocument(selected.id);
+      // Refresh the list to include the new row.
+      load();
+      setSelected((prev) => (prev ? refreshed : null));
+    } catch (err) {
+      setPanelError(err instanceof ApiError ? err.message : "Could not regenerate document");
+    } finally {
+      setRegenerating(false);
+    }
+  };
 
   return (
     <div>
@@ -85,20 +113,14 @@ export default function StaffDocuments() {
                 const b = docStatusBadge(d.status);
                 const docId = d.document_id;
                 return (
-                  <tr key={d.id}>
+                  <tr
+                    key={d.id}
+                    className={selected?.id === d.id ? "grid-row selected" : "grid-row"}
+                    onClick={() => openPanel(d)}
+                  >
                     <td className="cell-mono" data-label="Date">{formatDate(d.created_at)}</td>
                     <td className="cell-strong" data-label="Student Name">
-                      <a
-                        className="link-name"
-                        href={`/staff/${d.public_id}`}
-                        onClick={(e) => {
-                          e.preventDefault();
-                          e.stopPropagation();
-                          openSubmission(d.public_id);
-                        }}
-                      >
-                        {d.student_name || "Unnamed submission"}
-                      </a>
+                      {d.student_name || "Unnamed submission"}
                     </td>
                     <td data-label="School Name">{d.school_name ?? "—"}</td>
                     <td data-label="Course Title">{d.course_title ?? "—"}</td>
@@ -128,6 +150,109 @@ export default function StaffDocuments() {
           </table>
         )}
       </div>
+
+      {/* Right slide-out document detail panel */}
+      {selected && (
+        <div className="drawer-overlay open" onClick={closePanel}>
+          <div className="drawer" onClick={(e) => e.stopPropagation()}>
+            <div className="drawer-head">
+              <h2>Document Details</h2>
+              <button className="icon-button close" onClick={closePanel}>
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                  <line x1="18" y1="6" x2="6" y2="18" />
+                  <line x1="6" y1="6" x2="18" y2="18" />
+                </svg>
+              </button>
+            </div>
+
+            <div className="drawer-body">
+              <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "10px 0" }}>
+                <div className="field">
+                  <span className="f-label">Submission ID</span>
+                  <span className="cell-mono">{selected.public_id}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">Student Name</span>
+                  <span>{selected.student_name || "Unnamed submission"}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">School Name</span>
+                  <span>{selected.school_name ?? "—"}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">Course Title</span>
+                  <span>{selected.course_title ?? "—"}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">Phase I Result</span>
+                  <span>{selected.phase1_result ?? "—"}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">Generated</span>
+                  <span>{formatDate(selected.created_at)}</span>
+                </div>
+                <div className="field">
+                  <span className="f-label">Status</span>
+                  <span className={`badge ${docStatusBadge(selected.status).cls}`}>
+                    {docStatusBadge(selected.status).label}
+                  </span>
+                </div>
+                {selected.document_id ? (
+                  <div className="field">
+                    <span className="f-label">Document</span>
+                    <a
+                      className="link-name"
+                      href={`https://docs.google.com/document/d/${selected.document_id}/edit`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Open in Google Docs ↗
+                    </a>
+                  </div>
+                ) : null}
+                {selected.error ? (
+                  <div className="field">
+                    <span className="f-label">Error</span>
+                    <span style={{ color: "var(--danger, #ba3040)" }}>{selected.error}</span>
+                  </div>
+                ) : null}
+              </div>
+
+              {panelError && (
+                <div
+                  style={{
+                    background: "rgb(255,232,234)",
+                    color: "rgb(186,48,64)",
+                    padding: "10px 12px",
+                    borderRadius: "var(--radius)",
+                    fontSize: 13,
+                    marginTop: 14,
+                  }}
+                >
+                  {panelError}
+                </div>
+              )}
+            </div>
+
+            <div className="drawer-foot">
+              <span className="file-note" style={{ marginTop: 0 }}>
+                Regenerate re-reads the submission&apos;s current values.
+              </span>
+              <div className="spacer" />
+              <button className="secondary-button" onClick={closePanel}>
+                Close
+              </button>
+              <button
+                className="primary-button"
+                onClick={handleRegenerate}
+                disabled={regenerating || selected.status === "Pending"}
+              >
+                {regenerating ? "Regenerating..." : "Regenerate"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

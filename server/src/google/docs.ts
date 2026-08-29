@@ -7,11 +7,14 @@ import {
   markDocumentFailed,
   markDocumentPending,
 } from "../db/documents.js";
+import type { Document } from "../db/schema.js";
 import {
+  getSchool,
   getSubmissionById,
   listSubmissionValues,
   listFormFields,
 } from "../db/queries.js";
+import type { SubmissionValueRow } from "../db/queries.js";
 
 // -----------------------------------------------------------------------------
 // Google Docs generation.
@@ -19,6 +22,12 @@ import {
 // Drive call passes `supportsAllDrives` because the target folder lives in a
 // shared drive. The template uses inline `Label:` paragraphs (e.g. "Student
 // Name:"); we copy it, then fill the value that follows each `Label:`.
+//
+// Documents are saved into a per-school subfolder of the configured Drive
+// parent (e.g. "WCPSS/Documents/Broughton High School"); the folder is created
+// on first use and reused thereafter. The file name follows the convention
+// `<Submission ID>-<Student Name>-<Did Student meet criteria?>`, e.g.
+// `CDM2-00001-Amy Anderson-Met`.
 // -----------------------------------------------------------------------------
 
 let authClient: InstanceType<typeof google.auth.OAuth2> | null = null;
@@ -35,20 +44,95 @@ function getAuth() {
 }
 
 /**
- * Copy the document template into the target Drive folder, naming the new file
- * after the submission (its public_id). Returns the new Google Doc id.
+ * Find a Drive folder by name directly under `parentId`. Returns its id, or
+ * null when it doesn't exist. Only matches folders (mimeType
+ * `application/vnd.google-apps.folder`) that are direct children so we never
+ * mistake a same-named file for a folder.
  */
-export async function copyTemplate(name: string): Promise<string> {
+async function findFolderByName(
+  drive: ReturnType<typeof google.drive>,
+  name: string,
+  parentId: string
+): Promise<string | null> {
+  const res = await drive.files.list({
+    q: `'${parentId}' in parents and name = '${escapeDriveQuery(
+      name
+    )}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false`,
+    fields: "files(id, name)",
+    supportsAllDrives: env.google.isSharedDrive,
+    includeItemsFromAllDrives: env.google.isSharedDrive,
+    spaces: "drive",
+  });
+  return res.data.files?.[0]?.id ?? null;
+}
+
+/** Escape a value for use inside a Drive query-string literal. */
+function escapeDriveQuery(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/'/g, "\\'");
+}
+
+/**
+ * Resolve (create if needed) a per-school folder under the configured Drive
+ * parent. The folder name is the school's display name (e.g. "Broughton High
+ * School"). Returns the folder id. When no parent folder is configured (or no
+ * school is attached to the submission), the items are saved to the Drive root.
+ */
+async function ensureSchoolFolder(
+  drive: ReturnType<typeof google.drive>,
+  schoolName: string | null
+): Promise<string | null> {
+  if (!env.google.docFolderId) return null;
+  if (!schoolName) return env.google.docFolderId;
+
+  const folderName = schoolName.trim();
+  if (!folderName) return env.google.docFolderId;
+
+  const existing = await findFolderByName(drive, folderName, env.google.docFolderId);
+  if (existing) return existing;
+
+  const res = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [env.google.docFolderId],
+    },
+    supportsAllDrives: env.google.isSharedDrive,
+    fields: "id, name",
+  });
+  return res.data.id ?? null;
+}
+
+/**
+ * Copy the document template into the target Drive folder, naming the new file
+ * `<Submission ID>-<Student Name>-<Did Student meet criteria?>`. Returns the
+ * new Google Doc id.
+ *
+ * `parentId` is the pre-resolved per-school folder id (or the Drive root when
+ * no school folder applies). File names are sanitized to strip any Drive-
+ * reserved characters (`/`, `\`, `"`, etc.) and collapse whitespace.
+ */
+export async function copyTemplate(
+  name: string,
+  parentId: string | null
+): Promise<string> {
   const drive = google.drive({ version: "v3", auth: getAuth() });
   const res = await drive.files.copy({
     fileId: env.google.docTemplateId,
     requestBody: {
-      name,
-      ...(env.google.docFolderId ? { parents: [env.google.docFolderId] } : {}),
+      name: sanitizeFileName(name),
+      ...(parentId ? { parents: [parentId] } : {}),
     },
     supportsAllDrives: env.google.isSharedDrive,
   });
   return res.data.id!;
+}
+
+/** Strip characters Google Drive disallows in file names and collapse spaces. */
+function sanitizeFileName(name: string): string {
+  return name
+    .replace(/[/\\"<>:|?*]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
 }
 
 /**
@@ -144,7 +228,11 @@ export async function replacePlaceholders(
       // value). Skip the delete when that range is empty — Google Docs
       // rejects a zero-length deleteContentRange.
       const end = el.endIndex! - 1;
-      edits.push({ start, end, value: m.value });
+      // Add a single space after the colon so labels render as
+      // "Student Name: Mary Johnson" rather than "Student Name:Mary Johnson".
+      // Empty values get no trailing space.
+      const value = m.value === "" ? "" : ` ${m.value}`;
+      edits.push({ start, end, value });
       break; // one replacement per paragraph
     }
   }
@@ -174,6 +262,35 @@ export async function replacePlaceholders(
 }
 
 /**
+ * Run the Google-side generation for a specific document row: read the
+ * submission's CURRENT values, resolve the per-school folder, copy the template,
+ * fill the placeholders, and mark the row Completed (or Failed on error). Shared
+ * by both the idempotent `generateDocument` and the forced `regenerateDocument`.
+ */
+async function runGeneration(submissionId: number, dbId: number): Promise<void> {
+  try {
+    const submission = await getSubmissionById(submissionId);
+    if (!submission) throw new Error("Submission not found");
+
+    const values = await listSubmissionValues(submission.id);
+    const mappings = buildLabelMappings(submission, values);
+
+    // Resolve the per-school folder and build the file name.
+    const school = submission.school_id ? await getSchool(submission.school_id) : null;
+    const schoolName = school?.name ?? null;
+    const drive = google.drive({ version: "v3", auth: getAuth() });
+    const parentId = await ensureSchoolFolder(drive, schoolName);
+    const docName = buildDocumentName(submission.public_id, values);
+
+    const docId = await copyTemplate(docName, parentId);
+    await replacePlaceholders(docId, mappings);
+    await markDocumentCompleted(dbId, docId);
+  } catch (err) {
+    await markDocumentFailed(dbId, (err as Error).message);
+  }
+}
+
+/**
  * Core orchestrator: create/copy/fill the doc for a submission, then record the
  * outcome. Idempotent — if a Pending/Completed row already exists, it returns
  * without doing anything; a Failed row is retried. Errors are caught and written
@@ -187,28 +304,56 @@ export async function generateDocument(
   const existing = await getDocumentBySubmission(submissionId);
   if (existing && existing.status !== "Failed") return;
 
-  let dbId: number;
   if (existing) {
     // Reset a prior failure so the row shows Pending while this retry runs.
     await markDocumentPending(existing.id);
-    dbId = existing.id;
-  } else {
-    const created = await createDocument(submissionId, createdBy);
-    dbId = created.id;
+    await runGeneration(submissionId, existing.id);
+    return;
   }
 
-  try {
-    const submission = await getSubmissionById(submissionId);
-    if (!submission) throw new Error("Submission not found");
+  const created = await createDocument(submissionId, createdBy);
+  await runGeneration(submissionId, created.id);
+}
 
-    const values = await listSubmissionValues(submission.id);
-    const mappings = buildLabelMappings(submission, values);
-    const docId = await copyTemplate(submission.public_id);
-    await replacePlaceholders(docId, mappings);
-    await markDocumentCompleted(dbId, docId);
-  } catch (err) {
-    await markDocumentFailed(dbId, (err as Error).message);
-  }
+/**
+ * Force a brand-new document from the submission's CURRENT values. Unlike
+ * `generateDocument` this is allowed even when a Completed row already exists:
+ * it inserts a fresh Pending row (returned to the caller so the UI can show it
+ * immediately), then runs the Google generation in the background. This powers
+ * the "Regenerate" action, so a staff member can correct a submission and
+ * produce an updated document reflecting those changes.
+ *
+ * Returns the newly-created Pending row.
+ */
+export async function regenerateDocument(
+  submissionId: number,
+  createdBy: number
+): Promise<Document> {
+  const created = await createDocument(submissionId, createdBy);
+  // Fire-and-forget: the caller already has the new Pending row to render.
+  void runGeneration(submissionId, created.id).catch(() => undefined);
+  return created;
+}
+
+/**
+ * Build the Google Doc file name: `<Submission ID>-<Student Name>-<Did Student
+ * meet criteria?>`, e.g. `CDM2-00001-Amy Anderson-Met`. Values are read from the
+ * submission's answers case-insensitively; missing/invalid components fall back
+ * to empty-string segments so the name stays well-formed.
+ */
+function buildDocumentName(
+  submissionId: string,
+  values: SubmissionValueRow[]
+): string {
+  const byLabel = new Map(
+    values.map((v) => [v.field_label.trim().toLowerCase(), toText(v.value)])
+  );
+  const student = byLabel.get("student name") ?? "";
+  const criteria = byLabel.get("did student meet criteria?") ?? "";
+  return [submissionId, student, criteria]
+    .map((part) => sanitizeFileName(part))
+    .filter(Boolean)
+    .join("-");
 }
 
 /**

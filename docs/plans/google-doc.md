@@ -197,14 +197,40 @@ const SCOPE = [
 
 ### 4.1 Copy the template
 
+Documents are saved into a **per-school subfolder** of the configured Drive
+parent (e.g. "WCPSS/Documents/Broughton High School"). The folder is created on
+first use and reused thereafter. The file name follows the convention
+`<Submission ID>-<Student Name>-<Did Student meet criteria?>`, e.g.
+`CDM2-00001-Amy Anderson-Met`.
+
 ```ts
-export async function copyTemplate(name: string): Promise<string> {
+// Resolve (create if needed) a per-school folder under the Drive parent.
+async function ensureSchoolFolder(drive, schoolName) {
+  if (!env.google.docFolderId) return null;
+  if (!schoolName) return env.google.docFolderId;
+  const folderName = schoolName.trim();
+  if (!folderName) return env.google.docFolderId;
+  const existing = await findFolderByName(drive, folderName, env.google.docFolderId);
+  if (existing) return existing;
+  const res = await drive.files.create({
+    requestBody: {
+      name: folderName,
+      mimeType: "application/vnd.google-apps.folder",
+      parents: [env.google.docFolderId],
+    },
+    supportsAllDrives: env.google.isSharedDrive,
+    fields: "id, name",
+  });
+  return res.data.id ?? null;
+}
+
+export async function copyTemplate(name: string, parentId: string | null): Promise<string> {
   const drive = google.drive({ version: "v3", auth: getAuth() });
   const res = await drive.files.copy({
     fileId: env.google.docTemplateId,
     requestBody: {
-      name,
-      ...(env.google.docFolderId ? { parents: [env.google.docFolderId] } : {}),
+      name: sanitizeFileName(name),
+      ...(parentId ? { parents: [parentId] } : {}),
     },
     supportsAllDrives: env.google.isSharedDrive,
   });
@@ -279,7 +305,15 @@ export async function replacePlaceholders(
 ```ts
 export async function generateDocument(submission, values, createdBy) {
   const mappings = buildLabelMappings(submission, values); // see §5
-  const docId = await copyTemplate(`${submission.public_id}`);
+
+  // Per-school folder + `<Submission ID>-<Student Name>-<Did Student meet criteria?>` name.
+  const school = submission.school_id ? await getSchool(submission.school_id) : null;
+  const schoolName = school?.name ?? null;
+  const drive = google.drive({ version: "v3", auth: getAuth() });
+  const parentId = await ensureSchoolFolder(drive, schoolName);
+  const docName = buildDocumentName(submission.public_id, values);
+
+  const docId = await copyTemplate(docName, parentId);
   await replacePlaceholders(docId, mappings);
   return docId;
 }

@@ -188,7 +188,10 @@ Using the **Google Docs API**:
 **`server/src/google/docs.ts`**:
 
 - `getAuth()` — OAuth2 client from `env.google`.
-- `copyTemplate(name)` — `drive.files.copy` into the shared-drive folder.
+- `ensureSchoolFolder(drive, schoolName)` — find or create a per-school
+  subfolder under the Drive parent (e.g. "Broughton High School").
+- `copyTemplate(name, parentId)` — `drive.files.copy` into the per-school folder,
+  named `<Submission ID>-<Student Name>-<Did Student meet criteria?>`.
 - `replacePlaceholders(docId, mappings)` — inline label-dot range replace.
 - `maybeGenerateDocument(submissionId, createdBy)` — orchestrator (idempotent).
 

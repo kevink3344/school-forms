@@ -1440,6 +1440,24 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/documents/{id}/regenerate": {
+        post: {
+          tags: ["Documents"],
+          summary: "Regenerate a document from the submission's current values (staff/admin)",
+          description: "Force a brand-new Google Doc from the submission's CURRENT answer values, even if a Completed one already exists. Creates a fresh Pending row synchronously and returns it; the Google generation runs in the background. Use this when a submission's answers were corrected and the document must reflect them.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK — the newly-created Pending document row",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ListDocumentRow" } } },
+            },
+            "400": { description: "Invalid document id" },
+            "403": { description: "Forbidden (staff from another school)" },
+            "404": { description: "Document not found" },
+          },
+        },
+      },
     },
   };
 }
