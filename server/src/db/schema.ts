@@ -88,6 +88,44 @@ export interface FormField {
   staff_only: boolean;
   sort_order: number;
   placeholder: string | null;
+  // Roles that can access this field when it is internal (staff_only). Stored as
+  // a JSON string array (e.g. '["admin","staff"]'); NULL for parent-facing fields.
+  // When NULL/empty on a staff_only field, it defaults to all current roles
+  // (admin + staff) so existing rows behave as they did before. Future roles are
+  // expressed by simply adding them to this array — no schema change needed.
+  roles: string[] | null;
+}
+
+// Resolve the roles that may access an internal (staff_only) field. For backward
+// compatibility, a staff_only field with NULL/empty roles is treated as visible to
+// every current role (admin + staff). Parent-facing fields (staff_only=0) always
+// return null to signal "public".
+export function fieldAccessRoles(field: Pick<FormField, "staff_only" | "roles">): string[] | null {
+  if (!field.staff_only) return null;
+  const roles = field.roles?.filter(Boolean);
+  if (!roles || roles.length === 0) return [...ROLES];
+  return roles;
+}
+
+// Decide whether a given viewer can see a field. `viewer` is a role string, or
+// "parent" for anonymous submissions. Admins are superusers and see every field.
+// Staff see internal fields only when "staff" is in the field's access roles.
+// Parents never see any internal (staff_only) field.
+export function canSeeField(
+  field: Pick<FormField, "staff_only" | "roles">,
+  viewer: Role | "parent"
+): boolean {
+  if (viewer === "admin") return true;
+  if (!field.staff_only) return true;
+  if (viewer === "parent") return false;
+  return (fieldAccessRoles(field) ?? []).includes(viewer);
+}
+
+// Entry that composes a field with its resolved access roles for API payloads.
+export function toFieldAccessRoles(
+  field: Pick<FormField, "staff_only" | "roles">
+): string[] | null {
+  return fieldAccessRoles(field);
 }
 
 export interface Submission {
@@ -358,6 +396,20 @@ export const DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_form_fields_form')
      CREATE INDEX IX_form_fields_form ON dbo.form_fields(form_id);`,
+
+  // Role-based field visibility — which roles can access an internal (staff_only)
+  // field. Stored as a JSON array of role strings (e.g. '["admin","staff"]');
+  // NULL for parent-facing fields. A staff_only field with NULL/empty roles is
+  // treated as visible to all current roles (admin + staff).
+  `IF COL_LENGTH('dbo.form_fields', 'roles') IS NULL
+     ALTER TABLE dbo.form_fields ADD roles NVARCHAR(MAX) NULL;`,
+
+  // One-time backfill: existing staff-only fields default to admin + staff, the
+  // two roles that existed before this feature. Explicitly stored so the value is
+  // queryable and future role additions don't silently grant old fields access.
+  `UPDATE dbo.form_fields
+     SET roles = N'["admin","staff"]'
+   WHERE staff_only = 1 AND (roles IS NULL OR roles = '');`,
 
   `IF OBJECT_ID('dbo.submissions', 'U') IS NULL
    CREATE TABLE dbo.submissions (

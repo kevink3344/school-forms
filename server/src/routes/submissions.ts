@@ -75,7 +75,7 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
   try {
     const orgSlug = req.query.org ? String(req.query.org) : undefined;
     const org = orgSlug ? await getOrganizationBySlug(orgSlug) : null;
-    const submission = await getSubmissionDetail(req.params.publicId, org?.id ?? null);
+    const submission = await getSubmissionDetail(req.params.publicId, org?.id ?? null, "parent");
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -116,7 +116,7 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (r
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -147,7 +147,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -160,7 +160,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       }
     }
     await updateSubmissionStatus(submission.id, parsed.data.status);
-    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     res.json(updated);
   } catch (err) {
     next(err);
@@ -178,7 +178,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -199,7 +199,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
     if (parsed.data.staff_only === true) {
       await maybeGenerateDocument(submission.id, req.user!.id, parsed.data.answers);
     }
-    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     res.json(updated);
   } catch (err) {
     next(err);
@@ -212,7 +212,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -241,7 +241,7 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -271,7 +271,7 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -300,7 +300,7 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "a
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -339,7 +339,7 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
@@ -374,7 +374,7 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
 // -----------------------------------------------------------------------------
 submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
   try {
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;

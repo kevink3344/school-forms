@@ -1,6 +1,6 @@
 import { getPool } from "./pool.js";
 import sql, { type Transaction } from "mssql";
-import { formatSubmissionPublicId } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import type {
   School,
@@ -391,7 +391,7 @@ export async function getForm(id: number, organizationId?: number | null): Promi
 
 export async function listFormFields(formId: number): Promise<FormField[]> {
   const rows = await execute<FormField>(
-    `SELECT id, form_id, label, type, options, required, staff_only, sort_order, placeholder
+    `SELECT id, form_id, label, type, options, required, staff_only, sort_order, placeholder, roles
      FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
@@ -401,7 +401,24 @@ export async function listFormFields(formId: number): Promise<FormField[]> {
   return rows.map((f) => ({
     ...f,
     options: parseFormFieldOptions(f.options),
+    roles: parseFormFieldRoles(f.roles),
   }));
+}
+
+// Parse the stored JSON-string roles into an array. Accepts a JSON string or an
+// already-array value (defensive). Returns null for empty / invalid / non-array
+// payloads so callers fall back to the default (all roles) for staff-only fields.
+export function parseFormFieldRoles(raw: string[] | string | null | undefined): string[] | null {
+  if (raw == null) return null;
+  if (Array.isArray(raw)) return raw.map(String);
+  if (typeof raw !== "string") return null;
+  if (raw.trim() === "") return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed.map(String) : null;
+  } catch {
+    return null;
+  }
 }
 
 // Parse the stored JSON-string options into an array. Accepts a JSON string or
@@ -490,6 +507,7 @@ export async function createForm(
     staff_only?: boolean;
     sort_order?: number;
     placeholder?: string | null;
+    roles?: string[] | null;
   }[]
 ): Promise<FormWithFields> {
   // Derive a short, globally-unique form code from the title. The code prefixes
@@ -508,8 +526,8 @@ export async function createForm(
   const form = forms[0];
   for (const f of fields) {
     await execute(
-      `INSERT INTO dbo.form_fields (form_id, label, type, options, required, staff_only, sort_order, placeholder)
-       VALUES (@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, @placeholder)`,
+      `INSERT INTO dbo.form_fields (form_id, label, type, options, required, staff_only, sort_order, placeholder, roles)
+       VALUES (@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, @placeholder, @roles)`,
       {
         formId: form.id,
         label: f.label,
@@ -519,6 +537,7 @@ export async function createForm(
         staffOnly: f.staff_only ?? false,
         sortOrder: f.sort_order ?? 0,
         placeholder: f.placeholder ?? null,
+        roles: f.roles?.length ? JSON.stringify(f.roles) : null,
       }
     );
   }
@@ -540,6 +559,7 @@ export async function updateForm(
       staff_only?: boolean;
       sort_order?: number;
       placeholder?: string | null;
+      roles?: string[] | null;
     }[];
   }
 ): Promise<FormWithFields | null> {
@@ -578,6 +598,7 @@ async function reconcileFormFields(
     staff_only?: boolean;
     sort_order?: number;
     placeholder?: string | null;
+    roles?: string[] | null;
   }[]
 ): Promise<void> {
   const existingRows = await execute<FormField>(
@@ -591,12 +612,13 @@ async function reconcileFormFields(
     const f = fields[i];
     const sortOrder = f.sort_order ?? i;
     const options = f.options && f.options.length ? JSON.stringify(f.options) : null;
+    const roles = f.roles?.length ? JSON.stringify(f.roles) : null;
     if (f.id && existingIds.has(f.id)) {
       incomingIds.add(f.id);
       await execute(
         `UPDATE dbo.form_fields
          SET label=@label, type=@type, options=@options, required=@required,
-             staff_only=@staffOnly, sort_order=@sortOrder, placeholder=@placeholder
+             staff_only=@staffOnly, sort_order=@sortOrder, placeholder=@placeholder, roles=@roles
          WHERE id=@id AND form_id=@formId`,
         {
           id: f.id,
@@ -608,12 +630,13 @@ async function reconcileFormFields(
           staffOnly: f.staff_only ?? false,
           sortOrder,
           placeholder: f.placeholder ?? null,
+          roles,
         }
       );
     } else {
       await execute(
-        `INSERT INTO dbo.form_fields (form_id, label, type, options, required, staff_only, sort_order, placeholder)
-         VALUES (@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, @placeholder)`,
+        `INSERT INTO dbo.form_fields (form_id, label, type, options, required, staff_only, sort_order, placeholder, roles)
+         VALUES (@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, @placeholder, @roles)`,
         {
           formId,
           label: f.label,
@@ -623,6 +646,7 @@ async function reconcileFormFields(
           staffOnly: f.staff_only ?? false,
           sortOrder,
           placeholder: f.placeholder ?? null,
+          roles,
         }
       );
     }
@@ -831,19 +855,30 @@ export async function listComments(submissionId: number): Promise<CommentRow[]> 
   );
 }
 
-export async function getSubmissionDetail(publicId: string, organizationId?: number | null): Promise<SubmissionDetail | null> {
+export async function getSubmissionDetail(
+  publicId: string,
+  organizationId?: number | null,
+  viewer: Role | "parent" = "admin"
+): Promise<SubmissionDetail | null> {
   const submission = await getSubmissionByPublicId(publicId, organizationId);
   if (!submission) return null;
   const values = await listSubmissionValues(submission.id);
   const comments = await listComments(submission.id);
   const adhocFields = await listAdhocFields(submission.id);
-  // The form's staff-only field definitions, so the detail page can render every
-  // staff-only field (including ones not yet answered) for one-by-one filling.
+  // The form's field definitions, so the detail page can render every field
+  // (including ones not yet answered) for one-by-one filling. Internal fields
+  // are partitioned by the viewer's access: staff/admin see the internal fields
+  // their role is allowed to; parents never see internal fields.
   const formFields = await listFormFields(submission.form_id);
-  const staffOnlyFields = formFields.filter((f) => f.staff_only);
-  const parentFields = formFields.filter((f) => !f.staff_only);
+  const visibleFields = formFields.filter((f) => canSeeField(f, viewer));
+  const visibleFieldIds = new Set(visibleFields.map((f) => f.id));
+  const staffOnlyFields = visibleFields.filter((f) => f.staff_only);
+  const parentFields = visibleFields.filter((f) => !f.staff_only);
+  // Filter values to only the fields the viewer can see so a parent (or a staff
+  // member without access) never receives out-of-view answers.
+  const visibleValues = values.filter((v) => visibleFieldIds.has(v.field_id));
   const documents = await listDocumentsBySubmission(submission.id);
-  return { ...submission, values, comments, adhocFields, staffOnlyFields, parentFields, documents };
+  return { ...submission, values: visibleValues, comments, adhocFields, staffOnlyFields, parentFields, documents };
 }
 
 // Resolve which school a submission belongs to. District-wide forms (e.g. CDM)
@@ -1153,17 +1188,20 @@ export interface ExportColumn {
   key: string;
   label: string;
   staff_only: boolean;
+  // Roles that may access this column when it is staff-only. NULL for public.
+  roles: string[] | null;
 }
 
 export async function getExportColumns(formId: number): Promise<ExportColumn[]> {
-  const rows = await execute<{ id: number; label: string; staff_only: boolean }>(
-    `SELECT id, label, staff_only FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
+  const rows = await execute<{ id: number; label: string; staff_only: boolean; roles: string | null }>(
+    `SELECT id, label, staff_only, roles FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
   return rows.map((r) => ({
     key: `field_${r.id}`,
     label: r.label,
     staff_only: Boolean(r.staff_only),
+    roles: parseFormFieldRoles(r.roles),
   }));
 }
 

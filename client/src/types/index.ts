@@ -83,6 +83,9 @@ export interface FormField {
   options: string[] | null;
   required: boolean;
   staff_only: boolean;
+  // Roles that may access a staff-only field. null for public fields. Absent or
+  // empty on a staff-only field means "all current roles".
+  roles: string[] | null;
   sort_order: number;
   placeholder: string | null;
 }
@@ -227,6 +230,7 @@ export interface ExportColumn {
   key: string;
   label: string;
   staff_only: boolean;
+  roles: string[] | null;
 }
 
 export interface ExportPreview {

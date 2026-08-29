@@ -83,6 +83,7 @@ export function buildSwaggerSpec(req?: Request) {
             options: { type: "array", items: { type: "string" }, nullable: true },
             required: { type: "boolean" },
             staff_only: { type: "boolean" },
+            roles: { type: "array", items: { type: "string" }, nullable: true, description: "Roles that may access a staff-only field; null for public fields." },
             sort_order: { type: "integer" },
             placeholder: { type: "string", nullable: true },
           },
@@ -184,6 +185,7 @@ export function buildSwaggerSpec(req?: Request) {
             key: { type: "string" },
             label: { type: "string" },
             staff_only: { type: "boolean" },
+            roles: { type: "array", items: { type: "string" }, nullable: true, description: "Roles that may access a staff-only column; null for public columns." },
           },
         },
         ViewColumnsConfig: {

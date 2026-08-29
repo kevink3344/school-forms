@@ -16,6 +16,16 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "checkbox", label: "Checkbox" },
 ];
 
+// Roles that may access a staff-only field. Extend this array (and the server's
+// `ROLES`) to add future roles; the toggle badges render from it automatically.
+const ROLES = ["admin", "staff"] as const;
+
+// Most-recently-viewed role set is used to seed a new staff-only field so it
+// defaults to being visible to every current role (backward-compatible).
+function defaultFieldRoles(): string[] {
+  return [...ROLES];
+}
+
 export default function AdminFormDesigner() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -94,6 +104,7 @@ export default function AdminFormDesigner() {
   const staffFields = fields.filter((f) => f.staff_only);
 
   const addField = () => {
+    const isStaff = activeTab === "staff";
     setFields((prev) => [
       ...prev,
       {
@@ -103,7 +114,10 @@ export default function AdminFormDesigner() {
         type: "text",
         options: null,
         required: false,
-        staff_only: activeTab === "staff",
+        staff_only: isStaff,
+        // Seed a staff-only field with access for every current role so it is
+        // visible to admin + staff by default (matching pre-existing behavior).
+        roles: isStaff ? defaultFieldRoles() : null,
         sort_order: prev.length,
         placeholder: null,
       },
@@ -147,6 +161,7 @@ export default function AdminFormDesigner() {
           options: f.options,
           required: f.required,
           staff_only: f.staff_only,
+          roles: f.staff_only ? (f.roles && f.roles.length ? f.roles : defaultFieldRoles()) : null,
           sort_order: i,
           placeholder: f.placeholder,
         })),
@@ -569,7 +584,7 @@ function FieldRow({
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
         <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
           <input
             type="checkbox"
@@ -578,6 +593,37 @@ function FieldRow({
           />
           Required
         </label>
+        {field.staff_only && (
+          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Access:</span>
+            {ROLES.map((role) => {
+              const has = (field.roles ?? defaultFieldRoles()).includes(role);
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  title={`${has ? "Remove" : "Grant"} ${role} access to this field`}
+                  onClick={() => {
+                    const current = field.roles?.length ? field.roles : defaultFieldRoles();
+                    const next = has ? current.filter((r) => r !== role) : [...current, role];
+                    onChange({ roles: next.length ? next : defaultFieldRoles() });
+                  }}
+                  className="badge-button"
+                  style={{
+                    cursor: "pointer",
+                    fontSize: 11,
+                    padding: "3px 9px",
+                    background: has ? "rgb(234,243,255)" : "transparent",
+                    color: has ? "rgb(49,93,198)" : "var(--text-muted)",
+                    borderColor: has ? "rgb(169,201,255)" : "var(--border)",
+                  }}
+                >
+                  {has ? "+" : "−"} {role}
+                </button>
+              );
+            })}
+          </div>
+        )}
       </div>
     </div>
   );

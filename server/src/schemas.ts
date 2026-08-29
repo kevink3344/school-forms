@@ -79,6 +79,9 @@ export const fieldSchema = z.object({
   staff_only: z.boolean().default(false),
   sort_order: z.number().int().min(0).default(0),
   placeholder: z.string().max(200).optional().nullable(),
+  // Roles that may access an internal (staff_only) field. Absent for
+  // parent-facing fields. Stored as-is; the server resolves defaults.
+  roles: z.array(z.enum(ROLES)).optional().nullable(),
 });
 
 export const createFormSchema = z.object({

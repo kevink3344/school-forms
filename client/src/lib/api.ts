@@ -315,6 +315,7 @@ export const api = {
       options?: string[] | null;
       required?: boolean;
       staff_only?: boolean;
+      roles?: string[] | null;
       sort_order?: number;
       placeholder?: string | null;
     }[];
@@ -339,6 +340,7 @@ export const api = {
         options?: string[] | null;
         required?: boolean;
         staff_only?: boolean;
+        roles?: string[] | null;
         sort_order?: number;
         placeholder?: string | null;
       }[];

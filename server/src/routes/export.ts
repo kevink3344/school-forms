@@ -6,9 +6,27 @@ import {
   execute,
   getForm,
 } from "../db/queries.js";
+import { fieldAccessRoles } from "../db/schema.js";
 import { requireAuth, requireRoles } from "../auth.js";
+import type { Role } from "../db/schema.js";
 
 export const exportRouter = Router();
+
+// Filter export columns for the requesting role. Staff see public columns plus
+// any staff-only column whose roles include "staff". Admins see everything only
+// when they opt into staff-only columns (includeStaffOnly); otherwise they see
+// just the public columns — matching the historical default.
+function filterColumnsForRole<T extends { staff_only: boolean; roles: string[] | null }>(
+  columns: T[],
+  role: Role,
+  includeStaffOnly: boolean
+): T[] {
+  if (role === "admin") {
+    return columns.filter((c) => !c.staff_only || includeStaffOnly);
+  }
+  // Staff: visible when public, or its access roles grant "staff".
+  return columns.filter((c) => !c.staff_only || (fieldAccessRoles(c) ?? []).includes("staff"));
+}
 
 // -----------------------------------------------------------------------------
 // Helper: build the exportable rows for a set of submissions + columns
@@ -98,10 +116,8 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "admin"), async 
     }
 
     let rawColumns = await getExportColumns(formId);
-    // Staff must never see staff-only columns, even in the preview.
-    if (isStaff) {
-      rawColumns = rawColumns.filter((c) => !c.staff_only);
-    }
+    // Staff see public columns plus any staff-only column whose roles include "staff".
+    rawColumns = filterColumnsForRole(rawColumns, req.user!.role, false);
     const columns = rawColumns.map((c) => {
       const m = /^field_(\d+)$/.exec(c.key);
       return { ...c, field_id: m ? Number(m[1]) : 0 };
@@ -150,11 +166,7 @@ exportRouter.get("/csv", requireAuth, requireRoles("staff", "admin"), async (req
     }
 
     let rawColumns = await getExportColumns(formId);
-    if (isStaff) {
-      rawColumns = rawColumns.filter((c) => !c.staff_only);
-    } else if (!includeStaffOnly) {
-      rawColumns = rawColumns.filter((c) => !c.staff_only);
-    }
+    rawColumns = filterColumnsForRole(rawColumns, req.user!.role, includeStaffOnly);
     const columns = rawColumns.map((c) => {
       const m = /^field_(\d+)$/.exec(c.key);
       return { ...c, field_id: m ? Number(m[1]) : 0 };
