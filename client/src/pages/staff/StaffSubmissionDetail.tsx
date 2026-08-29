@@ -452,7 +452,7 @@ function Field({
     return (
       <div className="field">
         <span className="f-label">{label}</span>
-        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value)}</span>
+        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value, type)}</span>
       </div>
     );
   }
@@ -592,10 +592,19 @@ function toStr(v: string | number | boolean | string[] | null): string {
   return String(v);
 }
 
-function formatValue(v: unknown): string {
+function formatValue(v: unknown, type?: string): string {
   // Unanswered optional fields (e.g. "Course choice #3 (optional)") should render
   // as blank rather than a placeholder, per the product requirement.
   if (v === null || v === undefined || v === "") return "";
+  const str = Array.isArray(v) ? "" : String(v);
+  // Format date fields and date-like strings (e.g. "2026-08-28") as M/D/YYYY.
+  // Parse the YYYY-MM-DD string directly to avoid the timezone shift that
+  // `new Date("2026-08-28")` would introduce on negative-offset systems.
+  if (type === "date" || /^\d{4}-\d{2}-\d{2}$/.test(str)) {
+    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (m) return `${Number(m[2])}/${Number(m[3])}/${m[1]}`;
+    return str;
+  }
   if (Array.isArray(v)) return v.join(", ");
-  return String(v);
+  return str;
 }
