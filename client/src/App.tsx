@@ -66,6 +66,16 @@ export default function App() {
         }
       />
       <Route
+        path="/admin/documents"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <StaffDocuments />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
         path="/admin/schools"
         element={
           <ProtectedRoute roles={["admin"]}>
