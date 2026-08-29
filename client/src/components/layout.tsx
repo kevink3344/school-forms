@@ -1,6 +1,8 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
+import { api } from "../lib/api";
+import { parseDocumentRoles, ROLES } from "../lib/settings";
 import type { Role } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -92,6 +94,30 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [collapsed, setCollapsed] = useState(false);
   // Mobile off-canvas drawer state.
   const [mobileOpen, setMobileOpen] = useState(false);
+
+  // Which roles currently see the Documents link. Reads the public
+  // `documents_link` setting (JSON role array). Defaults to all roles while it
+  // loads, so the link never flashes away behind a slow request; the stored
+  // value resolves on the next render.
+  const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getPublicSetting("documents_link")
+      .then((s) => {
+        if (!cancelled) setDocRoles(parseDocumentRoles(s.value));
+      })
+      .catch(() => {
+        // keep the default (all roles) if the read fails
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // True if the current user's role is enabled for Documents.
+  const showDocuments = user ? docRoles.includes(user.role) : false;
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -185,15 +211,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </svg>
                 <span className="s-label">Dashboard</span>
               </NavLink>
-              <NavLink to="/admin/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="16" y1="13" x2="8" y2="13" />
-                  <line x1="16" y1="17" x2="8" y2="17" />
-                </svg>
-                <span className="s-label">Documents</span>
-              </NavLink>
+              {showDocuments && (
+                <NavLink to="/admin/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  <span className="s-label">Documents</span>
+                </NavLink>
+              )}
               <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
                   <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
@@ -228,15 +256,17 @@ export function AppShell({ children }: { children: ReactNode }) {
                 </svg>
                 <span className="s-label">Submissions</span>
               </NavLink>
-              <NavLink to="/staff/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
-                  <polyline points="14 2 14 8 20 8" />
-                  <line x1="16" y1="13" x2="8" y2="13" />
-                  <line x1="16" y1="17" x2="8" y2="17" />
-                </svg>
-                <span className="s-label">Documents</span>
-              </NavLink>
+              {showDocuments && (
+                <NavLink to="/staff/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
+                    <polyline points="14 2 14 8 20 8" />
+                    <line x1="16" y1="13" x2="8" y2="13" />
+                    <line x1="16" y1="17" x2="8" y2="17" />
+                  </svg>
+                  <span className="s-label">Documents</span>
+                </NavLink>
+              )}
             </>
           )}
         </nav>

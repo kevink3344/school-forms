@@ -57,6 +57,10 @@ export interface User {
 // Login modes selectable in Settings → Login Mode (and stored in app_settings).
 export type LoginMode = "select" | "password" | "maintenance";
 
+// App setting keys the client can read/write. `documents_link` stores a JSON
+// role array; `login_mode` / `maintenance_message` back the Login Mode feature.
+export type AppSettingKey = "login_mode" | "maintenance_message" | "documents_link";
+
 // A user row for the select-mode login dropdown (no password hash, no school).
 export interface LoginUser {
   id: number;

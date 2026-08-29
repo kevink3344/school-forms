@@ -1,16 +1,34 @@
-import { Router } from "express";
+import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth, requireRoles } from "../auth.js";
 import { listDocuments, getDocumentById, listDocumentsBySubmission } from "../db/documents.js";
 import { generateDocument, regenerateDocument } from "../google/docs.js";
+import { getSetting } from "../db/queries.js";
+import { documentsEnabledFor } from "./settings.js";
 
 export const documentsRouter = Router();
+
+// Gate the Documents feature per-role via the documents_link setting. If the
+// caller's role is not enabled, refuse the request (the sidebar link is also
+// hidden client-side; this is the defensive server-side gate).
+export async function documentsEnabled(req: Request, res: Response, next: NextFunction) {
+  try {
+    const raw = await getSetting("documents_link");
+    if (!documentsEnabledFor(raw, req.user!.role)) {
+      res.status(403).json({ error: "Documents is disabled for your role" });
+      return;
+    }
+    next();
+  } catch (err) {
+    next(err);
+  }
+}
 
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/documents — the Documents list page.
 // Staff scoped to their school; admin scoped to their org. Returns the enriched
 // ListDocumentRow[] (student/school/course/phase fields + document_id + status).
 // -----------------------------------------------------------------------------
-documentsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+documentsRouter.get("/", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const rows = await listDocuments(
       req.user!.role === "staff"
@@ -29,7 +47,7 @@ documentsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (req
 // (fire-and-forget, the retry responds immediately). Ownership scoped like the
 // list: staff → their school, admin → their org.
 // -----------------------------------------------------------------------------
-documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {
@@ -80,7 +98,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), 
 // fresh Pending row synchronously and returns it; the Google work runs in the
 // background.
 // -----------------------------------------------------------------------------
-documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {

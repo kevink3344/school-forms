@@ -69,4 +69,5 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/documents", auth: "staff", tags: "Documents" },
   { method: "get", path: "/api/submissions/{publicId}/documents", auth: "staff", tags: "Documents" },
   { method: "post", path: "/api/documents/{id}/retry", auth: "staff", tags: "Documents" },
+  { method: "post", path: "/api/documents/{id}/regenerate", auth: "staff", tags: "Documents" },
 ];

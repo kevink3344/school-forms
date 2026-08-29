@@ -322,10 +322,10 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/settings/{key}": {
         get: {
           tags: ["Settings"],
-          summary: "Get a public app setting (login_mode / maintenance_message)",
+          summary: "Get a public app setting (login_mode / maintenance_message / documents_link)",
           security: [],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link"] } },
           ],
           responses: {
             "200": {
@@ -347,7 +347,7 @@ export function buildSwaggerSpec(req?: Request) {
           summary: "Update an app setting (admin only)",
           security: [{ [bearerScheme]: [] }],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link"] } },
           ],
           requestBody: {
             required: true,

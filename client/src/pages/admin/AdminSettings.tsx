@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
+import { parseDocumentRoles, ROLES } from "../../lib/settings";
 import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
@@ -149,6 +150,10 @@ export default function AdminSettings() {
   const [maintenanceMessage, setMaintenanceMessage] = useState(MAINTENANCE_DEFAULT);
   const [loginModeBusy, setLoginModeBusy] = useState(false);
 
+  // Documents link panel state. A JSON role array stored in app_settings.
+  const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
+  const [docBusy, setDocBusy] = useState(false);
+
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -171,14 +176,16 @@ export default function AdminSettings() {
     // Load the Login Mode + maintenance settings (separate try so a settings
     // failure never blocks the users/orgs panels).
     try {
-      const [mode, info, msg] = await Promise.all([
+      const [mode, info, msg, docs] = await Promise.all([
         api.getPublicSetting("login_mode"),
         api.getInfo(),
         api.getPublicSetting("maintenance_message"),
+        api.getPublicSetting("documents_link"),
       ]);
       setLoginMode((mode.value as LoginMode) || "select");
       setLoginModeOverride(info.loginModeOverride);
       if (msg.value) setMaintenanceMessage(msg.value);
+      setDocRoles(parseDocumentRoles(docs.value));
     } catch {
       // keep defaults
     }
@@ -279,6 +286,26 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not save maintenance message");
     } finally {
       setLoginModeBusy(false);
+    }
+  };
+
+  // Toggle a role's access to the Documents link. Optimistic with rollback.
+  const toggleDocRole = async (role: Role) => {
+    setError("");
+    setDocBusy(true);
+    const prev = docRoles;
+    const next = prev.includes(role)
+      ? prev.filter((r) => r !== role)
+      : [...prev, role];
+    setDocRoles(next);
+    try {
+      await api.updateSetting("documents_link", JSON.stringify(next));
+      setMessage(`Documents link ${next.includes(role) ? "enabled" : "hidden"} for ${role}.`);
+    } catch (err) {
+      setDocRoles(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update Documents visibility");
+    } finally {
+      setDocBusy(false);
     }
   };
 
@@ -445,6 +472,57 @@ export default function AdminSettings() {
               Save Maintenance Message
             </button>
           </div>
+      </CollapsibleSection>
+
+      {/* Documents link panel — which roles see the Documents sidebar link */}
+      <CollapsibleSection
+        title="Documents Link"
+        subtitle="Show or hide the Documents sidebar link, enabled by role"
+      >
+        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+          Toggle which roles see <strong>Documents</strong> in the sidebar. Toggling a role
+          off hides the link for those users immediately; the API also refuses their
+          requests. At least one role should remain enabled for the page to be used.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+          {ROLES.map((role) => {
+            const has = docRoles.includes(role);
+            const badge = roleBadge(role);
+            return (
+              <div
+                key={role}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: 12,
+                  padding: "12px 14px",
+                  borderRadius: "var(--radius)",
+                  border: "1px solid var(--border)",
+                  background: "var(--app-bg)",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                  <span style={{ fontSize: 13, color: "var(--text)" }}>
+                    {role === "admin" ? "Administrator" : "Staff member"}
+                    {has ? " — can see Documents" : " — cannot see Documents"}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                    {has ? "Visible" : "Hidden"}
+                  </span>
+                  <Toggle
+                    checked={has}
+                    disabled={docBusy}
+                    onChange={() => void toggleDocRole(role)}
+                  />
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </CollapsibleSection>
 
       {/* Organizations panel */}

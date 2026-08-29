@@ -2,6 +2,7 @@ import type {
   AuthResponse,
   AdhocField,
   AdminUser,
+  AppSettingKey,
   Comment,
   DocumentRow,
   ExportPreview,
@@ -208,8 +209,8 @@ export const api = {
     });
   },
 
-  // Read a public app setting (login_mode / maintenance_message).
-  async getPublicSetting(key: "login_mode" | "maintenance_message"): Promise<{
+  // Read a public app setting (login_mode / maintenance_message / documents_link).
+  async getPublicSetting(key: AppSettingKey): Promise<{
     key: string;
     value: string;
   }> {
@@ -217,7 +218,7 @@ export const api = {
   },
 
   // Update an app setting (admin only).
-  async updateSetting(key: "login_mode" | "maintenance_message", value: string): Promise<{
+  async updateSetting(key: AppSettingKey, value: string): Promise<{
     key: string;
     value: string;
   }> {
