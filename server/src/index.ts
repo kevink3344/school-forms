@@ -22,6 +22,10 @@ import { buildSwaggerSpec } from "./swagger.js";
 
 const app = express();
 
+// Azure App Service sits behind a reverse proxy. Trust one hop so req.protocol /
+// req.get("host") reflect the real public scheme + host (https, no port).
+app.set("trust proxy", 1);
+
 // -----------------------------------------------------------------------------
 // Middleware
 // -----------------------------------------------------------------------------
@@ -51,10 +55,23 @@ app.use("/api/", apiLimiter);
 // -----------------------------------------------------------------------------
 // Swagger / OpenAPI
 // -----------------------------------------------------------------------------
-const swaggerSpec = buildSwaggerSpec();
 if (env.swagger.enabled) {
-  app.use("/api/docs", swaggerUi.serve, swaggerUi.setup(swaggerSpec));
-  app.get("/api/docs.json", (_req, res) => res.json(swaggerSpec));
+  // Serve the OpenAPI spec dynamically so `servers[0]` matches the origin the
+  // docs page was served from (localhost:4000 vs. Azure no-port).
+  app.get("/api/docs.json", (_req, res) => {
+    res.json(buildSwaggerSpec(_req));
+  });
+
+  app.use(
+    "/api/docs",
+    swaggerUi.serve,
+    swaggerUi.setup(null, {
+      swaggerOptions: {
+        url: "/api/docs.json",
+      },
+      customSiteTitle: "School Forms API",
+    })
+  );
 }
 
 // -----------------------------------------------------------------------------

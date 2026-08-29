@@ -1,8 +1,21 @@
+import type { Request } from "express";
 import { env } from "./config/env.js";
 
-export function buildSwaggerSpec() {
+// Derive the server URL from the actual request, so "Try it out" targets the
+// exact origin the docs page was served from. This handles the local-dev
+// `:4000` vs. Azure (no port) difference with zero config.
+export function baseUrlFromRequest(req: Request): string {
+  return `${req.protocol}://${req.get("host")}`;
+}
+
+export function buildSwaggerSpec(req?: Request) {
   const bearerScheme = env.swagger.bearerScheme;
-  const baseUrl = env.publicBaseUrl;
+  const servers = [
+    // Always first: the origin this request was served from.
+    ...(req ? [{ url: baseUrlFromRequest(req), description: "Current origin" }] : []),
+    // Documented fallback (optional override). Never the primary.
+    { url: env.publicBaseUrl, description: "Development (PUBLIC_BASE_URL)" },
+  ];
 
   return {
     openapi: "3.0.3",
@@ -12,10 +25,7 @@ export function buildSwaggerSpec() {
       description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, view only their school's submissions, and add staff-only comments.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
       contact: { name: "School Forms Team" },
     },
-    servers: [
-      { url: baseUrl, description: "Development" },
-      { url: "https://your-school-forms-api.azurewebsites.net", description: "Azure" },
-    ],
+    servers,
     components: {
       securitySchemes: {
         [bearerScheme]: {
@@ -114,6 +124,9 @@ export function buildSwaggerSpec() {
             staff_fields_updated_by_name: { type: "string", nullable: true },
             values: { type: "array", items: { $ref: "#/components/schemas/SubmissionValue" } },
             comments: { type: "array", items: { $ref: "#/components/schemas/Comment" } },
+            adhocFields: { type: "array", items: { $ref: "#/components/schemas/AdhocField" }, description: "Staff-only fields added ad-hoc to this submission." },
+            staffOnlyFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's own staff-only field definitions." },
+            parentFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's non-staff-only field definitions." },
           },
         },
         SubmissionValue: {
@@ -185,6 +198,55 @@ export function buildSwaggerSpec() {
               description: "The subset of column keys currently displayed in the Submissions grid. When unconfigured, this equals all column keys.",
               items: { type: "string" },
             },
+          },
+        },
+        AdhocField: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            label: { type: "string" },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+            options: { type: "array", items: { type: "string" }, nullable: true },
+            value: { type: "object", nullable: true },
+            sort_order: { type: "integer" },
+            created_by: { type: "integer", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+          },
+        },
+        SchoolPage: {
+          type: "object",
+          properties: {
+            data: { type: "array", items: { $ref: "#/components/schemas/School" } },
+            total: { type: "integer" },
+            page: { type: "integer" },
+            pageSize: { type: "integer" },
+            totalPages: { type: "integer" },
+          },
+        },
+        ImportResult: {
+          type: "object",
+          properties: { total: { type: "integer" } },
+        },
+        Error: {
+          type: "object",
+          properties: {
+            error: { type: "string" },
+            details: { type: "object", nullable: true, description: "Zod flatten() output" },
+          },
+        },
+        Document: {
+          type: "object",
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            document_id: { type: "string", nullable: true, description: "Google Doc id returned by the API; null while Pending." },
+            status: { type: "string", enum: ["Pending", "Completed", "Failed"] },
+            created_by: { type: "integer", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            error: { type: "string", nullable: true, description: "Reason for a Failed status." },
           },
         },
       },
@@ -492,7 +554,8 @@ export function buildSwaggerSpec() {
         get: {
           tags: ["Schools"],
           summary: "List all schools",
-          security: [],
+          description: "Requires auth. Admins get the full list; staff are scoped to their own school.",
+          security: [{ [bearerScheme]: [] }],
           responses: {
             "200": {
               description: "OK",
@@ -844,6 +907,524 @@ export function buildSwaggerSpec() {
               description: "CSV download",
               content: { "text/csv": { schema: { type: "string" } } },
             },
+          },
+        },
+      },
+      "/api/auth/refresh": {
+        post: {
+          tags: ["Auth"],
+          summary: "Refresh the access token using the httpOnly refresh cookie",
+          security: [],
+          responses: {
+            "200": {
+              description: "OK — new access_token",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/AuthResponse" } },
+              },
+            },
+            "401": { description: "Invalid or missing refresh cookie" },
+          },
+        },
+      },
+      "/api/auth/logout": {
+        post: {
+          tags: ["Auth"],
+          summary: "Log out — clears the refresh cookie",
+          security: [],
+          responses: {
+            "200": { description: "Logged out" },
+          },
+        },
+      },
+      "/api/auth/seed-admin": {
+        post: {
+          tags: ["Auth"],
+          summary: "Create/seed the initial admin user (public seed)",
+          description: "Seeds a default admin so the app can be logged into for the first time. Only works when no admin exists.",
+          security: [],
+          responses: {
+            "201": { description: "Admin created" },
+            "409": { description: "An admin already exists" },
+          },
+        },
+      },
+      "/api/auth/seed-staff": {
+        post: {
+          tags: ["Auth"],
+          summary: "Create a staff user (admin only)",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "password", "display_name", "school_id"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    password: { type: "string", minLength: 8 },
+                    display_name: { type: "string" },
+                    school_id: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Staff created" },
+            "400": { description: "Validation error" },
+            "401": { description: "Unauthorized" },
+            "403": { description: "Forbidden (not admin)" },
+          },
+        },
+      },
+      "/api/forms/{id}": {
+        get: {
+          tags: ["Forms"],
+          summary: "Get a form with its fields (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Form" } } },
+            },
+            "404": { description: "Form not found" },
+          },
+        },
+        put: {
+          tags: ["Forms"],
+          summary: "Update a form (title/description/status/fields) — admin",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": { schema: { $ref: "#/components/schemas/Form" } },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Form" } } },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/forms/{id}/status": {
+        patch: {
+          tags: ["Forms"],
+          summary: "Publish/unpublish a form (draft|published|archived) — admin",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["status"],
+                  properties: { status: { type: "string", enum: ["draft", "published", "archived"] } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK — updated form",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Form" } } },
+            },
+            "400": { description: "Invalid status" },
+            "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}": {
+        get: {
+          tags: ["Submissions"],
+          summary: "Get a submission with values, comments, and ad-hoc fields",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Submission" } } },
+            },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/status": {
+        patch: {
+          tags: ["Submissions"],
+          summary: "Update a submission's status (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["status"],
+                  properties: { status: { type: "string", enum: ["submitted", "in_review", "flagged", "resolved"] } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OK — updated submission" },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/values": {
+        put: {
+          tags: ["Submissions"],
+          summary: "Update a submission's field values (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["answers"],
+                  properties: {
+                    answers: {
+                      type: "array",
+                      items: {
+                        type: "object",
+                        properties: { field_id: { type: "integer" }, value: { type: "object", nullable: true } },
+                      },
+                    },
+                    staff_only: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OK — updated submission" },
+            "400": { description: "Validation error" },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/comments": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Add a staff-only comment (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["body"],
+                  properties: { body: { type: "string" }, visibility: { type: "string", enum: ["internal"] } },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Comment created" },
+            "400": { description: "Validation error" },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/adhoc": {
+        get: {
+          tags: ["Submissions"],
+          summary: "List ad-hoc staff-only fields on a submission",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/AdhocField" } } },
+              },
+            },
+            "404": { description: "Submission not found" },
+          },
+        },
+        post: {
+          tags: ["Submissions"],
+          summary: "Add a staff-only ad-hoc field (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["label", "type"],
+                  properties: {
+                    label: { type: "string" },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+                    options: { type: "array", items: { type: "string" }, nullable: true },
+                    value: { type: "object", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/AdhocField" } } },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/adhoc/{fieldId}": {
+        put: {
+          tags: ["Submissions"],
+          summary: "Update an ad-hoc field (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "fieldId", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["label", "type"],
+                  properties: {
+                    label: { type: "string" },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+                    options: { type: "array", items: { type: "string" }, nullable: true },
+                    value: { type: "object", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK — updated field",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/AdhocField" } } },
+            },
+            "404": { description: "Submission or field not found" },
+          },
+        },
+        delete: {
+          tags: ["Submissions"],
+          summary: "Remove an ad-hoc field (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "fieldId", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": {
+              description: "OK — remaining fields",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/AdhocField" } } },
+              },
+            },
+            "404": { description: "Submission or field not found" },
+          },
+        },
+      },
+      "/api/users": {
+        get: {
+          tags: ["Users"],
+          summary: "List users in the admin's org (admin)",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK — safe user list (no password hashes)",
+              content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/User" } } } },
+            },
+            "401": { description: "Unauthorized" },
+            "403": { description: "Forbidden (not admin)" },
+          },
+        },
+        post: {
+          tags: ["Users"],
+          summary: "Create a user within the admin's org (admin)",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email", "password", "role"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    password: { type: "string", minLength: 8 },
+                    display_name: { type: "string" },
+                    role: { type: "string", enum: ["admin", "staff"] },
+                    school_id: { type: "integer", nullable: true },
+                    organization_id: { type: "integer", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Created" },
+            "400": { description: "Validation error" },
+            "409": { description: "Email already registered" },
+            "401": { description: "Unauthorized" },
+            "403": { description: "Forbidden (not admin)" },
+          },
+        },
+      },
+      "/api/users/{id}": {
+        put: {
+          tags: ["Users"],
+          summary: "Edit a user (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    display_name: { type: "string" },
+                    role: { type: "string", enum: ["admin", "staff"] },
+                    school_id: { type: "integer", nullable: true },
+                    active: { type: "boolean" },
+                    organization_id: { type: "integer", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OK — updated user" },
+            "400": { description: "Validation error / cannot deactivate self" },
+            "404": { description: "User not found" },
+            "409": { description: "Email already registered" },
+          },
+        },
+      },
+      "/api/schools/columns": {
+        get: {
+          tags: ["Schools"],
+          summary: "Get the school import table columns (admin)",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { columns: { type: "array", items: { type: "string" } } } },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/schools/page": {
+        get: {
+          tags: ["Schools"],
+          summary: "Paginated school listing (admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "page", in: "query", schema: { type: "integer" }, required: false },
+            { name: "pageSize", in: "query", schema: { type: "integer" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/SchoolPage" } } },
+            },
+          },
+        },
+      },
+      "/api/schools/import": {
+        post: {
+          tags: ["Schools"],
+          summary: "Manual import from the GeoJSON school feed (admin)",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK — imported count",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ImportResult" } } },
+            },
+            "400": { description: "SCHOOL_JSON not configured" },
+            "502": { description: "Failed to fetch feed" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/documents": {
+        post: {
+          tags: ["Documents"],
+          summary: "Create a document for a submission (staff/admin)",
+          description: "Forward-declared — the Generate Document feature is planned. Returns a Pending document.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    template_id: { type: "integer", nullable: true },
+                    title: { type: "string", nullable: true },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created — Pending document",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Document" } } },
+            },
+            "404": { description: "Submission not found" },
+          },
+        },
+        get: {
+          tags: ["Documents"],
+          summary: "List documents for a submission (staff/admin)",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Document" } } },
+              },
+            },
+            "404": { description: "Submission not found" },
+          },
+        },
+      },
+      "/api/documents/{id}/retry": {
+        post: {
+          tags: ["Documents"],
+          summary: "Retry a failed document generation (staff/admin)",
+          description: "Forward-declared — the Generate Document feature is planned.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK — document status",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Document" } } },
+            },
+            "404": { description: "Document not found" },
           },
         },
       },
