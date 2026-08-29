@@ -419,6 +419,28 @@ function parseFormFieldOptions(raw: string[] | string | null | undefined): strin
   }
 }
 
+// Deserialize a stored submission value for the API. Collections (checkbox /
+// any array-valued field type) are persisted via JSON.stringify on write, so
+// parse the JSON string back into an array on read; otherwise return the value
+// unchanged. NULL is passed through so callers treat empty exactly as "not set".
+function parseSubmissionValue(
+  value: string | number | boolean | string[] | null,
+  fieldType: string
+): string | number | boolean | string[] | null {
+  if (value == null) return null;
+  if (Array.isArray(value)) return value.map(String); // already an array
+  const isCollection = fieldType === "checkbox" || fieldType === "multiselect";
+  if (!isCollection || typeof value !== "string") return value;
+  try {
+    const parsed: unknown = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed.map(String) : value;
+  } catch {
+    // Not valid JSON (e.g. legacy data or a plain value stored for the field) —
+    // return the raw string so callers still surface it rather than dropping it.
+    return value;
+  }
+}
+
 export async function getFormWithFields(id: number, organizationId?: number | null): Promise<FormWithFields | null> {
   const form = await getForm(id, organizationId);
   if (!form) return null;
@@ -753,12 +775,14 @@ export async function listSubmissionValues(submissionId: number): Promise<Submis
      ORDER BY ff.sort_order`,
     { submissionId }
   );
-  // Convert the stored JSON-string options (rawOptions) into a parsed array.
+  // Convert the stored JSON-string options (rawOptions) into a parsed array, and
+  // deserialize JSON-array values (checkbox/multiselect) back into arrays so the
+  // client renderer sees the correct checked state.
   return rows.map((r) => ({
     id: r.id,
     submission_id: r.submission_id,
     field_id: r.field_id,
-    value: r.value,
+    value: parseSubmissionValue(r.value, r.field_type),
     field_label: r.field_label,
     field_type: r.field_type,
     staff_only: r.staff_only,
