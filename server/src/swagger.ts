@@ -249,6 +249,26 @@ export function buildSwaggerSpec(req?: Request) {
             error: { type: "string", nullable: true, description: "Reason for a Failed status." },
           },
         },
+        ListDocumentRow: {
+          type: "object",
+          description: "A document row enriched with the submission's school and label-derived answers (Documents list page).",
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            document_id: { type: "string", nullable: true },
+            status: { type: "string", enum: ["Pending", "Completed", "Failed"] },
+            created_by: { type: "integer", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+            error: { type: "string", nullable: true },
+            public_id: { type: "string", description: "Submission public id (through-link)." },
+            school_id: { type: "integer", nullable: true },
+            school_name: { type: "string", nullable: true },
+            student_name: { type: "string", nullable: true },
+            course_title: { type: "string", nullable: true },
+            phase1_result: { type: "string", nullable: true },
+          },
+        },
       },
     },
     paths: {
@@ -1367,47 +1387,37 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
-      "/api/submissions/{publicId}/documents": {
-        post: {
+      "/api/documents": {
+        get: {
           tags: ["Documents"],
-          summary: "Create a document for a submission (staff/admin)",
-          description: "Forward-declared — the Generate Document feature is planned. Returns a Pending document.",
+          summary: "List generated documents (staff/admin)",
+          description: "Staff sees documents for their school; admin sees documents for their organization. Returns the enriched ListDocumentRow[].",
           security: [{ [bearerScheme]: [] }],
-          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  properties: {
-                    template_id: { type: "integer", nullable: true },
-                    title: { type: "string", nullable: true },
-                  },
-                },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/ListDocumentRow" } } },
               },
             },
           },
-          responses: {
-            "201": {
-              description: "Created — Pending document",
-              content: { "application/json": { schema: { $ref: "#/components/schemas/Document" } } },
-            },
-            "404": { description: "Submission not found" },
-          },
         },
+      },
+      "/api/submissions/{publicId}/documents": {
         get: {
           tags: ["Documents"],
           summary: "List documents for a submission (staff/admin)",
+          description: "The submission's generated documents (enriched rows), used by the staff detail card. Staff must own the submission's school.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
           responses: {
             "200": {
               description: "OK",
               content: {
-                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/Document" } } },
+                "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/ListDocumentRow" } } },
               },
             },
+            "403": { description: "Forbidden (staff from another school)" },
             "404": { description: "Submission not found" },
           },
         },
@@ -1416,14 +1426,16 @@ export function buildSwaggerSpec(req?: Request) {
         post: {
           tags: ["Documents"],
           summary: "Retry a failed document generation (staff/admin)",
-          description: "Forward-declared — the Generate Document feature is planned.",
+          description: "Resets a Failed (or stale Pending) document to Pending and re-runs the Google generator in the background. Fire-and-forget — responds immediately with the current row.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
           responses: {
             "200": {
-              description: "OK — document status",
-              content: { "application/json": { schema: { $ref: "#/components/schemas/Document" } } },
+              description: "OK — document status (Pending while the job runs)",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/ListDocumentRow" } } },
             },
+            "400": { description: "Document already completed / invalid id" },
+            "403": { description: "Forbidden (staff from another school)" },
             "404": { description: "Document not found" },
           },
         },

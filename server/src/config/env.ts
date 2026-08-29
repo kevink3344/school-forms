@@ -86,6 +86,20 @@ export const env = {
     max: int("RATE_LIMIT_MAX", 300),
   },
 
+  // Google Docs generation (staff "Generate document" feature).
+  // Authenticated as a project OAuth client using a refresh-token grant (not a
+  // service account). `googleIsSharedDrive` tells the Drive API whether the
+  // template/folder live in a shared drive (requires supportsAllDrives).
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+    refreshToken: process.env.GOOGLE_REFRESH_TOKEN ?? "",
+    grantType: process.env.GOOGLE_GRANT_TYPE ?? "refresh_token",
+    docTemplateId: process.env.GOOGLE_DOC_TEMPLATE_ID ?? "",
+    docFolderId: process.env.GOOGLE_DOC_FOLDER_ID ?? "",
+    isSharedDrive: process.env.GOOGLE_IS_SHARED_DRIVE === "true",
+  },
+
   // School import: a public ArcGIS GeoJSON feed + the table columns to render.
   // Import is manual (admin button); see docs/plans/school-import.md.
   schoolImport: {

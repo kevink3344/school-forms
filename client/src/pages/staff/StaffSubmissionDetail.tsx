@@ -150,6 +150,26 @@ export default function StaffSubmissionDetail() {
     setStaffDraft((prev) => ({ ...prev, [fieldId]: value }));
   };
 
+  // Re-run generation for a Failed document. Fire-and-forget on the server, so
+  // we optimistically set the row to Pending and re-fetch to see the outcome.
+  const handleRetryDocument = async (id: number) => {
+    if (!publicId) return;
+    setError("");
+    try {
+      const refreshed = await api.retryDocument(id);
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              documents: prev.documents.map((d) => (d.id === id ? refreshed : d)),
+            }
+          : prev
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not retry document generation");
+    }
+  };
+
   if (loading) {
     return (
       <div className="loading-state">
@@ -358,6 +378,41 @@ export default function StaffSubmissionDetail() {
               <div className="muted-note" style={{ marginTop: 12 }}>
                 Last saved by <strong>{detail.staff_fields_updated_by_name}</strong> on{" "}
                 {new Date(detail.staff_fields_updated_at).toLocaleString()}
+              </div>
+            )}
+
+            {detail.documents && detail.documents.length > 0 && (
+              <div style={{ marginTop: 12 }}>
+                {detail.documents.map((doc) => (
+                  <div className="muted-note" key={doc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                    <span>
+                      Document{" "}
+                      {doc.document_id ? (
+                        <a
+                          href={`https://docs.google.com/document/d/${doc.document_id}/edit`}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="link-name"
+                        >
+                          generated
+                        </a>
+                      ) : doc.status === "Failed" ? (
+                        <span>[failed]</span>
+                      ) : (
+                        <span>[pending]</span>
+                      )}{" "}
+                      on {new Date(doc.created_at).toLocaleString()}
+                    </span>
+                    <span className={`badge ${docStatusBadge(doc.status).cls}`}>
+                      {docStatusBadge(doc.status).label}
+                    </span>
+                    {doc.status === "Failed" && (
+                      <button className="badge-button" onClick={() => handleRetryDocument(doc.id)}>
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>
@@ -607,4 +662,17 @@ function formatValue(v: unknown, type?: string): string {
   }
   if (Array.isArray(v)) return v.join(", ");
   return str;
+}
+
+function docStatusBadge(status: string): { cls: string; label: string } {
+  switch (status) {
+    case "Completed":
+      return { cls: "badge-green", label: "Completed" };
+    case "Failed":
+      return { cls: "badge-red", label: "Failed" };
+    case "Pending":
+      return { cls: "badge-amber", label: "Pending" };
+    default:
+      return { cls: "badge-slate", label: status };
+  }
 }

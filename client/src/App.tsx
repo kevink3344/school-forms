@@ -9,6 +9,7 @@ import AdminFormDesigner from "./pages/admin/AdminFormDesigner";
 import AdminSchools from "./pages/admin/AdminSchools";
 import AdminSettings from "./pages/admin/AdminSettings";
 import StaffQueue from "./pages/staff/StaffQueue";
+import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
 import ParentSubmit from "./pages/parent/ParentSubmit";
 import ParentConfirmation from "./pages/parent/ParentConfirmation";
@@ -102,6 +103,16 @@ export default function App() {
           <ProtectedRoute roles={["staff"]}>
             <AppShell>
               <StaffQueue />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/documents"
+        element={
+          <ProtectedRoute roles={["staff"]}>
+            <AppShell>
+              <StaffDocuments />
             </AppShell>
           </ProtectedRoute>
         }

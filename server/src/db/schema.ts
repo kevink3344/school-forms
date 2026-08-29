@@ -140,6 +140,38 @@ export interface AdhocField {
 }
 
 // -----------------------------------------------------------------------------
+// Generated Google Documents (staff "Generate document" feature).
+// A row is created Pending when staff check the field on save, then updated to
+// Completed (with the Google Doc id) or Failed (with an error message) after the
+// Google call resolves. Lives in its own table so a submission can have multiple
+// attempts over time (original + retries) without mutating the submission.
+// -----------------------------------------------------------------------------
+export const DOCUMENT_STATUS = ["Pending", "Completed", "Failed"] as const;
+export type DocumentStatus = (typeof DOCUMENT_STATUS)[number];
+
+export interface Document {
+  id: number;
+  submission_id: number;
+  document_id: string | null;
+  status: DocumentStatus;
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+  error: string | null;
+}
+
+// A document row enriched with the labels shown on the Documents list page.
+// The non-column fields are derived from the submission's answers (or school).
+export interface ListDocumentRow extends Document {
+  public_id: string; // submission public id (link through)
+  school_id: number | null;
+  school_name: string | null;
+  student_name: string | null;
+  course_title: string | null;
+  phase1_result: string | null;
+}
+
+// -----------------------------------------------------------------------------
 // SQL Server DDL — executed once at startup (idempotent CREATE IF NOT EXISTS)
 // -----------------------------------------------------------------------------
 export const DDL_STATEMENTS: string[] = [
@@ -438,6 +470,28 @@ export const DDL_STATEMENTS: string[] = [
      [value]    NVARCHAR(MAX) NOT NULL,
      updated_at DATETIME2 NOT NULL CONSTRAINT DF_app_settings_updated_at DEFAULT SYSUTCDATETIME()
    );`,
+
+  // Generated Google Documents. `submission_id` has a single cascade path to
+  // schools (via submissions->forms->schools) so NO ACTION/other FK rules are
+  // chosen here; the only child FK out of submissions is to documents with
+  // ON DELETE CASCADE, plus created_by->users ON DELETE SET NULL (users is an
+  // ancestor of nothing on this path, so no 1785 risk).
+  `IF OBJECT_ID('dbo.documents', 'U') IS NULL
+   CREATE TABLE dbo.documents (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     submission_id INT NOT NULL,
+     document_id   NVARCHAR(100) NULL,
+     status        NVARCHAR(20) NOT NULL CONSTRAINT DF_documents_status DEFAULT 'Pending'
+                   CHECK (status IN ('Pending','Completed','Failed')),
+     created_by    INT NULL,
+     created_at    DATETIME2 NOT NULL CONSTRAINT DF_documents_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at    DATETIME2 NOT NULL CONSTRAINT DF_documents_updated_at DEFAULT SYSUTCDATETIME(),
+     error         NVARCHAR(MAX) NULL,
+     CONSTRAINT FK_documents_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
+     CONSTRAINT FK_documents_creator FOREIGN KEY (created_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+   );
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_documents_submission')
+     CREATE INDEX IX_documents_submission ON dbo.documents(submission_id);`,
 ];
 
 // -----------------------------------------------------------------------------

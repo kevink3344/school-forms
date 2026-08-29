@@ -16,6 +16,7 @@ import {
   getOrganizationBySlug,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
+import { maybeGenerateDocument } from "../google/docs.js";
 import {
   createSubmissionSchema,
   updateSubmissionStatusSchema,
@@ -193,8 +194,38 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
       staffOnly: parsed.data.staff_only === true,
       updaterId: req.user!.id,
     });
+    // Staff-only save: if the "Generate document" checkbox was ticked, fire the
+    // Google Doc generation (idempotent, fire-and-forget — never blocks the 200).
+    if (parsed.data.staff_only === true) {
+      await maybeGenerateDocument(submission.id, req.user!.id, parsed.data.answers);
+    }
     const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/:publicId/documents — list document rows for a
+// submission (used by the detail card). Reuses the staff school ownership check.
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (req.user!.role === "staff") {
+      const isOwner = submission.school_id === req.user!.school_id;
+      if (!isOwner) {
+        res.status(403).json({ error: "Forbidden" });
+        return;
+      }
+    }
+    const documents = submission.documents;
+    res.json(documents);
   } catch (err) {
     next(err);
   }

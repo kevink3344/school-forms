@@ -3,6 +3,7 @@ import type {
   AdhocField,
   AdminUser,
   Comment,
+  DocumentRow,
   ExportPreview,
   Form,
   FormWithFields,
@@ -559,5 +560,24 @@ export const api = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  },
+
+  // -------------------------------------------------------------------------
+  // Documents (generated Google Docs)
+  // -------------------------------------------------------------------------
+  // List generated Google Docs, scoped to the caller (staff → own school,
+  // admin → organization). Enriched with submission + school + label data.
+  async listDocuments(): Promise<DocumentRow[]> {
+    return request<DocumentRow[]>("/api/documents", { auth: true });
+  },
+
+  // Re-run generation for a Failed (or Pending) document. Fire-and-forget on
+  // the server; returns the refreshed row (may still be Pending while the doc
+  // is generated asynchronously).
+  async retryDocument(id: number): Promise<DocumentRow> {
+    return request<DocumentRow>(`/api/documents/${id}/retry`, {
+      method: "POST",
+      auth: true,
+    });
   },
 };

@@ -16,6 +16,7 @@ import { submissionsRouter } from "./routes/submissions.js";
 import { organizationsRouter } from "./routes/organizations.js";
 import { exportRouter } from "./routes/export.js";
 import { webhookRouter } from "./routes/webhook.js";
+import { documentsRouter } from "./routes/documents.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
 import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
@@ -88,6 +89,7 @@ app.use("/api/submissions", submissionsRouter);
 app.use("/api/organizations", organizationsRouter);
 app.use("/api/export", exportRouter);
 app.use("/api/webhook", webhookRouter);
+app.use("/api/documents", documentsRouter);
 
 // -----------------------------------------------------------------------------
 // Serve the built client (SPA) so a single URL hosts BOTH the API and the app.

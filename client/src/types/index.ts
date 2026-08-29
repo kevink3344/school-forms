@@ -175,6 +175,31 @@ export interface AdhocField {
   updated_at: string;
 }
 
+export type DocumentStatus = "Pending" | "Completed" | "Failed";
+
+// A generated Google Doc record for a submission.
+export interface Document {
+  id: number;
+  submission_id: number;
+  document_id: string | null;
+  status: DocumentStatus;
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+  error: string | null;
+}
+
+// Enriched document row returned by /api/documents — joins the submission and
+// its school + the label fields used to name/fill the doc.
+export interface DocumentRow extends Document {
+  public_id: string;
+  school_id: number | null;
+  school_name: string | null;
+  student_name: string | null;
+  course_title: string | null;
+  phase1_result: string | null;
+}
+
 export interface SubmissionDetail extends Submission {
   form_name: string;
   student_name: string | null;
@@ -188,6 +213,8 @@ export interface SubmissionDetail extends Submission {
   // The form's non-staff-only field definitions (always shown so unanswered
   // optional fields render + are editable even without a stored value).
   parentFields: FormField[];
+  // Generated Google Docs for this submission (idempotent: at most one active).
+  documents: DocumentRow[];
 }
 
 export interface AuthResponse {

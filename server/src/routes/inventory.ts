@@ -66,8 +66,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/export/preview", auth: "staff", tags: "Export" },
   { method: "get", path: "/api/export/csv", auth: "staff", tags: "Export" },
   { method: "post", path: "/api/webhook/google", auth: "secret", tags: "Submissions" },
-  // Forward-declared (Generate Document feature is planned, not yet mounted).
-  { method: "post", path: "/api/submissions/{publicId}/documents", auth: "staff", tags: "Documents" },
+  { method: "get", path: "/api/documents", auth: "staff", tags: "Documents" },
   { method: "get", path: "/api/submissions/{publicId}/documents", auth: "staff", tags: "Documents" },
   { method: "post", path: "/api/documents/{id}/retry", auth: "staff", tags: "Documents" },
 ];

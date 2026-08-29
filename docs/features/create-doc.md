@@ -1,9 +1,8 @@
 # Generate Document — Feature Plan
 
-> **Status:** Draft / design proposal (not yet implemented)
-> **Goal:** When a staff member checks the **"Generate document"** checkbox on a
-> submission (a staff-only field) and saves, the system creates a **Google Doc**
-> from a template and records it in a new **Documents** table.
+> **Status:** Superseded by [`docs/plans/google-doc.md`](../plans/google-doc.md).
+> This document is kept for historical context but **no longer reflects the
+> implemented design.** See the plan for the current, verified approach.
 
 ---
 
@@ -13,9 +12,13 @@ Staff reviewing a submission can tick a per-submission staff-only checkbox,
 **"Generate document"**. On save, the app should:
 
 1. Create a row in a new `dbo.documents` table.
-2. Call the **Google Docs API** (service account) to copy a **Google Doc
-   template** and fill in placeholders from the submission's answers.
+2. Call the **Google Docs API** to copy a **Google Doc template** and fill in
+   placeholders from the submission's answers.
 3. Store the resulting Google Doc id and status.
+
+> **Update:** The implemented design uses **OAuth refresh-token auth** (not a
+> service account) and the template uses **inline `Label:` pairs** (not
+> `{{Placeholder}}` tokens). See [`docs/plans/google-doc.md`](../plans/google-doc.md) for details.
 
 This keeps a permanent, auditable record of every generated document per
 submission (who generated it, when, and what the final Google Doc id was).
@@ -154,17 +157,20 @@ const shouldGenerate = val.length > 0; // checked → has at least one option se
 
 ## 4. Google Docs integration
 
-The user will supply the Google auth + template id in `.env`. We use a
-**Google Service Account** (`googleapis` npm package), not OAuth, because it's a
-server-to-server background job with no user consent flow.
+> **Update:** This section describes the **original draft** approach. The
+> implemented design uses an **OAuth client + refresh-token grant** (NOT a service
+> account) and the template's **inline `Label:`** convention (NOT `{{Placeholder}}`
+> tokens). See [`docs/plans/google-doc.md`](../plans/google-doc.md) §4–§5 for the
+> current code.
+
+The Google auth + template id come from `.env`. (Draft originally assumed a
+**Google Service Account**; verified reality is **OAuth refresh-token**.)
 
 ### 4.1 Auth flow
 
-1. Load a service-account JSON (or the key directly) from `.env`.
-2. `google.auth.GoogleAuth` with the service account.
-3. Scope: `https://www.googleapis.com/auth/documents` (read/write docs). If the
-   template and generated doc live in Drive and need `files.copy`, also grant
-   `https://www.googleapis.com/auth/drive`.
+1. Load `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` / `GOOGLE_REFRESH_TOKEN` from `.env`.
+2. `new google.auth.OAuth2(clientId, clientSecret)` + `setCredentials({ refresh_token })`.
+3. Scopes: `https://www.googleapis.com/auth/documents` + `https://www.googleapis.com/auth/drive`.
 
 ### 4.2 Template copy + placeholder replacement
 
@@ -172,33 +178,29 @@ Using the **Google Docs API**:
 
 1. `drive.files.copy` the template (by `GOOGLE_DOC_TEMPLATE_ID`) → returns a new
    doc id (`document_id`).
-2. `documents.batchUpdate` on the new doc to replace `{{PLACEHOLDER}}` tokens with
-   the submission's answer values (see `docs.documents.batchUpdate` with
-   `replaceAllText`).
-
-Placeholder convention: `{{FieldLabel}}` or `{{FieldId}}`, e.g. `{{Student Name}}`,
-`{{Student ID}}`, `{{School}}`, `{{DateSubmitted}}`. The user will confirm the
-exact mapping (Student Name, Student ID, etc.).
+2. `documents.batchUpdate` on the new doc. The template uses **inline `Label:`**
+   paragraphs (e.g. `Student Name:`), so the replacement computes string ranges
+   and inserts the value **after** the colon — NOT `replaceAllText` on a fixed
+   `{{token}}`.
 
 ### 4.3 New service file
 
-**`server/src/db/documents.ts`** (or `server/src/google/docs.ts`):
+**`server/src/google/docs.ts`**:
 
-- `generateDocument(submissionId, createdBy)` — the orchestrator.
-  - idempotency check (does a doc row already exist?)
-  - insert `Pending` row
-  - copy template → `batchUpdate` placeholders → store `document_id`, set `Completed`
-  - on error: set `Failed` + `error`, rethrow (do **not** break the staff save)
+- `getAuth()` — OAuth2 client from `env.google`.
+- `copyTemplate(name)` — `drive.files.copy` into the shared-drive folder.
+- `replacePlaceholders(docId, mappings)` — inline label-dot range replace.
+- `maybeGenerateDocument(submissionId, createdBy)` — orchestrator (idempotent).
 
 ### 4.4 npm dependencies
 
 ```bash
 npm i googleapis
-# (document this in the plan; not installed yet)
+# ✅ already installed at root (version 176)
 ```
 
-> `googleapis` is large. Alternatively `@googleapis/docs` + `@googleapis/drive`
-> (smaller, typed). Recommend the scoped packages.
+> Shared drive is enabled (`GOOGLE_IS_SHARED_DRIVE=true`), so every Drive call
+> passes `supportsAllDrives: true`.
 
 ---
 
@@ -222,25 +224,36 @@ unreachable:
 
 ## 6. `.env` additions
 
-The user said they'll provide these. Add to `env.ts` (`server/src/config/env.ts`)
-and `.env`:
+Already implemented (verified working). Add to `env.ts` (`server/src/config/env.ts`)
+and `.env` — OAuth refresh-token, not a service account:
 
 ```env
-# Google Docs / Drive service account
-GOOGLE_SERVICE_ACCOUNT_JSON=          # full JSON string, or a path to the key file
-GOOGLE_SERVICE_ACCOUNT_KEY_FILE=      # alternative to the inline JSON
-GOOGLE_DOC_TEMPLATE_ID=               # id of the template Google Doc
+# Google Docs / Drive OAuth client (refresh-token grant)
+GOOGLE_CLIENT_ID=                      # OAuth client id
+GOOGLE_CLIENT_SECRET=                  # OAuth client secret
+GOOGLE_REFRESH_TOKEN=                  # refresh token (grant type=refresh_token)
+GOOGLE_GRANT_TYPE=refresh_token
+GOOGLE_DOC_TEMPLATE_ID=                # id of the template Google Doc
+GOOGLE_DOC_FOLDER_ID=                  # Drive folder for generated docs
+GOOGLE_IS_SHARED_DRIVE=true            # pass supportsAllDrives on every Drive call
 ```
 
 Expose on `env`:
 
 ```ts
 google: {
-  serviceAccountJson: process.env.GOOGLE_SERVICE_ACCOUNT_JSON ?? "",
-  serviceAccountKeyFile: process.env.GOOGLE_SERVICE_ACCOUNT_KEY_FILE ?? "",
+  clientId: process.env.GOOGLE_CLIENT_ID ?? "",
+  clientSecret: process.env.GOOGLE_CLIENT_SECRET ?? "",
+  refreshToken: process.env.GOOGLE_REFRESH_TOKEN ?? "",
+  grantType: process.env.GOOGLE_GRANT_TYPE ?? "refresh_token",
   docTemplateId: process.env.GOOGLE_DOC_TEMPLATE_ID ?? "",
+  docFolderId: process.env.GOOGLE_DOC_FOLDER_ID ?? "",
+  isSharedDrive: process.env.GOOGLE_IS_SHARED_DRIVE === "true",
 },
 ```
+
+> The old `GOOGLE_SERVICE_ACCOUNT_JSON` / `GOOGLE_SERVICE_ACCOUNT_KEY_FILE` vars
+> are no longer used.
 
 ---
 
@@ -287,37 +300,39 @@ export interface Document {
 ## 9. Files to create / modify
 
 **Create**
-- `server/src/db/documents.ts` — table helpers + `generateDocument` (Google call).
-- `server/src/google/docs.ts` — `googleapis` client + `copyTemplate`/`replacePlaceholders`.
+- `server/src/google/docs.ts` — `googleapis` OAuth client + `copyTemplate`/`replacePlaceholders`/orchestrator.
+- `server/src/db/documents.ts` — document table helpers.
+- `server/src/routes/documents.ts` — new router for `GET /documents`, `POST /documents/:id/retry`.
 - `client/src/components/DocumentStatusBadge.tsx` — small status UI (optional).
-- `docs/features/create-doc.md` — **this plan**.
+- `docs/plans/google-doc.md` — **the current plan**.
 
 **Modify**
 - `server/src/db/schema.ts` — `dbo.documents` DDL + `Document` interface + `DOCUMENT_STATUS`.
-- `server/src/db/queries.ts` — `createDocument`, `listDocuments`, `updateDocumentStatus`.
-- `server/src/routes/submissions.ts` — hook the trigger into `PUT /values` (idempotent §3.1-B); add `GET /documents`.
-- `server/src/routes/documents.ts` — new router for `POST /documents`, `POST /documents/:id/retry`.
+- `server/src/db/queries.ts` — `createDocument`, `listDocuments`, `updateDocumentStatus` (shared reads).
+- `server/src/routes/submissions.ts` — hook the trigger into `PUT /values` (idempotent §3.1-B); add `GET /:publicId/documents`.
 - `server/src/index.ts` — mount `documentsRouter`.
-- `server/src/config/env.ts` — Google env vars.
+- `server/src/config/env.ts` — Google env vars (already done).
 - `server/src/schemas.ts` — any new Zod schemas (e.g. retry body).
 - `server/src/swagger.ts` — document the new endpoints.
-- `client/src/lib/api.ts` — `generateDocument`, `listDocuments`, `retryDocument`.
+- `client/src/lib/api.ts` — `listDocuments`, `retryDocument`.
 - `client/src/pages/staff/StaffSubmissionDetail.tsx` — status badge + link.
 
 ---
 
 ## 10. Open questions (need user input)
 
-1. **Field → placeholder mapping.** The user will provide (Student Name, Student
-   ID, etc.). Confirm the exact field labels and the template's `{{placeholder}}`
-   token names.
-2. **Auth delivery.** Inline JSON string vs. key-file path in `.env`?
-3. **Blocking vs. fire-and-forget.** Should the staff save wait for the Google
-   call, or return immediately with a `Pending` badge?
-4. **Failure UX.** If Google fails, should the user see `Failed` (with a manual
-   retry) or should it silently retry in the background?
-5. **Access control on generated docs.** Keep them private to the service account
-   (staff open via a shared link) or share with the school's Drive?
+> These now live in [`docs/plans/google-doc.md`](../plans/google-doc.md) §12.
+
+✔ **Field → label mapping — RESOLVED.** `Date:` = generation time,
+`Student Name:` = `Student Name`, `School Name:` = `School`, `Course Title:` =
+`Next Course in Sequence`, `Phase 1 Result:` = `Did Student meet criteria?`.
+
+1. **Blocking vs. fire-and-forget.** Should the staff save wait for the Google
+   call, or return immediately with a `Pending` badge? (Default: fire-and-forget.)
+2. **Failure UX.** If Google fails, should the user see `Failed` (with a manual
+   retry) or should it silently retry in the background? (Default: manual retry.)
+3. **Access control on generated docs.** Keep them private to the authored OAuth
+   Google account (staff open via a shared link) or share with the school's Drive?
 
 ---
 

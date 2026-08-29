@@ -1,6 +1,7 @@
 import { getPool } from "./pool.js";
 import sql, { type Transaction } from "mssql";
 import { formatSubmissionPublicId } from "./schema.js";
+import { listDocumentsBySubmission } from "./documents.js";
 import type {
   School,
   User,
@@ -12,6 +13,7 @@ import type {
   AdhocField,
   Role,
   Organization,
+  ListDocumentRow,
 } from "./schema.js";
 
 // -----------------------------------------------------------------------------
@@ -677,6 +679,8 @@ export interface SubmissionDetail extends SubmissionRow {
   // optional fields (e.g. "Course choice #3 (optional)") still render and are
   // editable, even when no submission_values row exists yet.
   parentFields: FormField[];
+  // Generated Google documents for this submission (detail-card audit line).
+  documents: ListDocumentRow[];
 }
 
 export async function listSubmissions(params: {
@@ -766,6 +770,26 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
   return rows[0] ?? null;
 }
 
+// Fetch a submission by its internal numeric id. Used internally by the Google
+// document generator (which works with submission ids) to read back form_id and
+// public_id without a public-id round trip.
+export async function getSubmissionById(
+  id: number
+): Promise<{ id: number; form_id: number; public_id: string; school_id: number | null; organization_id: number } | null> {
+  const rows = await execute<{
+    id: number;
+    form_id: number;
+    public_id: string;
+    school_id: number | null;
+    organization_id: number;
+  }>(
+    `SELECT id, form_id, public_id, school_id, organization_id
+     FROM dbo.submissions WHERE id = @id`,
+    { id }
+  );
+  return rows[0] ?? null;
+}
+
 export async function listSubmissionValues(submissionId: number): Promise<SubmissionValueRow[]> {
   interface RawValueRow extends Omit<SubmissionValueRow, "options"> {
     rawOptions: string | null;
@@ -818,7 +842,8 @@ export async function getSubmissionDetail(publicId: string, organizationId?: num
   const formFields = await listFormFields(submission.form_id);
   const staffOnlyFields = formFields.filter((f) => f.staff_only);
   const parentFields = formFields.filter((f) => !f.staff_only);
-  return { ...submission, values, comments, adhocFields, staffOnlyFields, parentFields };
+  const documents = await listDocumentsBySubmission(submission.id);
+  return { ...submission, values, comments, adhocFields, staffOnlyFields, parentFields, documents };
 }
 
 // Resolve which school a submission belongs to. District-wide forms (e.g. CDM)
