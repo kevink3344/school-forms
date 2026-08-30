@@ -344,6 +344,17 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
   color: var(--text-muted); margin-bottom: 8px;
 }
 .pdf-viewer { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: 1; min-height: 320px; }
+.pdf-toolbar {
+  display: flex; align-items: center; justify-content: flex-end; gap: 8px;
+  padding: 6px 10px; background: var(--card-bg); border-bottom: 1px solid var(--border);
+}
+.pdf-toolbar-link {
+  display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
+  font-size: 12px; font-weight: 600; color: var(--accent); text-decoration: none;
+  border: 1px solid var(--border); border-radius: var(--radius); white-space: nowrap;
+  transition: background-color .2s, color .2s;
+}
+.pdf-toolbar-link:hover { background: var(--accent); color: #fff; }
 .pdf-stage {
   position: relative; background: #595959; overflow: hidden; flex: 1; min-height: 0;
 }
