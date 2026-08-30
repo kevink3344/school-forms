@@ -52,14 +52,14 @@ async function executeInTransaction<T = unknown>(
 // -----------------------------------------------------------------------------
 export async function listOrganizations(): Promise<Organization[]> {
   return execute<Organization>(
-    "SELECT id, slug, name, created_at FROM dbo.organizations ORDER BY name"
+    "SELECT id, slug, name, active, created_at FROM dbo.organizations ORDER BY name"
   );
 }
 
 // Resolve an org by its URL slug (used for the public `/:slug` form routes).
 export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {
   const rows = await execute<Organization>(
-    "SELECT id, slug, name, created_at FROM dbo.organizations WHERE slug = @slug",
+    "SELECT id, slug, name, active, created_at FROM dbo.organizations WHERE slug = @slug",
     { slug }
   );
   return rows[0] ?? null;
@@ -67,8 +67,45 @@ export async function getOrganizationBySlug(slug: string): Promise<Organization 
 
 export async function getOrganizationById(id: number): Promise<Organization | null> {
   const rows = await execute<Organization>(
-    "SELECT id, slug, name, created_at FROM dbo.organizations WHERE id = @id",
+    "SELECT id, slug, name, active, created_at FROM dbo.organizations WHERE id = @id",
     { id }
+  );
+  return rows[0] ?? null;
+}
+
+export async function createOrganization(
+  name: string,
+  slug: string,
+  active: boolean
+): Promise<Organization> {
+  const rows = await execute<Organization>(
+    `INSERT INTO dbo.organizations (slug, name, active)
+     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.active, INSERTED.created_at
+     VALUES (@slug, @name, @active)`,
+    { slug, name, active }
+  );
+  return rows[0];
+}
+
+// Partial update: only supplied fields are changed. Returns the updated org, or
+// null if the id does not exist. Uses the read-first pattern (like updateUser).
+export async function updateOrganization(
+  id: number,
+  data: { name?: string; slug?: string; active?: boolean }
+): Promise<Organization | null> {
+  const existing = await getOrganizationById(id);
+  if (!existing) return null;
+
+  const name = data.name ?? existing.name;
+  const slug = data.slug ?? existing.slug;
+  const active = data.active ?? existing.active;
+
+  const rows = await execute<Organization>(
+    `UPDATE dbo.organizations
+     SET name = @name, slug = @slug, active = @active
+     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.active, INSERTED.created_at
+     WHERE id = @id`,
+    { id, name, slug, active }
   );
   return rows[0] ?? null;
 }
@@ -114,20 +151,23 @@ export async function setSetting(key: string, value: string): Promise<string> {
 }
 
 // Minimal user rows for the select-mode login dropdown. Never returns a
-// password hash — only the fields the dropdown label needs.
+// password hash — only the fields the dropdown label needs. Only active users in
+// active organizations are listed (inactive orgs are excluded from sign-in).
 export async function listUsersForSelect(organizationId?: number | null): Promise<
   { id: number; display_name: string; email: string; role: Role }[]
 > {
   const params: Record<string, unknown> = {};
-  const where = organizationId !== undefined && organizationId !== null
-    ? "WHERE organization_id = @organizationId"
-    : "";
-  if (where) params.organizationId = organizationId;
+  const where =
+    organizationId !== undefined && organizationId !== null
+      ? "WHERE u.organization_id = @organizationId AND u.active = 1 AND o.active = 1"
+      : "WHERE u.active = 1 AND o.active = 1";
+  if (organizationId !== undefined && organizationId !== null) params.organizationId = organizationId;
   return execute<{ id: number; display_name: string; email: string; role: Role }>(
-    `SELECT id, display_name, email, role
-     FROM dbo.users
+    `SELECT u.id, u.display_name, u.email, u.role
+     FROM dbo.users u
+     INNER JOIN dbo.organizations o ON o.id = u.organization_id
      ${where}
-     ORDER BY display_name, email`,
+     ORDER BY u.display_name, u.email`,
     params
   );
 }

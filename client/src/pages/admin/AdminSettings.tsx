@@ -135,6 +135,23 @@ const EMPTY: FormState = {
   active: true,
 };
 
+// ---------------------------------------------------------------------------
+// Create / edit Organization (right slide-out drawer)
+// ---------------------------------------------------------------------------
+interface OrgFormState {
+  id: number | null; // null → create
+  name: string;
+  slug: string; // "" = auto-derive from name on create
+  active: boolean;
+}
+
+const EMPTY_ORG: OrgFormState = {
+  id: null,
+  name: "",
+  slug: "",
+  active: true,
+};
+
 export default function AdminSettings() {
   const { user } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -158,6 +175,12 @@ export default function AdminSettings() {
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
+
+  // Organization drawer state.
+  const [orgOpen, setOrgOpen] = useState<boolean>(false);
+  const [orgForm, setOrgForm] = useState<OrgFormState>(EMPTY_ORG);
+  const [orgSaving, setOrgSaving] = useState(false);
+  const [orgSaveError, setOrgSaveError] = useState("");
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -306,6 +329,76 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not update Documents visibility");
     } finally {
       setDocBusy(false);
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // Organizations drawer handlers
+  // -------------------------------------------------------------------------
+  const openOrgCreate = () => {
+    setOrgForm(EMPTY_ORG);
+    setOrgOpen(true);
+    setOrgSaveError("");
+  };
+
+  const openOrgEdit = (o: OrganizationWithMembers) => {
+    setOrgForm({
+      id: o.id,
+      name: o.name,
+      slug: o.slug,
+      active: o.active,
+    });
+    setOrgOpen(true);
+    setOrgSaveError("");
+  };
+
+  const closeOrg = () => {
+    if (orgSaving) return;
+    setOrgOpen(false);
+    setOrgSaveError("");
+    setOrgForm(EMPTY_ORG);
+  };
+
+  const handleOrgSave = async () => {
+    setOrgSaving(true);
+    setOrgSaveError("");
+    try {
+      if (orgForm.id === null) {
+        await api.createOrganization({
+          name: orgForm.name.trim(),
+          slug: orgForm.slug.trim() || undefined,
+          active: orgForm.active,
+        });
+        setMessage("Organization created.");
+      } else {
+        await api.updateOrganization(orgForm.id, {
+          name: orgForm.name.trim(),
+          slug: orgForm.slug.trim() || undefined,
+          active: orgForm.active,
+        });
+        setMessage("Organization updated.");
+      }
+      await load();
+      closeOrg();
+    } catch (err) {
+      setOrgSaveError(err instanceof ApiError ? err.message : "Could not save organization");
+    } finally {
+      setOrgSaving(false);
+    }
+  };
+
+  // Toggle an organization active/inactive. Optimistic with rollback.
+  const toggleOrgActive = async (o: OrganizationWithMembers) => {
+    setError("");
+    const next = !o.active;
+    const prev = orgs;
+    setOrgs(prev.map((x) => (x.id === o.id ? { ...x, active: next } : x)));
+    try {
+      await api.updateOrganization(o.id, { active: next });
+      setMessage(`Organization "${o.name}" ${next ? "activated" : "deactivated"}.`);
+    } catch (err) {
+      setOrgs(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update organization");
     }
   };
 
@@ -531,33 +624,118 @@ export default function AdminSettings() {
         subtitle="Tenant boundaries — schools are shared across all organizations"
         bodyStyle={{ padding: 0 }}
       >
+        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+          <button className="primary-button" onClick={openOrgCreate}>
+            + Add Organization
+          </button>
+        </div>
         <table className="grid">
           <thead>
             <tr>
               <th>Name</th>
               <th>Slug</th>
               <th>Members</th>
+              <th>Status</th>
             </tr>
           </thead>
             <tbody>
               {orgs.length === 0 ? (
                 <tr>
-                  <td colSpan={3} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
                     No organizations.
                   </td>
                 </tr>
               ) : (
                 orgs.map((o) => (
                   <tr key={o.id}>
-                    <td className="cell-strong" data-label="Name">{o.name}</td>
-                    <td className="cell-mono" data-label="Slug">{o.slug}</td>
+                    <td className="cell-strong" data-label="Name" onClick={() => openOrgEdit(o)} style={{ cursor: "pointer" }}>{o.name}</td>
+                    <td className="cell-mono" data-label="Slug" onClick={() => openOrgEdit(o)} style={{ cursor: "pointer" }}>{o.slug}</td>
                     <td data-label="Members">{o.member_count} user{o.member_count === 1 ? "" : "s"}</td>
+                    <td data-label="Status">
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Toggle
+                          checked={o.active}
+                          disabled={o.id === user?.organization_id}
+                          onChange={() => void toggleOrgActive(o)}
+                        />
+                        <span className={`badge ${o.active ? "badge-green" : "badge-gray"}`}>
+                          {o.active ? "Active" : "Inactive"}
+                        </span>
+                      </div>
+                    </td>
                   </tr>
                 ))
               )}
             </tbody>
           </table>
       </CollapsibleSection>
+
+      {/* Create / edit organization — right slide-out drawer */}
+      <div className={`drawer-overlay ${orgOpen ? "open" : ""}`} onClick={closeOrg}>
+        <div className="drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="drawer-head">
+            <h2>{orgForm.id === null ? "Add Organization" : "Edit Organization"}</h2>
+            <button className="icon-button close" onClick={closeOrg} title="Close">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <line x1="18" y1="6" x2="6" y2="18" />
+                <line x1="6" y1="6" x2="18" y2="18" />
+              </svg>
+            </button>
+          </div>
+          <div className="drawer-body">
+            {orgSaveError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {orgSaveError}
+              </div>
+            )}
+            <div className="form-grid">
+              <Field label="Name" full>
+                <input
+                  className="edit-input"
+                  value={orgForm.name}
+                  onChange={(e) => setOrgForm((f) => ({ ...f, name: e.target.value }))}
+                  placeholder="Academics"
+                />
+              </Field>
+              <Field label="Slug" full>
+                <input
+                  className="edit-input"
+                  value={orgForm.slug}
+                  onChange={(e) => setOrgForm((f) => ({ ...f, slug: e.target.value }))}
+                  placeholder="academics (auto-derived from name if left blank)"
+                />
+              </Field>
+              <Field label="Active" full>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Toggle
+                    checked={orgForm.active}
+                    disabled={orgForm.id === user?.organization_id}
+                    onChange={(v) => setOrgForm((f) => ({ ...f, active: v }))}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    {orgForm.active ? "Active" : "Inactive"}
+                    {orgForm.id === user?.organization_id ? " (your organization)" : ""}
+                    {!orgForm.active && " — users of this org can no longer sign in"}
+                  </span>
+                </div>
+              </Field>
+            </div>
+          </div>
+          <div className="drawer-foot">
+            <span className="muted-note">{orgForm.id === null ? "New organization" : "Editing organization"}</span>
+            <button className="secondary-button" onClick={closeOrg} disabled={orgSaving}>
+              Cancel
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => void handleOrgSave()}
+              disabled={orgSaving || !orgForm.name.trim()}
+            >
+              {orgSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
 
       {/* Create / edit user — right slide-out drawer */}
       <div className={`drawer-overlay ${modalOpen ? "open" : ""}`} onClick={closeModal}>

@@ -35,6 +35,8 @@ export const ROUTES: RouteEntry[] = [
   { method: "post", path: "/api/auth/seed-admin", auth: "none", tags: "Auth" },
   { method: "post", path: "/api/auth/seed-staff", auth: "admin", tags: "Auth" },
   { method: "get", path: "/api/organizations", auth: "admin", tags: "Organizations" },
+  { method: "post", path: "/api/organizations", auth: "admin", tags: "Organizations" },
+  { method: "put", path: "/api/organizations/{id}", auth: "admin", tags: "Organizations" },
   { method: "get", path: "/api/schools", auth: "staff", tags: "Schools" },
   { method: "get", path: "/api/schools/columns", auth: "admin", tags: "Schools" },
   { method: "get", path: "/api/schools/page", auth: "admin", tags: "Schools" },

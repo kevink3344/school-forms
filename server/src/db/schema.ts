@@ -34,6 +34,7 @@ export interface Organization {
   id: number;
   slug: string;
   name: string;
+  active: boolean;
   created_at: Date;
 }
 
@@ -247,12 +248,16 @@ export const DDL_STATEMENTS: string[] = [
      id         INT IDENTITY(1,1) PRIMARY KEY,
      slug       NVARCHAR(60)  NOT NULL,
      name       NVARCHAR(120) NOT NULL,
+     active     BIT NOT NULL CONSTRAINT DF_organizations_active DEFAULT 1,
      created_at DATETIME2 NOT NULL CONSTRAINT DF_organizations_created_at DEFAULT SYSUTCDATETIME()
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_slug')
      CREATE UNIQUE INDEX UX_organizations_slug ON dbo.organizations(slug);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_name')
-     CREATE UNIQUE INDEX UX_organizations_name ON dbo.organizations(name);`,
+     CREATE UNIQUE INDEX UX_organizations_name ON dbo.organizations(name);
+   IF COL_LENGTH('dbo.organizations', 'active') IS NULL
+     ALTER TABLE dbo.organizations ADD active BIT NOT NULL
+       CONSTRAINT DF_organizations_active DEFAULT 1;`,
 
   // Seed the two known organizations (idempotent). Technology Services is a
   // placeholder org with NO users — only the org row is created here.

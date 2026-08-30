@@ -27,6 +27,7 @@ export interface Organization {
   id: number;
   slug: string;
   name: string;
+  active: boolean;
   created_at: string;
 }
 

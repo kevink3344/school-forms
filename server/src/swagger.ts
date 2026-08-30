@@ -41,6 +41,7 @@ export function buildSwaggerSpec(req?: Request) {
             id: { type: "integer" },
             slug: { type: "string" },
             name: { type: "string" },
+            active: { type: "boolean" },
             created_at: { type: "string", format: "date-time" },
           },
         },
@@ -561,6 +562,7 @@ export function buildSwaggerSpec(req?: Request) {
                         id: { type: "integer" },
                         slug: { type: "string" },
                         name: { type: "string" },
+                        active: { type: "boolean" },
                         created_at: { type: "string", format: "date-time" },
                         member_count: { type: "integer" },
                       },
@@ -569,6 +571,90 @@ export function buildSwaggerSpec(req?: Request) {
                 },
               },
             },
+          },
+        },
+        post: {
+          tags: ["Organizations"],
+          summary: "Create an organization (admin)",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "Organization display name (1-120 chars). Slug is derived if omitted." },
+                    slug: {
+                      type: "string",
+                      description: "URL-friendly identifier (lowercase, hyphen-separated). Auto-derived from name if omitted.",
+                      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    },
+                    active: { type: "boolean", default: true, description: "Whether the organization is active (default true)." },
+                  },
+                  required: ["name"],
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Organization" },
+                },
+              },
+            },
+            "409": { description: "Slug or name already in use" },
+          },
+        },
+      },
+      "/api/organizations/{id}": {
+        put: {
+          tags: ["Organizations"],
+          summary: "Update an organization (admin)",
+          description: "Partial update. At least one of name, slug, or active is required. Active toggled to false deactivates the org.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            {
+              name: "id",
+              in: "path",
+              required: true,
+              schema: { type: "integer" },
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", description: "Organization display name (1-120 chars)." },
+                    slug: {
+                      type: "string",
+                      description: "URL-friendly identifier (lowercase, hyphen-separated).",
+                      pattern: "^[a-z0-9]+(?:-[a-z0-9]+)*$",
+                    },
+                    active: { type: "boolean", description: "Whether the organization is active. Setting false deactivates it." },
+                  },
+                  minProperties: 1,
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { $ref: "#/components/schemas/Organization" },
+                },
+              },
+            },
+            "404": { description: "Organization not found" },
+            "409": { description: "Slug or name already in use" },
           },
         },
       },

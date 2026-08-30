@@ -243,6 +243,29 @@ export const api = {
     return request<OrganizationWithMembers[]>("/api/organizations", { auth: true });
   },
 
+  async createOrganization(input: {
+    name: string;
+    slug?: string;
+    active?: boolean;
+  }): Promise<OrganizationWithMembers> {
+    return request<OrganizationWithMembers>("/api/organizations", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  async updateOrganization(
+    id: number,
+    input: { name?: string; slug?: string; active?: boolean }
+  ): Promise<OrganizationWithMembers> {
+    return request<OrganizationWithMembers>(`/api/organizations/${id}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
+  },
+
   async listSchoolColumns(): Promise<{ columns: string[] }> {
     return request<{ columns: string[] }>("/api/schools/columns", { auth: true });
   },

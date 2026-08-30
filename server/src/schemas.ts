@@ -66,6 +66,35 @@ export const createSchoolSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// Organizations (admin add/edit)
+// -----------------------------------------------------------------------------
+export const createOrganizationSchema = z.object({
+  name: z.string().min(1).max(120),
+  // Slug is auto-derived from the name when absent; otherwise must be a valid
+  // slug (lowercase alphanumerics + hyphens). Uniqueness enforced at the route.
+  slug: z
+    .string()
+    .min(1)
+    .max(60)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: "Slug must be lowercase letters, numbers, and hyphens" })
+    .optional(),
+  active: z.boolean().default(true),
+});
+
+export const updateOrganizationSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    slug: z
+      .string()
+      .min(1)
+      .max(60)
+      .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: "Slug must be lowercase letters, numbers, and hyphens" })
+      .optional(),
+    active: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+// -----------------------------------------------------------------------------
 // Forms
 // -----------------------------------------------------------------------------
 const fieldTypeEnum = z.enum(FIELD_TYPES);

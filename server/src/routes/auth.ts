@@ -46,6 +46,14 @@ async function toUserDto(user: { id: number; email: string; role: Role; school_i
   };
 }
 
+// Reject sign-in when the user's organization has been deactivated (inactive
+// orgs are hidden from the select-login dropdown and their users are denied
+// both password and select login). Returns true if the org is active.
+async function orgIsActive(user: { organization_id: number }): Promise<boolean> {
+  const org = await getOrganizationById(user.organization_id);
+  return org ? org.active : true;
+}
+
 // -----------------------------------------------------------------------------
 // GET /api/auth/me — return current user (requires auth)
 // -----------------------------------------------------------------------------
@@ -91,6 +99,11 @@ authRouter.post("/register", async (req, res, next) => {
       }
       targetOrg = orgFromSlug;
     }
+    // Never register a new account into a deactivated organization.
+    if (!targetOrg.active) {
+      res.status(403).json({ error: "Organization is deactivated. Contact an administrator." });
+      return;
+    }
     const passwordHash = await bcrypt.hash(password, 12);
     const user = await createUser(email, passwordHash, role as Role, school_id, display_name, true, targetOrg.id);
 
@@ -132,6 +145,10 @@ authRouter.post("/login", async (req, res, next) => {
     }
     if (!user.active) {
       res.status(403).json({ error: "Account is deactivated. Contact an administrator." });
+      return;
+    }
+    if (!(await orgIsActive(user))) {
+      res.status(403).json({ error: "Organization is deactivated. Contact an administrator." });
       return;
     }
 
@@ -208,6 +225,10 @@ authRouter.post("/select", async (req, res, next) => {
     // Respect deactivation even in select mode.
     if (!user.active) {
       res.status(403).json({ error: "Account is deactivated. Contact an administrator." });
+      return;
+    }
+    if (!(await orgIsActive(user))) {
+      res.status(403).json({ error: "Organization is deactivated. Contact an administrator." });
       return;
     }
 
