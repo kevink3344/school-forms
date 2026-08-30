@@ -291,6 +291,9 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
   display: inline-block; width: 20px; height: 20px; border: 2px solid var(--border);
   border-top-color: var(--accent); border-radius: 50%; animation: spin .7s linear infinite;
 }
+.spinner-sm {
+  width: 12px; height: 12px; border-width: 2px; vertical-align: -2px;
+}
 @keyframes spin { to { transform: rotate(360deg); } }
 
 /* Modal */

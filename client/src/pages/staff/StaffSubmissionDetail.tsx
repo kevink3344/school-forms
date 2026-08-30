@@ -56,6 +56,23 @@ export default function StaffSubmissionDetail() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [publicId]);
 
+  // While a generated document is still in progress, poll quietly so the UI
+  // advances to the final message (generated / failed) as soon as generation
+  // completes — without interrupting any in-progress edits.
+  const anyPendingDocument = detail?.documents?.some((d) => d.status === "Pending") ?? false;
+  useEffect(() => {
+    if (!anyPendingDocument || !publicId) return;
+    const timer = window.setInterval(() => {
+      api
+        .getSubmission(publicId)
+        .then((d) => setDetail(d))
+        .catch(() => {
+          // Keep polling; a transient error shouldn't strand the spinner.
+        });
+    }, 3000);
+    return () => window.clearInterval(timer);
+  }, [anyPendingDocument, publicId]);
+
   const handleStatus = async (status: SubmissionStatus) => {
     if (!publicId || !detail || status === detail.status) return;
     setSavingStatus(true);
@@ -391,22 +408,29 @@ export default function StaffSubmissionDetail() {
                 {detail.documents.map((doc) => (
                   <div className="muted-note" key={doc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
                     <span>
-                      Document{" "}
-                      {doc.document_id ? (
-                        <a
-                          href={`https://docs.google.com/document/d/${doc.document_id}/edit`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="link-name"
-                        >
-                          generated
-                        </a>
-                      ) : doc.status === "Failed" ? (
-                        <span>[failed]</span>
+                      {doc.status === "Pending" ? (
+                        <>
+                          <span className="spinner spinner-sm" aria-hidden="true" />{" "}
+                          document generation in progress
+                        </>
                       ) : (
-                        <span>[pending]</span>
-                      )}{" "}
-                      on {new Date(doc.created_at).toLocaleString()}
+                        <>
+                          Document{" "}
+                          {doc.document_id ? (
+                            <a
+                              href={`https://docs.google.com/document/d/${doc.document_id}/edit`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              className="link-name"
+                            >
+                              generated
+                            </a>
+                          ) : (
+                            <span>[failed]</span>
+                          )}{" "}
+                          on {new Date(doc.created_at).toLocaleString()}
+                        </>
+                      )}
                     </span>
                     <span className={`badge ${docStatusBadge(doc.status).cls}`}>
                       {docStatusBadge(doc.status).label}
