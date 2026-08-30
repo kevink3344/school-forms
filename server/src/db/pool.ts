@@ -77,24 +77,6 @@ async function runDdl(): Promise<void> {
     await request.batch(statement);
   }
   await backfillSubmissionIds(db);
-  await backfillOrganizationFolderIds(db);
-}
-
-// One-time migration: materialize the global env Drive folder as the default
-// per-org folder for the Academics org (and any other org still unconfigured)
-// so generated documents keep landing where they did before, but now recorded
-// at the org level. Only sets orgs whose doc_folder_id is NULL — orgs that were
-// explicitly cleared keep falling back to env.
-async function backfillOrganizationFolderIds(db: ConnectionPool): Promise<void> {
-  const folderId = env.google.docFolderId?.trim();
-  if (!folderId) return;
-  await db.request()
-    .input("folderId", folderId)
-    .query(
-      `UPDATE dbo.organizations
-       SET doc_folder_id = @folderId
-       WHERE doc_folder_id IS NULL AND slug = N'academics';`
-    );
 }
 
 // One-time migration: convert legacy hex submission ids (`7bea...`) into the new

@@ -54,6 +54,12 @@ export default function AdminFormDesigner() {
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
 
+  // Per-form Google Drive folder override + live validation. `null` = not yet
+  // checked; `true`/`false` reflect a valid/invalid folder id.
+  const [docFolderId, setDocFolderId] = useState("");
+  const [docFolderValid, setDocFolderValid] = useState<boolean | null>(null);
+  const [docFolderName, setDocFolderName] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -64,6 +70,7 @@ export default function AdminFormDesigner() {
         setFields(f.fields || []);
         setTitle(f.title || "");
         setDescription(f.description ?? "");
+        setDocFolderId(f.doc_folder_id ?? "");
       })
       .catch(() => setError("Could not load form"))
       .finally(() => {
@@ -87,6 +94,31 @@ export default function AdminFormDesigner() {
       cancelled = true;
     };
   }, [formId]);
+
+  // Debounced live validation of the Drive Folder ID. Once the admin stops
+  // typing, ask the server to confirm the id is an accessible folder. Blank →
+  // no checkmark (neutral). Any valid folder → green checkmark.
+  useEffect(() => {
+    const id = docFolderId.trim();
+    if (!id) {
+      setDocFolderValid(null);
+      setDocFolderName("");
+      return;
+    }
+    const timer = window.setTimeout(() => {
+      api
+        .validateDriveFolder(formId, id)
+        .then((r) => {
+          setDocFolderValid(r.valid);
+          setDocFolderName(r.name ?? "");
+        })
+        .catch(() => {
+          setDocFolderValid(false);
+          setDocFolderName("");
+        });
+    }, 600);
+    return () => window.clearTimeout(timer);
+  }, [docFolderId, formId]);
 
   const rebuildField = (index: number, patch: Partial<FormField>) => {
     setFields((prev) => {
@@ -154,6 +186,7 @@ export default function AdminFormDesigner() {
       await api.updateForm(formId, {
         title: title || "Untitled",
         description: description || null,
+        doc_folder_id: docFolderId.trim() || null,
         fields: fields.map((f, i) => ({
           id: f.id || undefined,
           label: f.label,
@@ -172,6 +205,7 @@ export default function AdminFormDesigner() {
       setFields(fresh.fields || []);
       setTitle(fresh.title || "");
       setDescription(fresh.description ?? "");
+      setDocFolderId(fresh.doc_folder_id ?? "");
       setDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save form");
@@ -295,6 +329,63 @@ export default function AdminFormDesigner() {
                   setDirty(true);
                 }}
               />
+            </div>
+            <div className="filter-group" style={{ minWidth: 0 }}>
+              <label style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                Drive Folder ID
+                {docFolderValid === true && (
+                  <span
+                    style={{
+                      color: "var(--success, #16a34a)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                    title={docFolderName ? `Valid folder: ${docFolderName}` : "Valid folder"}
+                  >
+                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+                      <circle cx="12" cy="12" r="10" fill="#16a34a" />
+                      <path
+                        d="M8 12.5l2.5 2.5L16 9.5"
+                        stroke="#fff"
+                        strokeWidth="2"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                    Valid
+                  </span>
+                )}
+                {docFolderValid === false && (
+                  <span
+                    style={{
+                      color: "var(--danger, #b93040)",
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: 4,
+                      fontSize: 12,
+                      fontWeight: 600,
+                    }}
+                    title="This folder id isn't an accessible Google Drive folder"
+                  >
+                    Invalid folder
+                  </span>
+                )}
+              </label>
+              <input
+                type="text"
+                value={docFolderId}
+                placeholder="Google Drive folder ID (optional — blank uses the default folder)"
+                onChange={(e) => {
+                  setDocFolderId(e.target.value);
+                  setDirty(true);
+                }}
+              />
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                Generated documents for this form are saved to this folder. Leave blank to use the default.
+              </div>
             </div>
           </div>
         </div>

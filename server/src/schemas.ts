@@ -123,6 +123,7 @@ export const createFormSchema = z.object({
   title: z.string().min(1).max(200),
   description: z.string().optional().nullable(),
   school_id: z.number().int().positive().optional().nullable(),
+  doc_folder_id: z.string().max(255).optional().nullable(),
   fields: z.array(fieldSchema).min(1),
 });
 
@@ -130,6 +131,7 @@ export const updateFormSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().optional().nullable(),
   status: z.enum(FORM_STATUS).optional(),
+  doc_folder_id: z.string().max(255).optional().nullable(),
   fields: z.array(fieldSchema).optional(),
 });
 

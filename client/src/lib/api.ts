@@ -353,6 +353,7 @@ export const api = {
     title: string;
     description?: string | null;
     school_id?: number | null;
+    doc_folder_id?: string | null;
     fields: {
       label: string;
       type: string;
@@ -377,6 +378,7 @@ export const api = {
       title?: string;
       description?: string | null;
       status?: string;
+      doc_folder_id?: string | null;
       fields: {
         id?: number;
         label: string;
@@ -394,6 +396,14 @@ export const api = {
       method: "PUT",
       auth: true,
       body: input,
+    });
+  },
+
+  async validateDriveFolder(formId: number, folderId: string): Promise<{ valid: boolean; name?: string }> {
+    return request<{ valid: boolean; name?: string }>(`/api/forms/${formId}/drive-validate`, {
+      method: "POST",
+      auth: true,
+      body: { folder_id: folderId },
     });
   },
 

@@ -11,6 +11,7 @@ import {
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { createFormSchema, updateFormSchema } from "../schemas.js";
+import { validateDriveFolder } from "../google/docs.js";
 
 export const formsRouter = Router();
 
@@ -120,6 +121,7 @@ formsRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
         schoolId: parsed.data.school_id ?? null,
         designerId,
         organizationId,
+        docFolderId: parsed.data.doc_folder_id?.trim() ?? null,
       },
       parsed.data.fields
     );
@@ -149,12 +151,37 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       description: parsed.data.description,
       status: parsed.data.status,
       fields: parsed.data.fields,
+      // Only pass `doc_folder_id` when actually supplied so an omitted key can
+      // never clear the stored value (nullable clear semantics in updateForm).
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "doc_folder_id")
+        ? { doc_folder_id: parsed.data.doc_folder_id?.trim() ?? null }
+        : {}),
     });
     if (!updated) {
       res.status(404).json({ error: "Form not found" });
       return;
     }
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: validate that a supplied Google Drive Folder ID is an accessible
+// folder (used by the form designer to show a green checkmark). Takes the id in
+// the body so the admin can test a value before saving it to the form. Requires
+// the form to belong to the admin's org.
+formsRouter.post("/:id/drive-validate", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await getFormWithFields(id, req.user!.organization_id);
+    if (!existing) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const folderId = typeof req.body?.folder_id === "string" ? req.body.folder_id : null;
+    const result = await validateDriveFolder(folderId?.trim() || null);
+    res.json(result);
   } catch (err) {
     next(err);
   }

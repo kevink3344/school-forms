@@ -143,7 +143,6 @@ interface OrgFormState {
   name: string;
   slug: string; // "" = auto-derive from name on create
   description: string;
-  doc_folder_id: string;
   active: boolean;
 }
 
@@ -152,7 +151,6 @@ const EMPTY_ORG: OrgFormState = {
   name: "",
   slug: "",
   description: "",
-  doc_folder_id: "",
   active: true,
 };
 
@@ -351,7 +349,6 @@ export default function AdminSettings() {
       name: o.name,
       slug: o.slug,
       description: o.description ?? "",
-      doc_folder_id: o.doc_folder_id ?? "",
       active: o.active,
     });
     setOrgOpen(true);
@@ -374,7 +371,6 @@ export default function AdminSettings() {
           name: orgForm.name.trim(),
           slug: orgForm.slug.trim() || undefined,
           description: orgForm.description.trim() || null,
-          doc_folder_id: orgForm.doc_folder_id.trim() || null,
           active: orgForm.active,
         });
         setMessage("Organization created.");
@@ -383,7 +379,6 @@ export default function AdminSettings() {
           name: orgForm.name.trim(),
           slug: orgForm.slug.trim() || undefined,
           description: orgForm.description.trim() || null,
-          doc_folder_id: orgForm.doc_folder_id.trim() || null,
           active: orgForm.active,
         });
         setMessage("Organization updated.");
@@ -722,14 +717,6 @@ export default function AdminSettings() {
                   onChange={(e) => setOrgForm((f) => ({ ...f, description: e.target.value }))}
                   placeholder="Details about this organization"
                   rows={4}
-                />
-              </Field>
-              <Field label="Drive Folder ID" full>
-                <input
-                  className="edit-input"
-                  value={orgForm.doc_folder_id}
-                  onChange={(e) => setOrgForm((f) => ({ ...f, doc_folder_id: e.target.value }))}
-                  placeholder="Google Drive folder ID (optional)"
                 />
               </Field>
               <Field label="Active" full>

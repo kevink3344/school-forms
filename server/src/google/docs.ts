@@ -9,7 +9,7 @@ import {
 } from "../db/documents.js";
 import type { Document } from "../db/schema.js";
 import {
-  getOrganizationById,
+  getForm,
   getSchool,
   getSubmissionById,
   listSubmissionValues,
@@ -73,15 +73,47 @@ function escapeDriveQuery(value: string): string {
 }
 
 /**
- * Resolve the Google Drive parent folder for an organization's generated
- * documents. The organization's own `doc_folder_id` is the primary source;
- * when it's blank we fall back to the global `env.google.docFolderId`. Returns
- * null only when neither is set (items then save to the Drive root).
+ * Resolve the Google Drive parent folder for a generated document. The form's
+ * own `doc_folder_id` is the primary source; when it's blank we fall back to the
+ * global `env.google.docFolderId`. Returns null only when neither is set (items
+ * then save to the Drive root).
  */
-async function resolveParentFolderId(organizationId: number): Promise<string | null> {
-  const org = await getOrganizationById(organizationId);
-  const orgFolder = org?.doc_folder_id?.trim();
-  return orgFolder || env.google.docFolderId || null;
+async function resolveParentFolderId(formId: number): Promise<string | null> {
+  const form = await getForm(formId);
+  const formFolder = form?.doc_folder_id?.trim();
+  return formFolder || env.google.docFolderId || null;
+}
+
+/**
+ * Validate that `folderId` is an existing, non-trashed Google Drive folder the
+ * app's OAuth account can access. Returns `{ valid: boolean, name?: string }`.
+ * Used by the form designer to show the green checkmark next to a configured
+ * Drive Folder ID. When the id is blank the call is a no-op (invalid).
+ */
+export async function validateDriveFolder(
+  folderId: string | null | undefined
+): Promise<{ valid: boolean; name?: string }> {
+  const id = folderId?.trim();
+  if (!id) {
+    return { valid: false };
+  }
+  const drive = google.drive({ version: "v3", auth: getAuth() });
+  try {
+    const res = await drive.files.get({
+      fileId: id,
+      fields: "id, name, mimeType, trashed",
+      supportsAllDrives: env.google.isSharedDrive,
+    });
+    const folder = res.data;
+    const valid =
+      !!folder &&
+      folder.mimeType === "application/vnd.google-apps.folder" &&
+      folder.trashed !== true;
+    return { valid, name: folder?.name ?? undefined };
+  } catch {
+    // Any Drive error (not found, permission, bad id) → invalid.
+    return { valid: false };
+  }
 }
 
 /**
@@ -277,7 +309,7 @@ export async function replacePlaceholders(
 
 /**
  * Run the Google-side generation for a specific document row: read the
- * submission's CURRENT values, resolve the per-school folder (under the org's
+ * submission's CURRENT values, resolve the per-school folder (under the form's
  * Drive parent), copy the template, fill the placeholders, and mark the row
  * Completed (or Failed on error). Shared by both the idempotent
  * `generateDocument` and the forced `regenerateDocument`.
@@ -295,8 +327,8 @@ async function runGeneration(submissionId: number, dbId: number): Promise<void> 
     const school = submission.school_id ? await getSchool(submission.school_id) : null;
     const schoolName = school?.name ?? null;
     const drive = google.drive({ version: "v3", auth: getAuth() });
-    const orgParentId = await resolveParentFolderId(submission.organization_id);
-    const parentId = await ensureSchoolFolder(drive, schoolName, orgParentId);
+    const formParentId = await resolveParentFolderId(submission.form_id);
+    const parentId = await ensureSchoolFolder(drive, schoolName, formParentId);
     const docName = buildDocumentName(submission.public_id, values);
 
     const docId = await copyTemplate(docName, parentId);

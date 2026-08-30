@@ -469,7 +469,8 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
-            f.status, f.view_columns, f.code, f.submission_seq, f.created_at, f.updated_at
+            f.status, f.view_columns, f.code, f.submission_seq, f.doc_folder_id,
+            f.created_at, f.updated_at
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
   );
@@ -487,7 +488,7 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   }
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
-            view_columns, code, submission_seq, created_at, updated_at
+            view_columns, code, submission_seq, doc_folder_id, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -597,12 +598,14 @@ export async function createForm(
     schoolId,
     designerId,
     organizationId,
+    docFolderId,
   }: {
     title: string;
     description: string | null;
     schoolId: number | null;
     designerId: number | null;
     organizationId: number;
+    docFolderId: string | null;
   },
   fields: {
     label: string;
@@ -620,13 +623,13 @@ export async function createForm(
   const code = await generateFormCode(title);
   // Insert form
   const forms = await execute<Form>(
-    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq)
+    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq, doc_folder_id)
      OUTPUT INSERTED.id, INSERTED.title, INSERTED.description, INSERTED.school_id,
             INSERTED.designer_id, INSERTED.organization_id, INSERTED.status,
-            INSERTED.code, INSERTED.submission_seq,
+            INSERTED.code, INSERTED.submission_seq, INSERTED.doc_folder_id,
             INSERTED.created_at, INSERTED.updated_at
-     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0)`,
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code }
+     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId)`,
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -655,6 +658,7 @@ export async function updateForm(
     title?: string;
     description?: string | null;
     status?: string;
+    doc_folder_id?: string | null;
     fields?: {
       id?: number;
       label: string;
@@ -674,10 +678,17 @@ export async function updateForm(
   const title = data.title ?? existing.title;
   const description = data.description === undefined ? existing.description : data.description;
   const status = data.status ?? existing.status;
+  // `doc_folder_id` is nullable: an explicitly-supplied null clears it, an absent
+  // key leaves it unchanged. `??` would conflate null with "not provided", so
+  // check presence explicitly.
+  const docFolderId = Object.prototype.hasOwnProperty.call(data, "doc_folder_id")
+    ? data.doc_folder_id
+    : existing.doc_folder_id;
 
   await execute(
-    `UPDATE dbo.forms SET title=@title, description=@description, status=@status, updated_at=SYSUTCDATETIME() WHERE id=@id`,
-    { id: formId, title, description, status }
+    `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
+            doc_folder_id=@docFolderId, updated_at=SYSUTCDATETIME() WHERE id=@id`,
+    { id: formId, title, description, status, docFolderId: docFolderId ?? null }
   );
 
   if (data.fields) {

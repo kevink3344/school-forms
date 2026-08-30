@@ -81,6 +81,11 @@ export interface Form {
   submission_seq: number;
   created_at: Date;
   updated_at: Date;
+  // Per-form Google Drive parent folder where generated documents are saved for
+  // this form. NULL falls back to the global env.google.docFolderId (see docs.ts).
+  // Per-form so different admins can route their forms' documents to different
+  // Drive locations.
+  doc_folder_id: string | null;
 }
 
 export interface FormField {
@@ -361,6 +366,11 @@ export const DDL_STATEMENTS: string[] = [
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_organization')
      CREATE INDEX IX_forms_organization ON dbo.forms(organization_id);`,
+
+  // Form-level Google Drive folder override. NULL → fall back to the global
+  // env.google.docFolderId when generating documents for this form.
+  `IF COL_LENGTH('dbo.forms', 'doc_folder_id') IS NULL
+     ALTER TABLE dbo.forms ADD doc_folder_id NVARCHAR(255) NULL;`,
 
   // View Columns feature — per-form configuration of which columns the admin
   // Submissions grid displays. NULL/empty => show all columns (backward

@@ -114,6 +114,9 @@ export interface Form {
   status: FormStatus;
   code: string | null;
   submission_seq: number;
+  // Per-form Google Drive parent folder for generated documents. NULL falls back
+  // to the global env folder (see server google/docs.ts).
+  doc_folder_id: string | null;
   created_at: string;
   updated_at: string;
 }

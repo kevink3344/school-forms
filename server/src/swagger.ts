@@ -104,6 +104,7 @@ export function buildSwaggerSpec(req?: Request) {
             status: { type: "string", enum: ["draft", "published", "archived"] },
             code: { type: "string", nullable: true },
             submission_seq: { type: "integer" },
+            doc_folder_id: { type: "string", nullable: true, description: "Google Drive parent folder for this form's generated documents. NULL falls back to the global env folder." },
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
             fields: { type: "array", items: { $ref: "#/components/schemas/FormField" } },
