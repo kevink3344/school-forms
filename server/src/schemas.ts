@@ -78,6 +78,10 @@ export const createOrganizationSchema = z.object({
     .max(60)
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: "Slug must be lowercase letters, numbers, and hyphens" })
     .optional(),
+  description: z.string().max(2000).nullable().optional(),
+  // Per-org Google Drive parent folder for generated documents. Blank clears the
+  // override (falls back to the global env folder). Optional.
+  doc_folder_id: z.string().max(255).nullable().optional(),
   active: z.boolean().default(true),
 });
 
@@ -90,6 +94,8 @@ export const updateOrganizationSchema = z
       .max(60)
       .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, { message: "Slug must be lowercase letters, numbers, and hyphens" })
       .optional(),
+    description: z.string().max(2000).nullable().optional(),
+    doc_folder_id: z.string().max(255).nullable().optional(),
     active: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });

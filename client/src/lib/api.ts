@@ -246,6 +246,8 @@ export const api = {
   async createOrganization(input: {
     name: string;
     slug?: string;
+    description?: string | null;
+    doc_folder_id?: string | null;
     active?: boolean;
   }): Promise<OrganizationWithMembers> {
     return request<OrganizationWithMembers>("/api/organizations", {
@@ -257,7 +259,13 @@ export const api = {
 
   async updateOrganization(
     id: number,
-    input: { name?: string; slug?: string; active?: boolean }
+    input: {
+      name?: string;
+      slug?: string;
+      description?: string | null;
+      doc_folder_id?: string | null;
+      active?: boolean;
+    }
   ): Promise<OrganizationWithMembers> {
     return request<OrganizationWithMembers>(`/api/organizations/${id}`, {
       method: "PUT",

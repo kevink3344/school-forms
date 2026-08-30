@@ -52,14 +52,14 @@ async function executeInTransaction<T = unknown>(
 // -----------------------------------------------------------------------------
 export async function listOrganizations(): Promise<Organization[]> {
   return execute<Organization>(
-    "SELECT id, slug, name, active, created_at FROM dbo.organizations ORDER BY name"
+    "SELECT id, slug, name, description, doc_folder_id, active, created_at FROM dbo.organizations ORDER BY name"
   );
 }
 
 // Resolve an org by its URL slug (used for the public `/:slug` form routes).
 export async function getOrganizationBySlug(slug: string): Promise<Organization | null> {
   const rows = await execute<Organization>(
-    "SELECT id, slug, name, active, created_at FROM dbo.organizations WHERE slug = @slug",
+    "SELECT id, slug, name, description, doc_folder_id, active, created_at FROM dbo.organizations WHERE slug = @slug",
     { slug }
   );
   return rows[0] ?? null;
@@ -67,7 +67,7 @@ export async function getOrganizationBySlug(slug: string): Promise<Organization 
 
 export async function getOrganizationById(id: number): Promise<Organization | null> {
   const rows = await execute<Organization>(
-    "SELECT id, slug, name, active, created_at FROM dbo.organizations WHERE id = @id",
+    "SELECT id, slug, name, description, doc_folder_id, active, created_at FROM dbo.organizations WHERE id = @id",
     { id }
   );
   return rows[0] ?? null;
@@ -76,13 +76,15 @@ export async function getOrganizationById(id: number): Promise<Organization | nu
 export async function createOrganization(
   name: string,
   slug: string,
+  description: string | null,
+  docFolderId: string | null,
   active: boolean
 ): Promise<Organization> {
   const rows = await execute<Organization>(
-    `INSERT INTO dbo.organizations (slug, name, active)
-     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.active, INSERTED.created_at
-     VALUES (@slug, @name, @active)`,
-    { slug, name, active }
+    `INSERT INTO dbo.organizations (slug, name, description, doc_folder_id, active)
+     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.description, INSERTED.doc_folder_id, INSERTED.active, INSERTED.created_at
+     VALUES (@slug, @name, @description, @docFolderId, @active)`,
+    { slug, name, description, docFolderId, active }
   );
   return rows[0];
 }
@@ -91,21 +93,38 @@ export async function createOrganization(
 // null if the id does not exist. Uses the read-first pattern (like updateUser).
 export async function updateOrganization(
   id: number,
-  data: { name?: string; slug?: string; active?: boolean }
+  data: {
+    name?: string;
+    slug?: string;
+    description?: string | null;
+    doc_folder_id?: string | null;
+    active?: boolean;
+  }
 ): Promise<Organization | null> {
   const existing = await getOrganizationById(id);
   if (!existing) return null;
 
   const name = data.name ?? existing.name;
   const slug = data.slug ?? existing.slug;
+  // `description` is nullable: an explicitly-supplied null clears it, an absent
+  // key leaves it unchanged. `??` would conflate null with "not provided", so
+  // check presence explicitly.
+  const description = Object.prototype.hasOwnProperty.call(data, "description")
+    ? data.description
+    : existing.description;
+  // Same nullable/clear semantics as `description` for the Drive folder override.
+  const docFolderId = Object.prototype.hasOwnProperty.call(data, "doc_folder_id")
+    ? data.doc_folder_id
+    : existing.doc_folder_id;
   const active = data.active ?? existing.active;
 
   const rows = await execute<Organization>(
     `UPDATE dbo.organizations
-     SET name = @name, slug = @slug, active = @active
-     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.active, INSERTED.created_at
+     SET name = @name, slug = @slug, description = @description,
+         doc_folder_id = @docFolderId, active = @active
+     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.description, INSERTED.doc_folder_id, INSERTED.active, INSERTED.created_at
      WHERE id = @id`,
-    { id, name, slug, active }
+    { id, name, slug, description, docFolderId, active }
   );
   return rows[0] ?? null;
 }

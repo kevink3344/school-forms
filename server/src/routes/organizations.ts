@@ -55,6 +55,8 @@ organizationsRouter.get("/", requireAuth, requireRoles("admin"), async (req, res
         id: org.id,
         slug: org.slug,
         name: org.name,
+        description: org.description,
+        doc_folder_id: org.doc_folder_id,
         active: org.active,
         created_at: org.created_at,
         member_count: members.length,
@@ -79,6 +81,8 @@ organizationsRouter.post("/", requireAuth, requireRoles("admin"), async (req, re
     }
     const name = parsed.data.name.trim();
     const slug = parsed.data.slug ? parsed.data.slug.trim() : await uniqueSlug(slugify(name));
+    const description = parsed.data.description ?? null;
+    const docFolderId = parsed.data.doc_folder_id?.trim() || null;
     const active = parsed.data.active ?? true;
 
     // Guard against both a slug and an exact-name collision (both have unique indexes).
@@ -92,7 +96,7 @@ organizationsRouter.post("/", requireAuth, requireRoles("admin"), async (req, re
       return;
     }
 
-    const org = await createOrganization(name, slug, active);
+    const org = await createOrganization(name, slug, description, docFolderId, active);
     res.status(201).json(org);
   } catch (err) {
     next(err);
@@ -134,6 +138,16 @@ organizationsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, 
     const updated = await updateOrganization(id, {
       name,
       slug,
+      // Only include nullable fields when the client actually supplied them, so
+      // an omitted key leaves the column unchanged (see updateOrganization's
+      // hasOwnProperty-based clear semantics). `undefined` would otherwise be
+      // mistaken for "present" and clear the value.
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "description")
+        ? { description: parsed.data.description }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "doc_folder_id")
+        ? { doc_folder_id: parsed.data.doc_folder_id?.trim() || null }
+        : {}),
       active: parsed.data.active,
     });
     res.json(updated);

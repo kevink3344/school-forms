@@ -9,6 +9,7 @@ import {
 } from "../db/documents.js";
 import type { Document } from "../db/schema.js";
 import {
+  getOrganizationById,
   getSchool,
   getSubmissionById,
   listSubmissionValues,
@@ -72,29 +73,42 @@ function escapeDriveQuery(value: string): string {
 }
 
 /**
+ * Resolve the Google Drive parent folder for an organization's generated
+ * documents. The organization's own `doc_folder_id` is the primary source;
+ * when it's blank we fall back to the global `env.google.docFolderId`. Returns
+ * null only when neither is set (items then save to the Drive root).
+ */
+async function resolveParentFolderId(organizationId: number): Promise<string | null> {
+  const org = await getOrganizationById(organizationId);
+  const orgFolder = org?.doc_folder_id?.trim();
+  return orgFolder || env.google.docFolderId || null;
+}
+
+/**
  * Resolve (create if needed) a per-school folder under the configured Drive
  * parent. The folder name is the school's display name (e.g. "Broughton High
- * School"). Returns the folder id. When no parent folder is configured (or no
- * school is attached to the submission), the items are saved to the Drive root.
+ * School"). Returns the folder id. When `parentFolderId` is null (or no school
+ * is attached to the submission), the items are saved to the Drive root.
  */
 async function ensureSchoolFolder(
   drive: ReturnType<typeof google.drive>,
-  schoolName: string | null
+  schoolName: string | null,
+  parentFolderId: string | null
 ): Promise<string | null> {
-  if (!env.google.docFolderId) return null;
-  if (!schoolName) return env.google.docFolderId;
+  if (!parentFolderId) return null;
+  if (!schoolName) return parentFolderId;
 
   const folderName = schoolName.trim();
-  if (!folderName) return env.google.docFolderId;
+  if (!folderName) return parentFolderId;
 
-  const existing = await findFolderByName(drive, folderName, env.google.docFolderId);
+  const existing = await findFolderByName(drive, folderName, parentFolderId);
   if (existing) return existing;
 
   const res = await drive.files.create({
     requestBody: {
       name: folderName,
       mimeType: "application/vnd.google-apps.folder",
-      parents: [env.google.docFolderId],
+      parents: [parentFolderId],
     },
     supportsAllDrives: env.google.isSharedDrive,
     fields: "id, name",
@@ -263,9 +277,10 @@ export async function replacePlaceholders(
 
 /**
  * Run the Google-side generation for a specific document row: read the
- * submission's CURRENT values, resolve the per-school folder, copy the template,
- * fill the placeholders, and mark the row Completed (or Failed on error). Shared
- * by both the idempotent `generateDocument` and the forced `regenerateDocument`.
+ * submission's CURRENT values, resolve the per-school folder (under the org's
+ * Drive parent), copy the template, fill the placeholders, and mark the row
+ * Completed (or Failed on error). Shared by both the idempotent
+ * `generateDocument` and the forced `regenerateDocument`.
  */
 async function runGeneration(submissionId: number, dbId: number): Promise<void> {
   try {
@@ -275,11 +290,13 @@ async function runGeneration(submissionId: number, dbId: number): Promise<void> 
     const values = await listSubmissionValues(submission.id);
     const mappings = buildLabelMappings(submission, values);
 
-    // Resolve the per-school folder and build the file name.
+    // Resolve the per-school folder (under the org's Drive parent) and build the
+    // file name.
     const school = submission.school_id ? await getSchool(submission.school_id) : null;
     const schoolName = school?.name ?? null;
     const drive = google.drive({ version: "v3", auth: getAuth() });
-    const parentId = await ensureSchoolFolder(drive, schoolName);
+    const orgParentId = await resolveParentFolderId(submission.organization_id);
+    const parentId = await ensureSchoolFolder(drive, schoolName, orgParentId);
     const docName = buildDocumentName(submission.public_id, values);
 
     const docId = await copyTemplate(docName, parentId);

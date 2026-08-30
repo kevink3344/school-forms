@@ -27,6 +27,8 @@ export interface Organization {
   id: number;
   slug: string;
   name: string;
+  description: string | null;
+  doc_folder_id: string | null;
   active: boolean;
   created_at: string;
 }

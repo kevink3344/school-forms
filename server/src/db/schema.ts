@@ -34,6 +34,10 @@ export interface Organization {
   id: number;
   slug: string;
   name: string;
+  description: string | null;
+  // Per-org Google Drive parent folder where generated documents are saved.
+  // NULL falls back to the global env.google.docFolderId (see google/docs.ts).
+  doc_folder_id: string | null;
   active: boolean;
   created_at: Date;
 }
@@ -245,11 +249,12 @@ export const DDL_STATEMENTS: string[] = [
   // ---------------------------------------------------------------------
   `IF OBJECT_ID('dbo.organizations', 'U') IS NULL
    CREATE TABLE dbo.organizations (
-     id         INT IDENTITY(1,1) PRIMARY KEY,
-     slug       NVARCHAR(60)  NOT NULL,
-     name       NVARCHAR(120) NOT NULL,
-     active     BIT NOT NULL CONSTRAINT DF_organizations_active DEFAULT 1,
-     created_at DATETIME2 NOT NULL CONSTRAINT DF_organizations_created_at DEFAULT SYSUTCDATETIME()
+     id          INT IDENTITY(1,1) PRIMARY KEY,
+     slug        NVARCHAR(60)  NOT NULL,
+     name        NVARCHAR(120) NOT NULL,
+     description NVARCHAR(MAX) NULL,
+     active      BIT NOT NULL CONSTRAINT DF_organizations_active DEFAULT 1,
+     created_at  DATETIME2 NOT NULL CONSTRAINT DF_organizations_created_at DEFAULT SYSUTCDATETIME()
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_slug')
      CREATE UNIQUE INDEX UX_organizations_slug ON dbo.organizations(slug);
@@ -257,7 +262,11 @@ export const DDL_STATEMENTS: string[] = [
      CREATE UNIQUE INDEX UX_organizations_name ON dbo.organizations(name);
    IF COL_LENGTH('dbo.organizations', 'active') IS NULL
      ALTER TABLE dbo.organizations ADD active BIT NOT NULL
-       CONSTRAINT DF_organizations_active DEFAULT 1;`,
+       CONSTRAINT DF_organizations_active DEFAULT 1;
+   IF COL_LENGTH('dbo.organizations', 'description') IS NULL
+     ALTER TABLE dbo.organizations ADD description NVARCHAR(MAX) NULL;
+   IF COL_LENGTH('dbo.organizations', 'doc_folder_id') IS NULL
+     ALTER TABLE dbo.organizations ADD doc_folder_id NVARCHAR(255) NULL;`,
 
   // Seed the two known organizations (idempotent). Technology Services is a
   // placeholder org with NO users — only the org row is created here.
