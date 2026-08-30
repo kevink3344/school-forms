@@ -25,7 +25,11 @@ export function PdfViewer({ documentRowId, refreshKey = 0 }: PdfViewerProps) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  // Fetch the PDF blob whenever the document (or refreshKey) changes.
+  // Build the direct PDF URL (with the token as a query param) whenever the
+  // document (or refreshKey) changes. We point the iframe straight at the
+  // endpoint rather than a blob URL, because Chrome's built-in PDF viewer can't
+  // render a blob: URL inside an <iframe> (the embedder loads but the body stays
+  // empty, showing a blank screen).
   useEffect(() => {
     if (!documentRowId) {
       setPdfUrl(null);
@@ -35,14 +39,10 @@ export function PdfViewer({ documentRowId, refreshKey = 0 }: PdfViewerProps) {
     setLoading(true);
     setError("");
     api
-      .getDocumentPdf(documentRowId)
-      .then((b) => {
+      .getDocumentPdfSrc(documentRowId)
+      .then((u) => {
         if (cancelled) return;
-        // Revoke any previous object URL to avoid leaks.
-        setPdfUrl((prev) => {
-          if (prev) URL.revokeObjectURL(prev);
-          return URL.createObjectURL(b);
-        });
+        setPdfUrl(u);
       })
       .catch((err) => {
         if (cancelled) return;
@@ -55,16 +55,6 @@ export function PdfViewer({ documentRowId, refreshKey = 0 }: PdfViewerProps) {
       cancelled = true;
     };
   }, [documentRowId, refreshKey]);
-
-  // Clean up the object URL when the component unmounts.
-  useEffect(() => {
-    return () => {
-      setPdfUrl((prev) => {
-        if (prev) URL.revokeObjectURL(prev);
-        return null;
-      });
-    };
-  }, []);
 
   if (!documentRowId) {
     return (

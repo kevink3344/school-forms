@@ -676,4 +676,18 @@ export const api = {
     const blob = await this.getDocumentPdf(id);
     return URL.createObjectURL(blob);
   },
+
+  /**
+   * Return the direct URL to the PDF endpoint for this document, with the
+   * access token passed as a `?token=` query param. Chrome's built-in PDF
+   * viewer can't render a `blob:` URL in an <iframe> (the embedder loads but
+   * the body stays empty), so the iframe must point straight at the endpoint.
+   * Because the endpoint also accepts the Bearer header, this URL form is only
+   * used for the inline <iframe> preview where the header can't be sent.
+   */
+  async getDocumentPdfSrc(id: number): Promise<string> {
+    const token = getToken();
+    const qs = token ? `?token=${encodeURIComponent(token)}` : "";
+    return `${API_BASE}/api/documents/${id}/pdf${qs}`;
+  },
 };

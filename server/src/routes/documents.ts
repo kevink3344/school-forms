@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { requireAuth, requireRoles } from "../auth.js";
+import { requireAuth, requireRoles, verifyAccessToken } from "../auth.js";
 import { listDocuments, getDocumentById, listDocumentsBySubmission } from "../db/documents.js";
 import { generateDocument, regenerateDocument, getDocumentPdf } from "../google/docs.js";
 import { getSetting } from "../db/queries.js";
@@ -140,7 +140,38 @@ documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admi
 // content. Served inline so an <iframe>/<embed> can render it, with a Content-
 // Disposition filename for the explicit Save/Download action.
 // -----------------------------------------------------------------------------
-documentsRouter.get("/:id/pdf", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+// The PDF must be loaded via an <iframe src> so Chrome's built-in PDF viewer can
+// render it. An iframe src can't send an Authorization header, so this route
+// accepts the access token in a `?token=` query param as well as the Bearer
+// header. The access token is short-lived (15m) and this endpoint is read-only.
+function requireAuthForPdf(req: Request, res: Response, next: NextFunction): void {
+  let token = "";
+  const header = req.headers.authorization;
+  if (header && header.startsWith("Bearer ")) {
+    token = header.slice("Bearer ".length);
+  } else if (typeof req.query.token === "string" && req.query.token) {
+    token = req.query.token;
+  }
+  if (!token) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+  try {
+    const payload = verifyAccessToken(token);
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      school_id: payload.school_id,
+      organization_id: payload.organization_id,
+    };
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+documentsRouter.get("/:id/pdf", requireAuthForPdf, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {
