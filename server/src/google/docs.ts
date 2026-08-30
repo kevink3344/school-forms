@@ -395,3 +395,46 @@ function readCheckbox(value: string | number | boolean | string[] | null): boole
   const s = String(value);
   return s !== "" && s !== "0" && s !== "false";
 }
+
+/**
+ * Export a Drive document to PDF and return the raw binary buffer. This is the
+ * "snapshot" the app serves for inline preview (View PDF) and download. The
+ * doc is owned by the app's OAuth account, so rendering it through the app —
+ * rather than handing staff a shareable Drive link — is what lets anyone with
+ * a valid account (who passed the row-level scope check in the route) view it
+ * without needing a Google login or shared-drive membership.
+ *
+ * @param documentId The Drive file id stored in `documents.document_id`.
+ * @returns The PDF bytes (Buffer, `application/pdf`).
+ */
+export async function getDocumentPdf(documentId: string): Promise<Buffer> {
+  const drive = google.drive({ version: "v3", auth: getAuth() });
+  const res = await drive.files.export({
+    fileId: documentId,
+    mimeType: "application/pdf",
+  });
+  // googleapis returns the binary body as `.data`. Depending on the installed
+  // version it may be a Buffer, a Blob (with arrayBuffer()), or a Node Readable
+  // stream. Handle all three so we always return a Buffer.
+  const data = res.data as unknown;
+  if (Buffer.isBuffer(data)) {
+    return data;
+  }
+  // Blob (Node >=18 / browsers expose `arrayBuffer()`).
+  if (data && typeof (data as { arrayBuffer?: unknown }).arrayBuffer === "function") {
+    const buf = await (data as { arrayBuffer: () => Promise<ArrayBuffer> }).arrayBuffer();
+    return Buffer.from(buf);
+  }
+  // Node / web Readable stream.
+  if (data && typeof (data as { on?: unknown }).on === "function") {
+    const chunks: Buffer[] = [];
+    for await (const chunk of data as AsyncIterable<Buffer>) {
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as Uint8Array));
+    }
+    return Buffer.concat(chunks);
+  }
+  if (typeof data === "string") {
+    return Buffer.from(data, "binary");
+  }
+  throw new Error("Google Drive did not return PDF bytes");
+}

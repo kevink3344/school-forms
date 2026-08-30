@@ -270,8 +270,20 @@ export const api = {
     return request<{ columns: string[] }>("/api/schools/columns", { auth: true });
   },
 
-  async listSchoolsPage(page = 1, pageSize = 50): Promise<SchoolPage> {
-    return request<SchoolPage>(`/api/schools/page?page=${page}&pageSize=${pageSize}`, { auth: true });
+  async listSchoolsPage(
+    page = 1,
+    pageSize = 50,
+    filters: { search?: string; gradeLevel?: string; calendar?: string } = {}
+  ): Promise<SchoolPage> {
+    const qs = new URLSearchParams({ page: String(page), pageSize: String(pageSize) });
+    if (filters.search) qs.set("search", filters.search);
+    if (filters.gradeLevel) qs.set("gradeLevel", filters.gradeLevel);
+    if (filters.calendar) qs.set("calendar", filters.calendar);
+    return request<SchoolPage>(`/api/schools/page?${qs.toString()}`, { auth: true });
+  },
+
+  async listSchoolFacets(): Promise<{ gradeLevels: string[]; calendars: string[] }> {
+    return request<{ gradeLevels: string[]; calendars: string[] }>("/api/schools/facets", { auth: true });
   },
 
   async importSchools(): Promise<{ total: number }> {
@@ -615,5 +627,35 @@ export const api = {
       method: "POST",
       auth: true,
     });
+  },
+
+  /**
+   * Fetch a generated document as a PDF blob. Used for the inline preview
+   * ("View PDF") and for the explicit download action. Uses a direct fetch
+   * with the access token (the shared `request()` assumes JSON). Returns a
+   * Blob with type application/pdf, or throws on a non-OK response.
+   */
+  async getDocumentPdf(id: number): Promise<Blob> {
+    const res = await fetch(`${API_BASE}/api/documents/${id}/pdf`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      const body = await res.json().catch(() => null);
+      throw new ApiError(
+        res.status,
+        (body as { error?: string } | null)?.error || "Could not load PDF"
+      );
+    }
+    return res.blob();
+  },
+
+  /**
+   * Fetch the PDF and return a temporary object URL usable in an <iframe>/<embed>.
+   * Caller is responsible for `URL.revokeObjectURL(url)` when done.
+   */
+  async getDocumentPdfUrl(id: number): Promise<string> {
+    const blob = await this.getDocumentPdf(id);
+    return URL.createObjectURL(blob);
   },
 };

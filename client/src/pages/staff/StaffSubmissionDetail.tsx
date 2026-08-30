@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
 import { StatusBadge } from "../../components/layout";
+import { PdfViewerDrawer } from "../../components/PdfViewer";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "resolved"];
 
@@ -31,6 +32,10 @@ export default function StaffSubmissionDetail() {
   // Always-editable staff-only fields (the form's staff_only form_fields)
   const [staffDraft, setStaffDraft] = useState<Record<number, string | number | boolean | string[] | null>>({});
   const [savingStaff, setSavingStaff] = useState(false);
+
+  // Right slide-out PDF preview for a generated document.
+  const [previewDoc, setPreviewDoc] = useState<SubmissionDetail["documents"][number] | null>(null);
+  const [previewRefreshKey, setPreviewRefreshKey] = useState(0);
 
   const load = () => {
     if (!publicId) return;
@@ -406,6 +411,17 @@ export default function StaffSubmissionDetail() {
                     <span className={`badge ${docStatusBadge(doc.status).cls}`}>
                       {docStatusBadge(doc.status).label}
                     </span>
+                    {doc.document_id && doc.status === "Completed" && (
+                      <button
+                        className="badge-button"
+                        onClick={() => {
+                          setPreviewDoc(doc);
+                          setPreviewRefreshKey(0);
+                        }}
+                      >
+                        View PDF
+                      </button>
+                    )}
                     {doc.status === "Failed" && (
                       <button className="badge-button" onClick={() => handleRetryDocument(doc.id)}>
                         Retry
@@ -483,6 +499,16 @@ export default function StaffSubmissionDetail() {
           </div>
         </div>
       </div>
+
+      {/* Right slide-out PDF preview */}
+      {previewDoc && (
+        <PdfViewerDrawer
+          title="Document Preview"
+          documentRowId={previewDoc.id}
+          refreshKey={previewRefreshKey}
+          onClose={() => setPreviewDoc(null)}
+        />
+      )}
     </div>
   );
 }
@@ -590,10 +616,36 @@ function renderEditor(
           ))}
         </div>
       );
-    case "checkbox":
+    case "checkbox": {
+      const opts = options ?? [];
+      // A single-option checkbox (e.g. the staff-only "Generate document" field)
+      // is semantically a boolean, so render it as a toggle switch to make it
+      // deliberate rather than an easy-to-mistake checkbox. Fields with multiple
+      // options keep the checkbox list.
+      if (opts.length === 1) {
+        const o = opts[0];
+        const arr = Array.isArray(value) ? value : [];
+        const checked = arr.includes(o);
+        return (
+          <label className="toggle" title="Toggle to set this option">
+            <input
+              type="checkbox"
+              checked={checked}
+              onChange={(e) => {
+                const next = e.target.checked ? [...arr, o] : arr.filter((x) => x !== o);
+                onChange(next);
+              }}
+            />
+            <span className="track">
+              <span className="thumb" />
+            </span>
+            <span style={{ marginLeft: 8, fontSize: 13 }}>{o}</span>
+          </label>
+        );
+      }
       return (
         <div className="f-value inline">
-          {(options ?? []).map((o) => {
+          {opts.map((o) => {
             const arr = Array.isArray(value) ? value : [];
             const checked = arr.includes(o);
             return (
@@ -612,6 +664,7 @@ function renderEditor(
           })}
         </div>
       );
+    }
     default:
       return (
         <input

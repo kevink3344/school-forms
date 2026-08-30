@@ -2,6 +2,7 @@ import { Router } from "express";
 import {
   createSchool,
   featureToSchool,
+  getSchoolFacets,
   listSchools,
   listSchoolsPage,
   upsertSchoolFromSource,
@@ -35,14 +36,28 @@ schoolsRouter.get("/columns", requireAuth, requireRoles("admin"), (_req, res) =>
   res.json({ columns: env.schoolImport.columns });
 });
 
-// Admin: paginated school listing (pageSize capped at 50).
+// Admin: paginated school listing (pageSize capped at 50), with optional
+// filter query params: search (name/district), gradeLevel, calendar.
 schoolsRouter.get("/page", requireAuth, requireRoles("admin"), async (req, res, next) => {
   try {
     const page = Math.max(1, Number(req.query.page) || 1);
     const pageSize = Math.min(MAX_PAGE_SIZE, Math.max(1, Number(req.query.pageSize) || MAX_PAGE_SIZE));
-    const result = await listSchoolsPage({ page, pageSize });
+    const search = typeof req.query.search === "string" ? req.query.search.trim() : "";
+    const gradeLevel = typeof req.query.gradeLevel === "string" ? req.query.gradeLevel : "";
+    const calendar = typeof req.query.calendar === "string" ? req.query.calendar : "";
+    const result = await listSchoolsPage({ page, pageSize, search, gradeLevel, calendar });
     const totalPages = result.total === 0 ? 0 : Math.ceil(result.total / pageSize);
     res.json({ ...result, page, pageSize, totalPages });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: distinct grade-level/calendar values for the filter dropdowns.
+schoolsRouter.get("/facets", requireAuth, requireRoles("admin"), async (_req, res, next) => {
+  try {
+    const facets = await getSchoolFacets();
+    res.json(facets);
   } catch (err) {
     next(err);
   }

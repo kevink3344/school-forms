@@ -206,25 +206,71 @@ export async function createSchool(name: string, district: string | null): Promi
   return rows[0];
 }
 
-// Paginated listing for the admin Schools page.
+// Paginated listing for the admin Schools page. Supports an optional search
+// term (matched against name/district) and exact-match filters for grade level
+// and calendar. The same WHERE clause is applied to both the count and the rows.
 export async function listSchoolsPage(params: {
   page: number;
   pageSize: number;
+  search?: string;
+  gradeLevel?: string;
+  calendar?: string;
 }): Promise<{ rows: School[]; total: number }> {
-  const { page, pageSize } = params;
+  const { page, pageSize, search, gradeLevel, calendar } = params;
   const offset = (page - 1) * pageSize;
+
+  const conditions: string[] = [];
+  const filterParams: Record<string, unknown> = {};
+  if (search) {
+    conditions.push("(name LIKE @search OR district LIKE @search)");
+    filterParams.search = `%${search}%`;
+  }
+  if (gradeLevel) {
+    conditions.push("grade_level = @gradeLevel");
+    filterParams.gradeLevel = gradeLevel;
+  }
+  if (calendar) {
+    conditions.push("calendar = @calendar");
+    filterParams.calendar = calendar;
+  }
+  const where = conditions.length ? `WHERE ${conditions.join(" AND ")}` : "";
+
   const countRows = await execute<{ total: number }>(
-    "SELECT COUNT(*) AS total FROM dbo.schools"
+    `SELECT COUNT(*) AS total FROM dbo.schools ${where}`,
+    filterParams
   );
   const total = countRows[0]?.total ?? 0;
   const rows = await execute<School>(
     `SELECT id, source_id, name, grade_level, calendar, district, created_at
      FROM dbo.schools
+     ${where}
      ORDER BY name
      OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`,
-    { offset, pageSize }
+    { ...filterParams, offset, pageSize }
   );
   return { rows, total };
+}
+
+// Distinct grade-level and calendar values used to populate the filter dropdowns
+// on the admin Schools page. Empty/null values are excluded.
+export async function getSchoolFacets(): Promise<{
+  gradeLevels: string[];
+  calendars: string[];
+}> {
+  const gradeRows = await execute<{ value: string }>(
+    `SELECT DISTINCT grade_level AS value FROM dbo.schools
+     WHERE grade_level IS NOT NULL AND grade_level <> ''
+     ORDER BY grade_level`
+  );
+  const calendarRows = await execute<{ value: string }>(
+    `SELECT DISTINCT calendar AS value FROM dbo.schools
+     WHERE calendar IS NOT NULL AND calendar <> ''
+     ORDER BY calendar`
+  );
+  return {
+    gradeLevels: gradeRows.map((r) => r.value),
+    calendars: calendarRows.map((r) => r.value),
+  };
 }
 
 // Upsert a school from the imported feed, keyed on the stable source_id (FID).

@@ -1,7 +1,7 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth, requireRoles } from "../auth.js";
 import { listDocuments, getDocumentById, listDocumentsBySubmission } from "../db/documents.js";
-import { generateDocument, regenerateDocument } from "../google/docs.js";
+import { generateDocument, regenerateDocument, getDocumentPdf } from "../google/docs.js";
 import { getSetting } from "../db/queries.js";
 import { documentsEnabledFor } from "./settings.js";
 
@@ -124,6 +124,52 @@ documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admi
     // Return the newest document rows for the submission (the new one is Pending).
     const rows = await listDocumentsBySubmission(doc.submission_id);
     res.json(rows[0] ?? doc);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/documents/:id/pdf — stream the Google Doc as a PDF for the
+// inline preview ("View PDF"). Access is scoped exactly like the list: staff
+// → their school, admin → their org, via getDocumentById. The Google Doc is
+// owned by the app's OAuth account, so the only way a staff member with a
+// normal account can see it is through this endpoint (no Google login or
+// shared-drive membership required). The PDF is a snapshot of the doc at the
+// moment of export — if the doc is regenerated, a fresh fetch returns the new
+// content. Served inline so an <iframe>/<embed> can render it, with a Content-
+// Disposition filename for the explicit Save/Download action.
+// -----------------------------------------------------------------------------
+documentsRouter.get("/:id/pdf", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+  try {
+    const dbId = Number(req.params.id);
+    if (!Number.isInteger(dbId) || dbId <= 0) {
+      res.status(400).json({ error: "Invalid document id" });
+      return;
+    }
+
+    const doc = await getDocumentById(
+      dbId,
+      req.user!.role === "staff"
+        ? { schoolId: req.user!.school_id }
+        : { organizationId: req.user!.organization_id }
+    );
+    if (!doc) {
+      res.status(404).json({ error: "Document not found" });
+      return;
+    }
+    if (!doc.document_id) {
+      res.status(400).json({ error: "Document has no Drive file yet" });
+      return;
+    }
+
+    const pdf = await getDocumentPdf(doc.document_id);
+
+    const filename = `${(doc.student_name || `document-${dbId}`).replace(/[^\w\-. ]+/g, "_")}.pdf`;
+    res.setHeader("Content-Type", "application/pdf");
+    res.setHeader("Content-Disposition", `inline; filename="${filename}"`);
+    res.setHeader("Content-Length", pdf.length);
+    res.send(pdf);
   } catch (err) {
     next(err);
   }

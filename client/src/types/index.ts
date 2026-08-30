@@ -44,6 +44,13 @@ export interface SchoolPage {
   totalPages: number;
 }
 
+// Distinct grade-level/calendar values for the Schools page filter dropdowns
+// (returned by /api/schools/facets).
+export interface SchoolFacets {
+  gradeLevels: string[];
+  calendars: string[];
+}
+
 export interface User {
   id: number;
   email: string;

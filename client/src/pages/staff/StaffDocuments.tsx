@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import type { DocumentRow } from "../../types";
 import { PageHead } from "../../components/layout";
+import { PdfViewer } from "../../components/PdfViewer";
 import { useAuth } from "../../context/AuthContext";
 
 // Document status → badge color (Pending / Completed / Failed).
@@ -26,6 +27,9 @@ export default function StaffDocuments() {
   const [selected, setSelected] = useState<DocumentRow | null>(null);
   const [regenerating, setRegenerating] = useState(false);
   const [panelError, setPanelError] = useState("");
+  // Bumped after a regenerate so the inline PDF preview re-fetches the freshly
+  // generated snapshot.
+  const [pdfRefreshKey, setPdfRefreshKey] = useState(0);
 
   const load = () => {
     setLoading(true);
@@ -62,6 +66,8 @@ export default function StaffDocuments() {
       // Refresh the list to include the new row.
       load();
       setSelected((prev) => (prev ? refreshed : null));
+      // Force the inline PDF to re-fetch the newly generated snapshot.
+      setPdfRefreshKey((k) => k + 1);
     } catch (err) {
       setPanelError(err instanceof ApiError ? err.message : "Could not regenerate document");
     } finally {
@@ -134,15 +140,27 @@ export default function StaffDocuments() {
                     <td data-label="Phase I Result">{d.phase1_result ?? "—"}</td>
                     <td data-label="Document">
                       {docId ? (
-                        <a
-                          className="link-name"
-                          href={`https://docs.google.com/document/d/${docId}/edit`}
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          Open
-                        </a>
+                        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                          <a
+                            className="link-name"
+                            href={`https://docs.google.com/document/d/${docId}/edit`}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            Open
+                          </a>
+                          <button
+                            className="link-name"
+                            style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              openPanel(d);
+                            }}
+                          >
+                            View PDF
+                          </button>
+                        </span>
                       ) : (
                         <span className="cell-mono">—</span>
                       )}
@@ -224,6 +242,13 @@ export default function StaffDocuments() {
                   </div>
                 ) : null}
               </div>
+
+              {selected.status === "Completed" && selected.document_id && (
+                <div className="pdf-drawer-section">
+                  <div className="pdf-drawer-heading">Preview</div>
+                  <PdfViewer documentRowId={selected.id} refreshKey={pdfRefreshKey} />
+                </div>
+              )}
 
               {panelError && (
                 <div

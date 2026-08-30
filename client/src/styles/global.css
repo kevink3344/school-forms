@@ -332,6 +332,26 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
 .drawer-foot { display: flex; align-items: center; gap: 12px; padding: 14px 20px; border-top: 1px solid var(--border); }
 .drawer-foot .spacer { flex: 1; }
 
+/* PDF viewer (inline preview of a generated Google Doc) */
+.drawer-pdf { width: min(720px, 100vw); }
+.drawer-body-pdf { padding: 16px; display: flex; flex-direction: column; overflow: hidden; }
+.pdf-drawer-section { margin-top: 16px; display: flex; flex-direction: column; }
+.pdf-drawer-heading {
+  font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+  color: var(--text-muted); margin-bottom: 8px;
+}
+.pdf-viewer { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; flex: 1; min-height: 320px; }
+.pdf-stage {
+  position: relative; background: #595959; overflow: hidden; flex: 1; min-height: 0;
+}
+.pdf-frame { position: absolute; inset: 0; width: 100%; height: 100%; border: none; background: #fff; }
+.pdf-loading, .pdf-error {
+  display: flex; align-items: center; justify-content: center; gap: 10px;
+  width: 100%; color: #fff; font-size: 14px; min-height: 280px;
+}
+.pdf-error { color: #ffe1e1; }
+.pdf-viewer-placeholder { padding: 24px; color: var(--text-muted); font-size: 13px; border: 1px dashed var(--border); border-radius: var(--radius); }
+
 .export-summary { display: flex; gap: 20px; margin-bottom: 18px; flex-wrap: wrap; }
 .export-summary .stat { font-size: 13px; }
 .export-summary .stat b { font-size: 20px; display: block; }
