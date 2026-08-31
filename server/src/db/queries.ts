@@ -138,6 +138,32 @@ export async function getDefaultOrganization(): Promise<Organization> {
 }
 
 // -----------------------------------------------------------------------------
+// Login stats (public counts for the login-page brand panel)
+// -----------------------------------------------------------------------------
+export interface LoginStats {
+  users: number;
+  schools: number;
+  submissions: number;
+}
+
+// Org-wide counts for the login page's three stat boxes. Because the login page
+// is pre-auth, the caller passes an organization_id so counts are scoped to that
+// tenant (NOT the whole DB). Users & submissions carry `organization_id`
+// directly and are scoped to the org. Schools are a GLOBAL shared directory with
+// NO organization_id column (no school-org mapping table), so every school is
+// counted regardless of org — that's the total directory size.
+export async function getLoginStats(organizationId: number): Promise<LoginStats> {
+  const rows = await execute<LoginStats>(
+    `SELECT
+       (SELECT COUNT(*) FROM dbo.users                WHERE organization_id = @orgId) AS users,
+       (SELECT COUNT(*) FROM dbo.schools)                                              AS schools,
+       (SELECT COUNT(*) FROM dbo.submissions          WHERE organization_id = @orgId) AS submissions`,
+    { orgId: organizationId }
+  );
+  return rows[0] ?? { users: 0, schools: 0, submissions: 0 };
+}
+
+// -----------------------------------------------------------------------------
 // App settings (generic key/value store — public read, admin write)
 // -----------------------------------------------------------------------------
 interface SettingRow {

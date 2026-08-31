@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent } from "react";
 import { Link, Navigate, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../context/AuthContext";
 import { api, ApiError } from "../lib/api";
-import type { LoginMode, LoginUser } from "../types";
+import type { LoginMode, LoginStats, LoginUser } from "../types";
 
 // Organization options shown in the select-mode dropdown (matches RegisterPage).
 const ORG_OPTIONS = [
@@ -43,6 +43,9 @@ export default function LoginPage() {
 
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
+
+  // Org-wide login-page stat counts for the brand panel (users/schools/submissions).
+  const [stats, setStats] = useState<LoginStats | null>(null);
 
   // Admin local override (only when ?admin=1). Higher priority than the env
   // override so the preview always wins while testing.
@@ -102,6 +105,23 @@ export default function LoginPage() {
     };
   }, [orgSlug, effectiveMode]);
 
+  // Load org-wide stat counts for the brand panel. Re-fetch whenever the
+  // selected org changes (org-wide scope, not global). Show "—" while loading.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getLoginStats(orgSlug)
+      .then((s) => {
+        if (!cancelled) setStats(s);
+      })
+      .catch(() => {
+        if (!cancelled) setStats(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [orgSlug]);
+
   // Already signed in → go home.
   if (user) {
     return <Navigate to={user.role === "admin" ? "/admin" : "/staff"} replace />;
@@ -155,176 +175,212 @@ export default function LoginPage() {
   }
 
   return (
-    <Centered>
-      <div className="card" style={{ width: "100%", maxWidth: 400, padding: 32, boxShadow: "var(--shadow-card)" }}>
-        <div style={{ marginBottom: 6 }}>
-          <p
-            style={{
-              fontSize: 11,
-              fontWeight: 700,
-              textTransform: "uppercase",
-              letterSpacing: "0.08em",
-              color: "var(--text-muted)",
-              margin: "0 0 4px",
-            }}
-          >
-            Authentication
-          </p>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Sign In</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "6px 0 0" }}>
-            {effectiveMode === "select" &&
-              "Select a test user from the directory and create a session without entering email or password."}
-            {effectiveMode === "password" &&
-              "Sign in with your email and password to access School Forms."}
-            {effectiveMode === "maintenance" &&
-              "System maintenance is currently in progress."}
-          </p>
-        </div>
-
-        {error && (
-          <div
-            style={{
-              background: "rgb(255,232,234)",
-              color: "rgb(186,48,64)",
-              padding: "10px 12px",
-              borderRadius: "var(--radius)",
-              fontSize: 13,
-              marginBottom: 16,
-              marginTop: 12,
-            }}
-          >
-            {error}
-          </div>
-        )}
-
-        {effectiveMode === "select" && (
-          <form onSubmit={handleSelectSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div className="filter-group" style={{ minWidth: 0 }}>
-              <label htmlFor="select-org">Organization</label>
-              <select
-                id="select-org"
-                value={orgSlug}
-                onChange={(e) => setOrgSlug(e.target.value)}
-              >
-                {ORG_OPTIONS.map((o) => (
-                  <option key={o.slug} value={o.slug}>
-                    {o.label}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <div className="filter-group" style={{ minWidth: 0 }}>
-              <label htmlFor="select-user">Test User</label>
-              <select
-                id="select-user"
-                value={userId}
-                onChange={(e) => setUserId(e.target.value)}
-                required
-              >
-                <option value="" disabled>
-                  {users.length ? "Select a user…" : "No users available"}
-                </option>
-                {users.map((u) => (
-                  <option key={u.id} value={u.id}>
-                    {u.display_name} · {u.email} · {u.role}
-                  </option>
-                ))}
-              </select>
-            </div>
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={busy || !userId}
-              style={{ justifyContent: "center" }}
-            >
-              {busy ? "Signing in…" : "Sign In"}
-            </button>
-          </form>
-        )}
-
-        {effectiveMode === "password" && (
-          <form onSubmit={handlePasswordSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div className="filter-group" style={{ minWidth: 0 }}>
-              <label htmlFor="email">Email</label>
-              <input
-                id="email"
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                required
-              />
-            </div>
-            <div className="filter-group" style={{ minWidth: 0 }}>
-              <label htmlFor="password">Password</label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                required
-              />
-            </div>
-            <button
-              type="submit"
-              className="primary-button"
-              disabled={busy}
-              style={{ justifyContent: "center" }}
-            >
-              {busy ? "Signing in…" : "Sign In"}
-            </button>
-          </form>
-        )}
-
-        {effectiveMode === "maintenance" && (
-          <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-            <div
+    <div className="login-split">
+      <div className="login-card">
+        <BrandPanel stats={stats} />
+        <div className="login-auth">
+          <div className="card" style={{ width: "100%", maxWidth: 400, padding: 32 }}>
+          <div style={{ marginBottom: 6 }}>
+            <p
               style={{
-                background: "rgb(255,247,229)",
-                color: "rgb(146,90,10)",
-                padding: "12px 14px",
-                borderRadius: "var(--radius)",
-                fontSize: 13,
+                fontSize: 11,
+                fontWeight: 700,
+                textTransform: "uppercase",
+                letterSpacing: "0.08em",
+                color: "var(--text-muted)",
+                margin: "0 0 4px",
               }}
             >
-              {maintenanceMessage}
-            </div>
-          </div>
-        )}
-
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
-          {effectiveMode === "password" ? (
-            <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
-              Staff?{" "}
-              <Link to="/register" style={{ color: "var(--accent)", fontWeight: 600 }}>
-                Create an account
-              </Link>
+              Authentication
             </p>
-          ) : (
-            <span />
-          )}
-          {adminOverrideEnabled && (
-            <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              {(Object.keys(MODE_LABELS) as LoginMode[]).map((m) => (
-                <button
-                  key={m}
-                  type="button"
-                  onClick={() => setAdminMode(m)}
-                  className="badge-button"
-                  style={{
-                    ...(adminMode === m || (adminMode === null && effectiveMode === m)
-                      ? { background: "var(--accent)", color: "#fff" }
-                      : {}),
-                    fontSize: 10,
-                  }}
-                >
-                  {MODE_LABELS[m]}
-                </button>
-              ))}
+            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Sign In</h1>
+            <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "6px 0 0" }}>
+              {effectiveMode === "select" &&
+                "Select a test user from the directory and create a session without entering email or password."}
+              {effectiveMode === "password" &&
+                "Sign in with your email and password to access School Forms."}
+              {effectiveMode === "maintenance" &&
+                "System maintenance is currently in progress."}
+            </p>
+          </div>
+
+          {error && (
+            <div
+              style={{
+                background: "rgb(255,232,234)",
+                color: "rgb(186,48,64)",
+                padding: "10px 12px",
+                borderRadius: "var(--radius)",
+                fontSize: 13,
+                marginBottom: 16,
+                marginTop: 12,
+              }}
+            >
+              {error}
             </div>
           )}
+
+          {effectiveMode === "select" && (
+            <form onSubmit={handleSelectSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div className="filter-group" style={{ minWidth: 0 }}>
+                <label htmlFor="select-org">Organization</label>
+                <select
+                  id="select-org"
+                  value={orgSlug}
+                  onChange={(e) => setOrgSlug(e.target.value)}
+                >
+                  {ORG_OPTIONS.map((o) => (
+                    <option key={o.slug} value={o.slug}>
+                      {o.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <div className="filter-group" style={{ minWidth: 0 }}>
+                <label htmlFor="select-user">Test User</label>
+                <select
+                  id="select-user"
+                  value={userId}
+                  onChange={(e) => setUserId(e.target.value)}
+                  required
+                >
+                  <option value="" disabled>
+                    {users.length ? "Select a user…" : "No users available"}
+                  </option>
+                  {users.map((u) => (
+                    <option key={u.id} value={u.id}>
+                      {u.display_name} · {u.email} · {u.role}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={busy || !userId}
+                style={{ justifyContent: "center" }}
+              >
+                {busy ? "Signing in…" : "Sign In"}
+              </button>
+            </form>
+          )}
+
+          {effectiveMode === "password" && (
+            <form onSubmit={handlePasswordSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div className="filter-group" style={{ minWidth: 0 }}>
+                <label htmlFor="email">Email</label>
+                <input
+                  id="email"
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  required
+                />
+              </div>
+              <div className="filter-group" style={{ minWidth: 0 }}>
+                <label htmlFor="password">Password</label>
+                <input
+                  id="password"
+                  type="password"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  required
+                />
+              </div>
+              <button
+                type="submit"
+                className="primary-button"
+                disabled={busy}
+                style={{ justifyContent: "center" }}
+              >
+                {busy ? "Signing in…" : "Sign In"}
+              </button>
+            </form>
+          )}
+
+          {effectiveMode === "maintenance" && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+              <div
+                style={{
+                  background: "rgb(255,247,229)",
+                  color: "rgb(146,90,10)",
+                  padding: "12px 14px",
+                  borderRadius: "var(--radius)",
+                  fontSize: 13,
+                }}
+              >
+                {maintenanceMessage}
+              </div>
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
+            {effectiveMode === "password" ? (
+              <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
+                Staff?{" "}
+                <Link to="/register" style={{ color: "var(--accent)", fontWeight: 600 }}>
+                  Create an account
+                </Link>
+              </p>
+            ) : (
+              <span />
+            )}
+            {adminOverrideEnabled && (
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {(Object.keys(MODE_LABELS) as LoginMode[]).map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setAdminMode(m)}
+                    className="badge-button"
+                    style={{
+                      ...(adminMode === m || (adminMode === null && effectiveMode === m)
+                        ? { background: "var(--accent)", color: "#fff" }
+                        : {}),
+                      fontSize: 10,
+                    }}
+                  >
+                    {MODE_LABELS[m]}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
         </div>
       </div>
-    </Centered>
+      </div>
+    </div>
+  );
+}
+
+// Left brand panel: logo, eyebrow, title, tagline, and three static stat boxes.
+// `stats` is null while loading or on error, so the boxes show "—" for the number.
+function BrandPanel({ stats }: { stats: LoginStats | null }) {
+  const n = (v: number | undefined) => (v === undefined || v === null ? "—" : v);
+  return (
+    <div className="login-brand">
+      <div className="logo-badge">G</div>
+      <p className="brand-eyebrow">Enterprise Staff Support</p>
+      <h1>Google Submissions</h1>
+      <p className="brand-tagline">
+        Choose a test user and sign in instantly. The correct organization and team
+        context will be applied automatically.
+      </p>
+      <div className="brand-stats">
+        <div className="brand-stat">
+          <div className="stat-num">{n(stats?.users)}</div>
+          <div className="stat-label">Users</div>
+        </div>
+        <div className="brand-stat">
+          <div className="stat-num">{n(stats?.schools)}</div>
+          <div className="stat-label">Schools</div>
+        </div>
+        <div className="brand-stat">
+          <div className="stat-num">{n(stats?.submissions)}</div>
+          <div className="stat-label">Submissions</div>
+        </div>
+      </div>
+    </div>
   );
 }
 

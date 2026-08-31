@@ -79,6 +79,13 @@ export interface LoginUser {
   role: Role;
 }
 
+// Public login-page stat counts (org-scoped), returned by /api/health/stats.
+export interface LoginStats {
+  users: number;
+  schools: number;
+  submissions: number;
+}
+
 // User row as returned by the admin /api/users endpoints — enriched with the
 // school's display name (null for admins with no school) and the active flag.
 export interface AdminUser extends User {

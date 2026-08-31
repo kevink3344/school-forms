@@ -771,3 +771,79 @@ table.grid tbody tr.grid-row:hover { background: #e7f1fb; }
   }
 }
 
+/* ===== Login split layout (TeamSupportPro style) ===== */
+.login-split {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--app-bg);
+  padding: 32px 24px;
+}
+.login-card {
+  width: min(1080px, 100%);
+  display: grid;
+  grid-template-columns: minmax(0, 1.1fr) minmax(360px, 1fr);
+  border-radius: 12px;
+  overflow: hidden;
+  box-shadow: var(--shadow-card);
+}
+.login-brand {
+  background: var(--header-bg);
+  color: #fff;
+  padding: 56px 48px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+}
+.login-brand .logo-badge {
+  width: 40px; height: 40px; border-radius: 8px;
+  background: var(--accent); display: flex; align-items: center; justify-content: center;
+  font-size: 18px; font-weight: 700;
+}
+.login-brand .brand-eyebrow {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.12em; color: rgba(255,255,255,0.55); margin-top: 24px;
+}
+.login-brand h1 {
+  font-size: 38px; font-weight: 700; line-height: 1.15; margin: 14px 0 0;
+}
+.login-brand .brand-tagline {
+  color: rgba(255,255,255,0.72); font-size: 15px; line-height: 1.5;
+  margin: 16px 0 40px; max-width: 420px;
+}
+.brand-stats {
+  display: grid; grid-template-columns: repeat(3, 1fr);
+  gap: 16px; max-width: 520px;
+}
+.brand-stat {
+  background: rgba(255,255,255,0.08);
+  border: 1px solid rgba(255,255,255,0.12);
+  border-radius: var(--radius);
+  padding: 20px 18px;
+}
+.brand-stat .stat-num {
+  font-size: 32px; font-weight: 700; line-height: 1;
+}
+.brand-stat .stat-label {
+  font-size: 11px; font-weight: 700; text-transform: uppercase;
+  letter-spacing: 0.08em; color: rgba(255,255,255,0.6); margin-top: 8px;
+}
+.login-auth {
+  display: flex; align-items: center; justify-content: center;
+  padding: 48px;
+  background: var(--card-bg);
+}
+.login-auth .card {
+  width: 100%; max-width: 400px; padding: 0;
+  border: none; background: transparent; box-shadow: none;
+}
+
+@media (max-width: 900px) {
+  .login-split { padding: 24px 16px; }
+  .login-card { grid-template-columns: 1fr; }
+  .login-brand { padding: 40px 24px; }
+  .brand-stats { max-width: none; }
+  .login-auth { padding: 32px 24px; }
+}
+

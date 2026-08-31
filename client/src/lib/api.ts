@@ -10,6 +10,7 @@ import type {
   FormWithFields,
   LoginMode,
   LoginUser,
+  LoginStats,
   OrganizationWithMembers,
   PublicForm,
   Role,
@@ -215,6 +216,13 @@ export const api = {
     value: string;
   }> {
     return request<{ key: string; value: string }>(`/api/settings/${key}`, { auth: false });
+  },
+
+  // Public login-page stat counts. Pass the selected org slug so the server
+  // scopes the three counts to that tenant (org-wide, not global).
+  async getLoginStats(orgSlug?: string): Promise<LoginStats> {
+    const qs = orgSlug ? `?org=${encodeURIComponent(orgSlug)}` : "";
+    return request<LoginStats>(`/api/health/stats${qs}`, { auth: false });
   },
 
   // Update an app setting (admin only).
