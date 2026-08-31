@@ -2,6 +2,8 @@ import { Router } from "express";
 import { getSetting, setSetting } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { ROLES, type Role } from "../db/schema.js";
+import { env } from "../config/env.js";
+import { notifySlack } from "../notify/slack.js";
 
 export const settingsRouter = Router();
 
@@ -126,6 +128,40 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
 
     const stored = await setSetting(key, effective);
     res.json({ key, value: stored });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/settings/slack/test — send a test Slack message (admin only).
+//
+// Lets an admin verify the SLACK_WEBHOOK_URL and preview how a notification
+// renders. Subject is sent bold; the optional body follows on a new line. Both
+// support Slack mrkdwn formatting (*bold*, _italic_, `code`, >quote, links).
+// -----------------------------------------------------------------------------
+settingsRouter.post("/slack/test", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const subject = typeof req.body?.subject === "string" ? req.body.subject.trim() : "";
+    const body = typeof req.body?.body === "string" ? req.body.body.trim() : "";
+    if (!subject) {
+      res.status(400).json({ error: "subject is required" });
+      return;
+    }
+
+    const configured = !!env.slack.webhookUrl;
+    const text = `*${subject}*${body ? `\n\n${body}` : ""}`;
+    const sent = configured ? await notifySlack({ text }) : false;
+
+    if (!configured) {
+      res.status(400).json({ ok: false, error: "Slack webhook is not configured. Set SLACK_WEBHOOK_URL and restart the server." });
+      return;
+    }
+    if (!sent) {
+      res.status(400).json({ ok: false, error: "Slack send failed. Check the webhook URL and the server logs." });
+      return;
+    }
+    res.json({ ok: true, message: "Test message sent to Slack." });
   } catch (err) {
     next(err);
   }

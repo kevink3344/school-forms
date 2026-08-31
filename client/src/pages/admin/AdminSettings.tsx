@@ -173,6 +173,13 @@ export default function AdminSettings() {
   const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
   const [docBusy, setDocBusy] = useState(false);
 
+  // Slack test panel state — subject, body, and a busy flag.
+  const [slackSubject, setSlackSubject] = useState("Test notification");
+  const [slackBody, setSlackBody] = useState(
+    "This is a test message from School Forms. Slack *markdown* is supported."
+  );
+  const [slackBusy, setSlackBusy] = useState(false);
+
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -331,6 +338,20 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not update Documents visibility");
     } finally {
       setDocBusy(false);
+    }
+  };
+
+  // Send a test message to the configured Slack webhook (admin only).
+  const sendSlackTest = async () => {
+    setError("");
+    setSlackBusy(true);
+    try {
+      const r = await api.sendSlackTest(slackSubject.trim(), slackBody.trim());
+      setMessage(r.message || "Test message sent to Slack.");
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not send Slack test message");
+    } finally {
+      setSlackBusy(false);
     }
   };
 
@@ -620,6 +641,52 @@ export default function AdminSettings() {
               </div>
             );
           })}
+        </div>
+      </CollapsibleSection>
+
+      {/* Slack test panel — send a test message to verify the admin alert webhook */}
+      <CollapsibleSection
+        title="Slack Notifications"
+        subtitle="Send a test message to verify the admin alert webhook"
+      >
+        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+          Admin alerts (new submissions, generated documents) are delivered to{" "}
+          <strong>Slack</strong> through a webhook. Use this panel to verify the webhook
+          is working and preview how a message looks. The subject and body support Slack
+          formatting: <code>*bold*</code>, <code>_italic_</code>, <code>`code`</code>,{" "}
+          <code>&gt;quote</code>, and <code>&lt;https://example.com|link&gt;</code>.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+          <div className="filter-group" style={{ minWidth: 0 }}>
+            <label htmlFor="slack-subject">Subject</label>
+            <input
+              id="slack-subject"
+              className="edit-input"
+              value={slackSubject}
+              onChange={(e) => setSlackSubject(e.target.value)}
+              placeholder="Test notification"
+            />
+          </div>
+          <div className="filter-group" style={{ minWidth: 0 }}>
+            <label htmlFor="slack-body">Body</label>
+            <textarea
+              id="slack-body"
+              className="edit-input"
+              value={slackBody}
+              onChange={(e) => setSlackBody(e.target.value)}
+              rows={4}
+              placeholder="Message body — Slack markdown supported"
+            />
+          </div>
+          <button
+            type="button"
+            className="primary-button"
+            disabled={slackBusy || !slackSubject.trim()}
+            onClick={() => void sendSlackTest()}
+            style={{ alignSelf: "flex-start" }}
+          >
+            {slackBusy ? "Sending…" : "Send Test Message"}
+          </button>
         </div>
       </CollapsibleSection>
 

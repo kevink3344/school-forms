@@ -237,6 +237,15 @@ export const api = {
     });
   },
 
+  // Send a test Slack notification to verify the webhook (admin only).
+  async sendSlackTest(subject: string, body: string): Promise<{ ok: boolean; message: string }> {
+    return request<{ ok: boolean; message: string }>("/api/settings/slack/test", {
+      method: "POST",
+      auth: true,
+      body: { subject, body },
+    });
+  },
+
   // Public app info — reports the version + whether LOGIN_MODE is overridden.
   async getInfo(): Promise<{ version: string; loginModeOverride: LoginMode | null }> {
     return request<{ version: string; loginModeOverride: LoginMode | null }>("/api/info", {
