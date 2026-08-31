@@ -3,6 +3,7 @@ import crypto from "node:crypto";
 import { createSubmissionSchema } from "../schemas.js";
 import { getForm, createSubmission } from "../db/queries.js";
 import { env } from "../config/env.js";
+import { sendSlackAlert } from "../notify/slack.js";
 
 export const webhookRouter = Router();
 
@@ -45,6 +46,18 @@ webhookRouter.post("/google", async (req, res, next) => {
     }
 
     const submission = await createSubmission(form, answers);
+
+    // Admin Slack alert (not parents) — fire-and-forget, never blocks the 201.
+    await sendSlackAlert(
+      `📥 New submission to *${form.title}* (via Google Forms)`,
+      [
+        { title: "Form", value: form.title, short: true },
+        { title: "Submitted ID", value: submission.public_id, short: true },
+        { title: "School", value: submission.school_name ?? "—", short: true },
+        { title: "Student", value: submission.student_name ?? form.title, short: true },
+      ],
+      { fallback: `New submission ${submission.public_id} to ${form.title} (Google Forms)` }
+    );
 
     res.status(201).json({
       public_id: submission.public_id,

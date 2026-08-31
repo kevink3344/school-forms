@@ -70,6 +70,13 @@ export const env = {
 
   googleWebhookSecret: process.env.GOOGLE_FORMS_WEBHOOK_SECRET ?? "",
 
+  slack: {
+    // Incoming-webhook URL used for ADMIN notifications (new submission,
+    // document created/failed). Empty string disables Slack entirely — the
+    // notifier is fire-and-forget and never throws, so the flow always succeeds.
+    webhookUrl: process.env.SLACK_WEBHOOK_URL ?? "",
+  },
+
   webhookAdminEmail: process.env.SEED_ADMIN_EMAIL ?? "admin@schoolforms.local",
   webhookAdminPassword: process.env.SEED_ADMIN_PASSWORD ?? "ChangeMe123!",
 

@@ -16,6 +16,7 @@ import {
   listFormFields,
 } from "../db/queries.js";
 import type { SubmissionValueRow } from "../db/queries.js";
+import { sendSlackAlert } from "../notify/slack.js";
 
 // -----------------------------------------------------------------------------
 // Google Docs generation.
@@ -334,8 +335,36 @@ async function runGeneration(submissionId: number, dbId: number): Promise<void> 
     const docId = await copyTemplate(docName, parentId);
     await replacePlaceholders(docId, mappings);
     await markDocumentCompleted(dbId, docId);
+
+    // Admin Slack alert (not parents) — fire-and-forget. Best-effort; a Slack
+    // failure never surfaces to the staff who triggered the generation.
+    const form = await getForm(submission.form_id);
+    await sendSlackAlert(
+      `📄 Document created for *${submission.public_id}*`,
+      [
+        { title: "Submission", value: submission.public_id, short: true },
+        { title: "Form", value: form?.title ?? "—", short: true },
+        { title: "School", value: schoolName ?? "—", short: true },
+        { title: "File", value: docName, short: false },
+      ],
+      { fallback: `Document ${docName} created for ${submission.public_id}` }
+    );
   } catch (err) {
-    await markDocumentFailed(dbId, (err as Error).message);
+    const message = (err as Error).message;
+    await markDocumentFailed(dbId, message);
+
+    // Admin Slack alert on generation failure (fire-and-forget).
+    const submission = await getSubmissionById(submissionId).catch(() => null);
+    const form = submission ? await getForm(submission.form_id).catch(() => null) : null;
+    await sendSlackAlert(
+      `⚠️ Document generation failed for *${submission?.public_id ?? "?"}*`,
+      [
+        { title: "Submission", value: submission?.public_id ?? "?", short: true },
+        { title: "Form", value: form?.title ?? "—", short: true },
+        { title: "Error", value: message, short: false },
+      ],
+      { color: "danger", fallback: `Document generation failed (${message})` }
+    );
   }
 }
 

@@ -17,6 +17,7 @@ import {
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { maybeGenerateDocument } from "../google/docs.js";
+import { sendSlackAlert } from "../notify/slack.js";
 import {
   createSubmissionSchema,
   updateSubmissionStatusSchema,
@@ -56,6 +57,20 @@ submissionsRouter.post("/", async (req, res, next) => {
     }
 
     const submission = await createSubmission(form, answers);
+
+    // Admin Slack alert (not parents) — fire-and-forget, never blocks the 201.
+    const schoolName = submission.school_name ?? "—";
+    const studentName = submission.student_name ?? form.title;
+    await sendSlackAlert(
+      `📥 New submission to *${form.title}*`,
+      [
+        { title: "Form", value: form.title, short: true },
+        { title: "Submitted ID", value: submission.public_id, short: true },
+        { title: "School", value: schoolName, short: true },
+        { title: "Student", value: studentName, short: true },
+      ],
+      { fallback: `New submission ${submission.public_id} to ${form.title}` }
+    );
 
     res.status(201).json({
       public_id: submission.public_id,
