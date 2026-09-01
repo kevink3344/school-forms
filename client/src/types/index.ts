@@ -147,6 +147,7 @@ export interface Submission {
   submission_seq: number | null;
   submitted_at: string;
   updated_at: string;
+  school_year: string | null;
   // Staff-only fields audit trail (null until a staff-only save happens).
   staff_fields_updated_by: number | null;
   staff_fields_updated_at: string | null;

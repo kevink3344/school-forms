@@ -1,6 +1,6 @@
 import bcrypt from "bcryptjs";
 import { initDb, getPool } from "./pool.js";
-import { formatSubmissionPublicId } from "./schema.js";
+import { formatSubmissionPublicId, schoolYearForDate } from "./schema.js";
 import { env } from "../config/env.js";
 
 /**
@@ -95,15 +95,17 @@ async function seed() {
     .input("publicId", PUBLIC_ID)
     .query(`SELECT id FROM dbo.submissions WHERE public_id = @publicId`);
   if (!submissionExists.recordset.length) {
+    const schoolYear = schoolYearForDate(new Date());
     const sub = await pool.request()
       .input("publicId", PUBLIC_ID)
       .input("formId", FORM_ID)
       .input("schoolId", school.id)
       .input("orgId", orgId)
+      .input("schoolYear", schoolYear)
       .query(
-        `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq)
+        `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq, school_year)
          OUTPUT INSERTED.id
-         VALUES (@publicId, @formId, @schoolId, @orgId, 'submitted', 1);`
+         VALUES (@publicId, @formId, @schoolId, @orgId, 'submitted', 1, @schoolYear);`
       );
     const submissionId = sub.recordset[0].id;
     // Ensure the form counter accounts for the seeded reference submission so the

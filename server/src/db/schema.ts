@@ -148,6 +148,9 @@ export interface Submission {
   submission_seq: number;
   submitted_at: Date;
   updated_at: Date;
+  // School year the submission belongs to (e.g. "2026-2027"). A stable snapshot
+  // captured from submitted_at at insert + backfill time; NOT recomputed on read.
+  school_year: string | null;
   // Staff-only fields audit trail — which staff last saved the submission's
   // staff-only fields, and when. NULL until a staff-only save happens.
   staff_fields_updated_by: number | null;
@@ -428,6 +431,28 @@ export const DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.submissions', 'submission_seq') IS NULL
      ALTER TABLE dbo.submissions ADD submission_seq INT NULL;`,
 
+  // ---------------------------------------------------------------------
+  // School Year — denormalized on submissions so it's a stable snapshot and
+  // queryable/filterable. Populated on insert (createSubmission) and by the
+  // one-time backfill below. The school year runs Aug 1 -> Jul 31, so a date
+  // in Aug-Dec belongs to YYYY-YYYY+1 and a date in Jan-Jul belongs to the
+  // prior year. Nullable so the migration is additive/backward-compatible.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.submissions', 'school_year') IS NULL
+     ALTER TABLE dbo.submissions ADD school_year NVARCHAR(9) NULL;`,
+
+  // One-time backfill for rows created before the column existed. Derives each
+  // row's year from ITS OWN submitted_at (not the current date), so a June 2026
+  // submission correctly gets '2025-2026'. Idempotent: only fills NULL/empty.
+  `UPDATE dbo.submissions
+     SET school_year =
+       CASE
+         WHEN MONTH(submitted_at) >= 8
+           THEN CAST(YEAR(submitted_at) AS nvarchar(4)) + '-' + CAST(YEAR(submitted_at) + 1 AS nvarchar(4))
+         ELSE CAST(YEAR(submitted_at) - 1 AS nvarchar(4)) + '-' + CAST(YEAR(submitted_at) AS nvarchar(4))
+       END
+   WHERE school_year IS NULL OR school_year = '';`,
+
   `IF OBJECT_ID('dbo.form_fields', 'U') IS NULL
    CREATE TABLE dbo.form_fields (
      id          INT IDENTITY(1,1) PRIMARY KEY,
@@ -603,4 +628,17 @@ export const DDL_STATEMENTS: string[] = [
 export function formatSubmissionPublicId(code: string | null | undefined, seq: number): string {
   const prefix = (code ?? "").trim().toUpperCase().replace(/[^A-Z0-9]/g, "") || "SUB";
   return `${prefix}-${String(seq).padStart(5, "0")}`;
+}
+
+// Derive the school year a date belongs to. The school year runs Aug 1 -> Jul 31,
+// so:
+//   - Aug-Dec  -> the year starting THIS year, `YYYY-YYYY+1` (e.g. 9/1/2026 -> 2026-2027)
+//   - Jan-Jul  -> the year starting LAST year, `YYYY-1-YYYY` (e.g. 1/15/2027 -> 2026-2027)
+// Uses UTC accessors to match the SYSUTCDATETIME() value stored in submitted_at.
+// `boundaryMonthIdx` is 0-indexed (Jan=0 ... Dec=11); default 7 = August.
+export function schoolYearForDate(date: Date, boundaryMonthIdx = 7): string {
+  const y = date.getUTCFullYear();
+  const m = date.getUTCMonth();
+  const start = m >= boundaryMonthIdx ? y : y - 1;
+  return `${start}-${start + 1}`;
 }

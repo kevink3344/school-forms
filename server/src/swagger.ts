@@ -124,6 +124,7 @@ export function buildSwaggerSpec(req?: Request) {
             submission_seq: { type: "integer", nullable: true },
             submitted_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
+            school_year: { type: "string", nullable: true, description: "School year this submission belongs to (e.g. 2026-2027). Derived from submitted_at using an Aug 1 - Jul 31 boundary." },
             staff_fields_updated_by: { type: "integer", nullable: true },
             staff_fields_updated_at: { type: "string", format: "date-time", nullable: true },
             staff_fields_updated_by_name: { type: "string", nullable: true },

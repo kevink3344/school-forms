@@ -307,6 +307,12 @@ export default function StaffSubmissionDetail() {
                       {new Date(detail.submitted_at).toLocaleString()}
                     </span>
                   </div>
+                  <div className="field">
+                    <span className="f-label">School Year</span>
+                    <span className="f-value">
+                      {detail.school_year || "—"}
+                    </span>
+                  </div>
                 </div>
 
                 <div className="divider" />

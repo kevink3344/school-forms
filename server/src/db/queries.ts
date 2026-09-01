@@ -1,6 +1,6 @@
 import { getPool } from "./pool.js";
 import sql, { type Transaction } from "mssql";
-import { formatSubmissionPublicId, fieldAccessRoles, canSeeField } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import type {
   School,
@@ -887,6 +887,7 @@ export async function listSubmissions(params: {
   return execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
+            s.school_year,
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name,
@@ -919,6 +920,7 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
   const rows = await execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
+            s.school_year,
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
@@ -1093,13 +1095,14 @@ export async function createSubmission(
   }
 
   const schoolId = await resolveSubmissionSchoolId(form, answers);
+  const schoolYear = schoolYearForDate(new Date());
   const subs = await execute<Submission>(
-    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq)
+    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq, school_year)
      OUTPUT INSERTED.id, INSERTED.public_id, INSERTED.form_id, INSERTED.school_id,
             INSERTED.organization_id, INSERTED.status, INSERTED.submission_seq,
-            INSERTED.submitted_at, INSERTED.updated_at
-     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq)`,
-    { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq }
+            INSERTED.school_year, INSERTED.submitted_at, INSERTED.updated_at
+     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq, @schoolYear)`,
+    { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq, schoolYear }
   );
   const submission = subs[0];
   for (const a of answers) {
