@@ -12,10 +12,11 @@ import type { Role } from "../db/schema.js";
 
 export const exportRouter = Router();
 
-// Filter export columns for the requesting role. Staff see public columns plus
-// any staff-only column whose roles include "staff". Admins see everything only
-// when they opt into staff-only columns (includeStaffOnly); otherwise they see
-// just the public columns — matching the historical default.
+// Filter export columns for the requesting role. Staff (and CDM Contacts) see
+// public columns plus any staff-only column whose access roles include their
+// own role (e.g. "staff" / "cdm_contact"). Admins see everything only when they
+// opt into staff-only columns (includeStaffOnly); otherwise they see just the
+// public columns — matching the historical default.
 function filterColumnsForRole<T extends { staff_only: boolean; roles: string[] | null }>(
   columns: T[],
   role: Role,
@@ -24,8 +25,8 @@ function filterColumnsForRole<T extends { staff_only: boolean; roles: string[] |
   if (role === "admin") {
     return columns.filter((c) => !c.staff_only || includeStaffOnly);
   }
-  // Staff: visible when public, or its access roles grant "staff".
-  return columns.filter((c) => !c.staff_only || (fieldAccessRoles(c) ?? []).includes("staff"));
+  // Staff-like: visible when public, or its access roles grant this role.
+  return columns.filter((c) => !c.staff_only || (fieldAccessRoles(c) ?? []).includes(role));
 }
 
 // -----------------------------------------------------------------------------
@@ -93,12 +94,12 @@ function csvEscape(value: unknown): string {
 // Available to admin AND staff. Staff are always scoped to their own school and
 // can never see staff-only columns.
 // -----------------------------------------------------------------------------
-exportRouter.get("/preview", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
-    const isStaff = req.user!.role === "staff";
-    // Admin may filter by school; staff are locked to their own school.
+    const isStaff = req.user!.role !== "admin";
+    // Admin may filter by school; staff and CDM Contacts are locked to their own school.
     const schoolId = isStaff
       ? req.user!.school_id ?? undefined
       : req.query.school_id
@@ -141,12 +142,12 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "admin"), async 
 // returns a CSV download. Available to admin AND staff. Staff are always scoped
 // to their own school; the include_staff_only flag is only honored for admins.
 // -----------------------------------------------------------------------------
-exportRouter.get("/csv", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+exportRouter.get("/csv", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
-    const isStaff = req.user!.role === "staff";
-    // Admin may filter by school; staff are locked to their own school.
+    const isStaff = req.user!.role !== "admin";
+    // Admin may filter by school; staff and CDM Contacts are locked to their own school.
     const schoolId = isStaff
       ? req.user!.school_id ?? undefined
       : req.query.school_id

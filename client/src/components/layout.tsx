@@ -248,7 +248,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               </NavLink>
             </>
           )}
-          {user?.role === "staff" && (
+          {(user?.role === "staff" || user?.role === "cdm_contact") && (
             <>
               <NavLink to="/staff" className="sidebar-link" end title={collapsed ? "Submissions" : undefined} onClick={() => setMobileOpen(false)}>
                 <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">

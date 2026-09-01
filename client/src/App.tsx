@@ -106,11 +106,11 @@ export default function App() {
         }
       />
 
-      {/* Staff */}
+      {/* Staff + CDM Contact */}
       <Route
         path="/staff"
         element={
-          <ProtectedRoute roles={["staff"]}>
+          <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <StaffQueue />
             </AppShell>
@@ -120,7 +120,7 @@ export default function App() {
       <Route
         path="/staff/documents"
         element={
-          <ProtectedRoute roles={["staff"]}>
+          <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <StaffDocuments />
             </AppShell>
@@ -130,7 +130,7 @@ export default function App() {
       <Route
         path="/staff/:publicId"
         element={
-          <ProtectedRoute roles={["staff"]}>
+          <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <StaffSubmissionDetail />
             </AppShell>

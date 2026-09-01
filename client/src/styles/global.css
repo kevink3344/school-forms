@@ -238,6 +238,7 @@ p { margin: 0; }
 .badge-red    { color: rgb(186,48,64);   background: rgb(255,232,234); border-color: rgb(255,177,184); }
 .badge-slate  { color: rgb(84,98,116);   background: rgb(245,247,250); border-color: rgb(213,220,228); }
 .badge-orange { color: rgb(179,93,25);   background: rgb(255,240,226); border-color: rgb(255,194,140); }
+.badge-teal   { color: rgb(13,125,130);  background: rgb(226,248,248); border-color: rgb(153,224,225); }
 .badge-gray   { color: #5f7389; background: #eef2f6; border-color: #dbe2ea; }
 
 /* Filter toolbar */

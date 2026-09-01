@@ -2,7 +2,7 @@ import type { Role } from "../types";
 
 // The set of roles the app currently supports. Kept in sync with the server's
 // `ROLES`. Extend both to add a future role; the toggle badges render from it.
-export const ROLES: Role[] = ["admin", "staff"];
+export const ROLES: Role[] = ["admin", "staff", "cdm_contact"];
 
 // Parse a stored documents_link value (a JSON role array) into a Role[]. A null
 // / undefined / blank / unparsable value defaults to every current role so legacy

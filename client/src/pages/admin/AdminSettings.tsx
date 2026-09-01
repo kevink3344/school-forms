@@ -53,9 +53,9 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 }
 
 function roleBadge(role: Role): { cls: string; label: string } {
-  return role === "admin" ?
-    { cls: "badge-orange", label: "Admin" } :
-    { cls: "badge-blue", label: "Staff" };
+  if (role === "admin") return { cls: "badge-orange", label: "Admin" };
+  if (role === "cdm_contact") return { cls: "badge-teal", label: "CDM Contact" };
+  return { cls: "badge-blue", label: "Staff" };
 }
 
 // ---------------------------------------------------------------------------
@@ -624,7 +624,11 @@ export default function AdminSettings() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className={`badge ${badge.cls}`}>{badge.label}</span>
                   <span style={{ fontSize: 13, color: "var(--text)" }}>
-                    {role === "admin" ? "Administrator" : "Staff member"}
+                    {role === "admin"
+                      ? "Administrator"
+                      : role === "cdm_contact"
+                        ? "CDM Contact"
+                        : "Staff member"}
                     {has ? " — can see Documents" : " — cannot see Documents"}
                   </span>
                 </div>
@@ -872,6 +876,7 @@ export default function AdminSettings() {
                   onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
                 >
                   <option value="staff">Staff</option>
+                  <option value="cdm_contact">CDM Contact</option>
                   <option value="admin">Admin</option>
                 </select>
               </Field>

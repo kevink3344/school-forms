@@ -29,6 +29,13 @@ import {
 
 export const submissionsRouter = Router();
 
+// Whether the current user is school-scoped (staff or CDM Contact) rather than
+// org-scoped (admin). School-scoped callers may only touch their own school's
+// submissions.
+export function isSchoolScoped(role: string): boolean {
+  return role === "staff" || role === "cdm_contact";
+}
+
 // -----------------------------------------------------------------------------
 // PUBLIC: POST /api/submissions — anonymous Parent submission
 // -----------------------------------------------------------------------------
@@ -109,9 +116,10 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/submissions — list submissions scoped to their school
 // -----------------------------------------------------------------------------
-submissionsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
-    const isStaff = req.user!.role === "staff";
+    // Staff and CDM Contacts are school-scoped; admins are org-scoped.
+    const isStaff = req.user!.role !== "admin";
     const organizationId = req.user!.organization_id;
     const schoolId = isStaff ? req.user!.school_id : (req.query.school_id ? Number(req.query.school_id) : undefined);
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
@@ -129,15 +137,15 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "admin"), async (r
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/submissions/:publicId — full detail with answers + comments
 // -----------------------------------------------------------------------------
-submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    // Staff can only view submissions belonging to their own school within their org
-    if (req.user!.role === "staff") {
+    // Staff and CDM Contacts can only view submissions belonging to their own school within their org
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden: submission belongs to another school" });
@@ -155,7 +163,7 @@ submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "admin"),
 // -----------------------------------------------------------------------------
 // STAFF: PATCH /api/submissions/:publicId/status — update workflow state
 // -----------------------------------------------------------------------------
-submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const parsed = updateSubmissionStatusSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -167,7 +175,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -186,7 +194,7 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
 // STAFF: PUT /api/submissions/:publicId/values — edit submission answers
 // (staff/admin correcting parent input across all fields, incl. staff-only)
 // -----------------------------------------------------------------------------
-submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const parsed = updateSubmissionValuesSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -198,7 +206,7 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -225,14 +233,14 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "a
 // STAFF: GET /api/submissions/:publicId/documents — list document rows for a
 // submission (used by the detail card). Reuses the staff school ownership check.
 // -----------------------------------------------------------------------------
-submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -249,7 +257,7 @@ submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff",
 // -----------------------------------------------------------------------------
 // STAFF: POST /api/submissions/:publicId/comments — add staff-only comment
 // -----------------------------------------------------------------------------
-submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const parsed = createCommentSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -261,7 +269,7 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -284,14 +292,14 @@ submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff",
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/submissions/:publicId/adhoc — list staff-only ad-hoc fields
 // -----------------------------------------------------------------------------
-submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -308,7 +316,7 @@ submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "ad
 // -----------------------------------------------------------------------------
 // STAFF: POST /api/submissions/:publicId/adhoc — add a staff-only ad-hoc field
 // -----------------------------------------------------------------------------
-submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const parsed = createAdhocFieldSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -320,7 +328,7 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "a
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -347,7 +355,7 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "a
 // -----------------------------------------------------------------------------
 // STAFF: PUT /api/submissions/:publicId/adhoc/:fieldId — update an ad-hoc field
 // -----------------------------------------------------------------------------
-submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const parsed = updateAdhocFieldSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -359,7 +367,7 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });
@@ -387,14 +395,14 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
 // -----------------------------------------------------------------------------
 // STAFF: DELETE /api/submissions/:publicId/adhoc/:fieldId — remove an ad-hoc field
 // -----------------------------------------------------------------------------
-submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "admin"), async (req, res, next) => {
+submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (req.user!.role === "staff") {
+    if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {
         res.status(403).json({ error: "Forbidden" });

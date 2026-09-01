@@ -249,7 +249,7 @@ export default function LoginPage() {
                   </option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.display_name} · {u.email} · {u.role}
+                      {u.display_name} · {u.email} · {u.role === "cdm_contact" ? "CDM Contact" : u.role}
                     </option>
                   ))}
                 </select>

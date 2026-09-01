@@ -118,7 +118,7 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
         return;
       }
       if (!Array.isArray(roles) || roles.some((r) => typeof r !== "string" || !(ROLES as readonly string[]).includes(r))) {
-        res.status(400).json({ error: "value must be a JSON array of roles: [\"admin\",\"staff\"]" });
+        res.status(400).json({ error: `value must be a JSON array of roles: ${JSON.stringify(ROLES)}` });
         return;
       }
       effective = JSON.stringify(ROLES.filter((r) => (roles as string[]).includes(r)));

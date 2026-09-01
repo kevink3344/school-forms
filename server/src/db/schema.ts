@@ -1,7 +1,7 @@
 // -----------------------------------------------------------------------------
 // Enum values (kept in TS; validated at the app layer)
 // -----------------------------------------------------------------------------
-export const ROLES = ["admin", "staff"] as const;
+export const ROLES = ["admin", "staff", "cdm_contact"] as const;
 export const FORM_STATUS = ["draft", "published", "archived"] as const;
 export const SUBMISSION_STATUS = [
   "submitted",
@@ -285,7 +285,7 @@ export const DDL_STATEMENTS: string[] = [
      id            INT IDENTITY(1,1) PRIMARY KEY,
      email         NVARCHAR(320) NOT NULL,
      password_hash NVARCHAR(255) NOT NULL,
-     role          NVARCHAR(20) NOT NULL CHECK (role IN ('admin','staff')),
+     role          NVARCHAR(20) NOT NULL CHECK (role IN ('admin','staff','cdm_contact')),
      school_id     INT NULL,
      display_name  NVARCHAR(120) NOT NULL,
      active        BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
@@ -301,6 +301,29 @@ export const DDL_STATEMENTS: string[] = [
   // active flag to an ALREADY-EXISTING dbo.users table (safe to re-run).
   `IF COL_LENGTH('dbo.users', 'active') IS NULL
      ALTER TABLE dbo.users ADD active BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1;`,
+
+  // Idempotent migration for the CDM Contact role — widens the role CHECK
+  // constraint to accept 'cdm_contact'. The original CREATE TABLE only runs when
+  // the table is brand new, so existing deployments need their role CHECK
+  // constraint replaced. Constraint names are auto-generated, so drop any CHECK
+  // that constrains the role column to NOT include the new role, and re-add it
+  // with the full role set. Guarded so it no-ops once 'cdm_contact' is allowed.
+  `IF EXISTS (SELECT 1 FROM sys.check_constraints
+               WHERE parent_object_id = OBJECT_ID('dbo.users')
+                 AND definition LIKE '%role%'
+                 AND definition LIKE '%admin%'
+                 AND definition NOT LIKE '%cdm_contact%')
+   BEGIN
+     DECLARE @ck nvarchar(128) = (SELECT TOP 1 name FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.users')
+         AND definition LIKE '%role%'
+         AND definition LIKE '%admin%'
+         AND definition NOT LIKE '%cdm_contact%');
+     IF @ck IS NOT NULL
+       EXEC(N'ALTER TABLE dbo.users DROP CONSTRAINT ' + @ck);
+     ALTER TABLE dbo.users ADD CONSTRAINT CK_users_role
+       CHECK (role IN ('admin','staff','cdm_contact'));
+   END;`,
 
   // ---------------------------------------------------------------------
   // Organizations — users.organization_id (1:1 tenant boundary).

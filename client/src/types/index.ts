@@ -1,6 +1,6 @@
 // Shared types mirroring the backend API contract (server/src/db/schema.ts)
 
-export type Role = "admin" | "staff";
+export type Role = "admin" | "staff" | "cdm_contact";
 export type FormStatus = "draft" | "published" | "archived";
 export type SubmissionStatus = "submitted" | "in_review" | "flagged" | "resolved";
 export type FieldType =

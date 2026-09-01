@@ -28,10 +28,10 @@ export async function documentsEnabled(req: Request, res: Response, next: NextFu
 // Staff scoped to their school; admin scoped to their org. Returns the enriched
 // ListDocumentRow[] (student/school/course/phase fields + document_id + status).
 // -----------------------------------------------------------------------------
-documentsRouter.get("/", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+documentsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const rows = await listDocuments(
-      req.user!.role === "staff"
+      req.user!.role !== "admin"
         ? { schoolId: req.user!.school_id }
         : { organizationId: req.user!.organization_id }
     );
@@ -47,7 +47,7 @@ documentsRouter.get("/", requireAuth, requireRoles("staff", "admin"), documentsE
 // (fire-and-forget, the retry responds immediately). Ownership scoped like the
 // list: staff → their school, admin → their org.
 // -----------------------------------------------------------------------------
-documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {
@@ -57,7 +57,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), 
 
     const doc = await getDocumentById(
       dbId,
-      req.user!.role === "staff"
+      req.user!.role !== "admin"
         ? { schoolId: req.user!.school_id }
         : { organizationId: req.user!.organization_id }
     );
@@ -78,7 +78,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), 
     // Return the row as it stands (now Pending once the generator resets it).
     const refreshed = await getDocumentById(
       dbId,
-      req.user!.role === "staff"
+      req.user!.role !== "admin"
         ? { schoolId: req.user!.school_id }
         : { organizationId: req.user!.organization_id }
     );
@@ -98,7 +98,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "admin"), 
 // fresh Pending row synchronously and returns it; the Google work runs in the
 // background.
 // -----------------------------------------------------------------------------
-documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {
@@ -108,7 +108,7 @@ documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "admi
 
     const doc = await getDocumentById(
       dbId,
-      req.user!.role === "staff"
+      req.user!.role !== "admin"
         ? { schoolId: req.user!.school_id }
         : { organizationId: req.user!.organization_id }
     );
@@ -171,7 +171,7 @@ function requireAuthForPdf(req: Request, res: Response, next: NextFunction): voi
   }
 }
 
-documentsRouter.get("/:id/pdf", requireAuthForPdf, requireRoles("staff", "admin"), documentsEnabled, async (req, res, next) => {
+documentsRouter.get("/:id/pdf", requireAuthForPdf, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
     const dbId = Number(req.params.id);
     if (!Number.isInteger(dbId) || dbId <= 0) {
@@ -181,7 +181,7 @@ documentsRouter.get("/:id/pdf", requireAuthForPdf, requireRoles("staff", "admin"
 
     const doc = await getDocumentById(
       dbId,
-      req.user!.role === "staff"
+      req.user!.role !== "admin"
         ? { schoolId: req.user!.school_id }
         : { organizationId: req.user!.organization_id }
     );
