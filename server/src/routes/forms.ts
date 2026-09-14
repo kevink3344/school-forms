@@ -125,6 +125,7 @@ formsRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
         designerId,
         organizationId,
         docFolderId: parsed.data.doc_folder_id?.trim() ?? null,
+        googleFormUrl: parsed.data.google_form_url?.trim() || null,
       },
       parsed.data.fields
     );
@@ -159,6 +160,10 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       ...(Object.prototype.hasOwnProperty.call(parsed.data, "doc_folder_id")
         ? { doc_folder_id: parsed.data.doc_folder_id?.trim() ?? null }
         : {}),
+      // Same null-vs-absent handling for the Google Form URL.
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "google_form_url")
+        ? { google_form_url: parsed.data.google_form_url?.trim() || null }
+        : {}),
     });
     if (!updated) {
       res.status(404).json({ error: "Form not found" });
@@ -185,6 +190,42 @@ formsRouter.post("/:id/drive-validate", requireAuth, requireRoles("admin"), asyn
     const folderId = typeof req.body?.folder_id === "string" ? req.body.folder_id : null;
     const result = await validateDriveFolder(folderId?.trim() || null);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: generate form fields from the linked Google Form.
+//
+// NOT YET IMPLEMENTED — reading a Google Form's questions requires the Google
+// Forms API (`https://www.googleapis.com/auth/forms.body.readonly`), which needs
+// a refresh token minted with that scope. Until that OAuth credential is
+// provided, this returns 501 with an actionable message so the designer can show
+// a clear "not configured yet" state instead of a generic failure.
+//
+// When the credential is available, replace the body with a call to
+// `fetchGoogleFormFields(url)` (see docs/plans/google-form-url.md §5.3) and
+// return `{ title, fields }`. The route deliberately does NOT persist — the
+// client merges the fields into the editor and the admin saves.
+formsRouter.post("/:id/generate-fields", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const existing = await getFormWithFields(id, req.user!.organization_id);
+    if (!existing) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const url = typeof req.body?.google_form_url === "string" ? req.body.google_form_url.trim() : "";
+    if (!url) {
+      res.status(400).json({ error: "A Google Form URL is required" });
+      return;
+    }
+    res.status(501).json({
+      error:
+        "Automatic field generation isn't configured yet. Add the Google Forms OAuth scope " +
+        "to enable it, or add the fields manually.",
+      code: "GOOGLE_FORMS_NOT_CONFIGURED",
+    });
   } catch (err) {
     next(err);
   }

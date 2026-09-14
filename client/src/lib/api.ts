@@ -396,6 +396,7 @@ export const api = {
       description?: string | null;
       status?: string;
       doc_folder_id?: string | null;
+      google_form_url?: string | null;
       fields: {
         id?: number;
         label: string;
@@ -429,6 +430,20 @@ export const api = {
       method: "PATCH",
       auth: true,
       body: { status },
+    });
+  },
+
+  // Ask the server to generate form fields from the linked Google Form. Not yet
+  // implemented server-side (needs the Google Forms OAuth scope) — returns 501
+  // with an actionable message until that credential is configured.
+  async generateFormFields(
+    id: number,
+    googleFormUrl: string
+  ): Promise<{ title: string; fields: unknown[] }> {
+    return request<{ title: string; fields: unknown[] }>(`/api/forms/${id}/generate-fields`, {
+      method: "POST",
+      auth: true,
+      body: { google_form_url: googleFormUrl },
     });
   },
 

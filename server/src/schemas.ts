@@ -124,6 +124,8 @@ export const createFormSchema = z.object({
   description: z.string().optional().nullable(),
   school_id: z.number().int().positive().optional().nullable(),
   doc_folder_id: z.string().max(255).optional().nullable(),
+  google_form_url: z.string().max(1000).optional().nullable(),
+  generate_form_fields: z.boolean().optional(),
   fields: z.array(fieldSchema).min(1),
 });
 
@@ -132,6 +134,8 @@ export const updateFormSchema = z.object({
   description: z.string().optional().nullable(),
   status: z.enum(FORM_STATUS).optional(),
   doc_folder_id: z.string().max(255).optional().nullable(),
+  google_form_url: z.string().max(1000).optional().nullable(),
+  generate_form_fields: z.boolean().optional(),
   fields: z.array(fieldSchema).optional(),
 });
 

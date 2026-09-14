@@ -86,6 +86,9 @@ export interface Form {
   // Per-form so different admins can route their forms' documents to different
   // Drive locations.
   doc_folder_id: string | null;
+  // Optional link to the source Google Form this form mirrors. Purely
+  // informational — shown to staff so they can open it. No API integration.
+  google_form_url: string | null;
   // Number of submissions attached to this form. Populated by listForms (computed
   // subquery) so the admin Forms list can gate the Delete action. A form with any
   // submissions is NOT deletable (submissions.form_id cascades on delete).
@@ -404,6 +407,12 @@ export const DDL_STATEMENTS: string[] = [
   // env.google.docFolderId when generating documents for this form.
   `IF COL_LENGTH('dbo.forms', 'doc_folder_id') IS NULL
      ALTER TABLE dbo.forms ADD doc_folder_id NVARCHAR(255) NULL;`,
+
+  // Optional link to the source Google Form this form mirrors. When set, staff
+  // can open the Google Form directly (e.g. to fill it in manually). Purely
+  // informational — no API integration; the admin pastes the URL by hand.
+  `IF COL_LENGTH('dbo.forms', 'google_form_url') IS NULL
+     ALTER TABLE dbo.forms ADD google_form_url NVARCHAR(1000) NULL;`,
 
   // View Columns feature — per-form configuration of which columns the admin
   // Submissions grid displays. NULL/empty => show all columns (backward

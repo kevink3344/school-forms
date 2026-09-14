@@ -62,6 +62,14 @@ export default function AdminFormDesigner() {
   const [docFolderValid, setDocFolderValid] = useState<boolean | null>(null);
   const [docFolderName, setDocFolderName] = useState("");
 
+  // Optional link to the source Google Form, plus the "generate fields" toggle.
+  // The toggle is stored on the form; generation itself needs the Google Forms
+  // OAuth scope (not yet configured), so the button surfaces a clear message.
+  const [googleFormUrl, setGoogleFormUrl] = useState("");
+  const [generateFormFields, setGenerateFormFields] = useState(false);
+  const [generating, setGenerating] = useState(false);
+  const [generateMsg, setGenerateMsg] = useState("");
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -73,6 +81,7 @@ export default function AdminFormDesigner() {
         setTitle(f.title || "");
         setDescription(f.description ?? "");
         setDocFolderId(f.doc_folder_id ?? "");
+        setGoogleFormUrl(f.google_form_url ?? "");
       })
       .catch(() => setError("Could not load form"))
       .finally(() => {
@@ -108,6 +117,36 @@ export default function AdminFormDesigner() {
     }, 600);
     return () => window.clearTimeout(timer);
   }, [docFolderId, formId]);
+
+  // Ask the server to generate fields from the linked Google Form. Not yet
+  // implemented server-side (needs the Google Forms OAuth scope), so this
+  // surfaces the server's actionable message instead of failing silently.
+  const handleGenerateFields = async () => {
+    const url = googleFormUrl.trim();
+    if (!url) {
+      setGenerateMsg("Enter a Google Form URL first.");
+      return;
+    }
+    setGenerating(true);
+    setGenerateMsg("");
+    try {
+      const result = await api.generateFormFields(formId, url);
+      // Populate the designer with the returned fields (nothing is saved until
+      // the admin clicks Save).
+      const imported = result.fields as FormField[];
+      if (Array.isArray(imported) && imported.length) {
+        setFields((prev) => [...prev, ...imported]);
+        setDirty(true);
+        setGenerateMsg(`Imported ${imported.length} field(s) — review and Save.`);
+      } else {
+        setGenerateMsg("No fields found in that Google Form.");
+      }
+    } catch (err) {
+      setGenerateMsg(err instanceof ApiError ? err.message : "Could not generate fields");
+    } finally {
+      setGenerating(false);
+    }
+  };
 
   const rebuildField = (index: number, patch: Partial<FormField>) => {
     setFields((prev) => {
@@ -176,6 +215,7 @@ export default function AdminFormDesigner() {
         title: title || "Untitled",
         description: description || null,
         doc_folder_id: docFolderId.trim() || null,
+        google_form_url: googleFormUrl.trim() || null,
         fields: fields.map((f, i) => ({
           id: f.id || undefined,
           label: f.label,
@@ -198,6 +238,7 @@ export default function AdminFormDesigner() {
       setTitle(fresh.title || "");
       setDescription(fresh.description ?? "");
       setDocFolderId(fresh.doc_folder_id ?? "");
+      setGoogleFormUrl(fresh.google_form_url ?? "");
       setDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save form");
@@ -348,6 +389,63 @@ export default function AdminFormDesigner() {
               <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
                 Generated documents for this form are saved to this folder. Leave blank to use the default.
               </div>
+            </div>
+
+            <div className="filter-group" style={{ minWidth: 0 }}>
+              <label>Google Form URL</label>
+              <input
+                type="text"
+                value={googleFormUrl}
+                placeholder="https://docs.google.com/forms/d/.../edit"
+                onChange={(e) => {
+                  setGoogleFormUrl(e.target.value);
+                  setDirty(true);
+                }}
+              />
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                Optional link to the source Google Form. Shown to staff so they can open it.
+              </div>
+
+              <label
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  marginTop: 12,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                <input
+                  type="checkbox"
+                  checked={generateFormFields}
+                  onChange={(e) => {
+                    setGenerateFormFields(e.target.checked);
+                    setDirty(true);
+                  }}
+                />
+                Generate form fields
+              </label>
+              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+                When enabled, the fields below are created automatically from the Google Form.
+                Requires Google Forms access to be configured.
+              </div>
+
+              {generateFormFields && (
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginTop: 10 }}>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void handleGenerateFields()}
+                    disabled={generating || !googleFormUrl.trim()}
+                  >
+                    {generating ? "Generating…" : "Generate fields now"}
+                  </button>
+                  {generateMsg && (
+                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{generateMsg}</span>
+                  )}
+                </div>
+              )}
             </div>
           </div>
         </div>

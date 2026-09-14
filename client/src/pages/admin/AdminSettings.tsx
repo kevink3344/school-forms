@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
 import { ChevronDown, X } from "lucide-react";
-import { parseDocumentRoles, ROLES } from "../../lib/settings";
+import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, type MenuItemKey } from "../../lib/settings";
 import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
@@ -162,6 +162,10 @@ export default function AdminSettings() {
   const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
   const [docBusy, setDocBusy] = useState(false);
 
+  // Menu visibility per item, from the `menu_items` setting.
+  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, Role[]>>(defaultMenuItems);
+  const [menuBusy, setMenuBusy] = useState(false);
+
   // Slack test panel state — subject, body, and a busy flag.
   const [slackSubject, setSlackSubject] = useState("Test notification");
   const [slackBody, setSlackBody] = useState(
@@ -197,16 +201,18 @@ export default function AdminSettings() {
     // Load the Login Mode + maintenance settings (separate try so a settings
     // failure never blocks the users/orgs panels).
     try {
-      const [mode, info, msg, docs] = await Promise.all([
+      const [mode, info, msg, docs, menu] = await Promise.all([
         api.getPublicSetting("login_mode"),
         api.getInfo(),
         api.getPublicSetting("maintenance_message"),
         api.getPublicSetting("documents_link"),
+        api.getPublicSetting("menu_items"),
       ]);
       setLoginMode((mode.value as LoginMode) || "select");
       setLoginModeOverride(info.loginModeOverride);
       if (msg.value) setMaintenanceMessage(msg.value);
       setDocRoles(parseDocumentRoles(docs.value));
+      setMenuItems(parseMenuItems(menu.value));
     } catch {
       // keep defaults
     }
@@ -327,6 +333,30 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not update Documents visibility");
     } finally {
       setDocBusy(false);
+    }
+  };
+
+  // Toggle a role's visibility of a sidebar menu item. Optimistic with rollback.
+  const toggleMenuItemRole = async (item: MenuItemKey, role: Role) => {
+    setError("");
+    setMenuBusy(true);
+    const prev = menuItems;
+    const current = prev[item];
+    const nextRoles = current.includes(role)
+      ? current.filter((r) => r !== role)
+      : [...current, role];
+    const next = { ...prev, [item]: nextRoles };
+    setMenuItems(next);
+    try {
+      await api.updateSetting("menu_items", JSON.stringify(next));
+      setMessage(
+        `${MENU_ITEM_LABELS[item]} ${nextRoles.includes(role) ? "shown" : "hidden"} for ${role}.`
+      );
+    } catch (err) {
+      setMenuItems(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update menu visibility");
+    } finally {
+      setMenuBusy(false);
     }
   };
 
@@ -634,6 +664,74 @@ export default function AdminSettings() {
               </div>
             );
           })}
+        </div>
+      </CollapsibleSection>
+
+      {/* Menu Settings — show/hide sidebar items, by role */}
+      <CollapsibleSection
+        title="Menu Settings"
+        subtitle="Show or hide sidebar menu items, enabled by role"
+      >
+        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+          Choose which sidebar items each role can see. Hiding an item removes it from
+          the menu for that role; it does not delete any data or change permissions on
+          the underlying pages.
+        </p>
+        <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+          {MENU_ITEMS.map((item) => (
+            <div key={item}>
+              <div
+                style={{
+                  fontSize: 11,
+                  fontWeight: 700,
+                  letterSpacing: "0.06em",
+                  textTransform: "uppercase",
+                  color: "var(--text-muted)",
+                  marginBottom: 8,
+                }}
+              >
+                {MENU_ITEM_LABELS[item]}
+              </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                {ROLES.map((role) => {
+                  const has = menuItems[item].includes(role);
+                  const badge = roleBadge(role);
+                  return (
+                    <div
+                      key={role}
+                      style={{
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between",
+                        gap: 12,
+                        padding: "12px 14px",
+                        borderRadius: "var(--radius)",
+                        border: "1px solid var(--border)",
+                        background: "var(--app-bg)",
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                        <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                        <span style={{ fontSize: 13, color: "var(--text)" }}>
+                          {has ? "Sees this menu item" : "Menu item hidden"}
+                        </span>
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          {has ? "Visible" : "Hidden"}
+                        </span>
+                        <Toggle
+                          checked={has}
+                          disabled={menuBusy}
+                          onChange={() => void toggleMenuItemRole(item, role)}
+                        />
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
         </div>
       </CollapsibleSection>
 

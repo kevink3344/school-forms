@@ -13,7 +13,13 @@ import {
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
-import { parseDocumentRoles, ROLES } from "../lib/settings";
+import {
+  parseDocumentRoles,
+  parseMenuItems,
+  defaultMenuItems,
+  ROLES,
+  type MenuItemKey,
+} from "../lib/settings";
 import type { Role } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -112,6 +118,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   // value resolves on the next render.
   const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
 
+  // Menu visibility per item, from the `menu_items` setting. Defaults to
+  // "visible to all roles" while loading so items don't flash away.
+  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, Role[]>>(defaultMenuItems);
+
   useEffect(() => {
     let cancelled = false;
     api
@@ -122,6 +132,14 @@ export function AppShell({ children }: { children: ReactNode }) {
       .catch(() => {
         // keep the default (all roles) if the read fails
       });
+    api
+      .getPublicSetting("menu_items")
+      .then((s) => {
+        if (!cancelled) setMenuItems(parseMenuItems(s.value));
+      })
+      .catch(() => {
+        // keep the default (all items visible) if the read fails
+      });
     return () => {
       cancelled = true;
     };
@@ -129,6 +147,10 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   // True if the current user's role is enabled for Documents.
   const showDocuments = user ? docRoles.includes(user.role) : false;
+
+  // Whether a given menu item is visible to the current user's role.
+  const menuVisible = (item: MenuItemKey): boolean =>
+    user ? menuItems[item].includes(user.role) : false;
 
   // Close the mobile drawer whenever the route changes.
   useEffect(() => {
@@ -205,20 +227,24 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <LayoutDashboard size={18} />
                 <span className="s-label">Dashboard</span>
               </NavLink>
-              {showDocuments && (
+              {showDocuments && menuVisible("documents") && (
                 <NavLink to="/admin/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>
                 </NavLink>
               )}
-              <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined} onClick={() => setMobileOpen(false)}>
-                <FileText size={18} />
-                <span className="s-label">Forms</span>
-              </NavLink>
-              <NavLink to="/admin/schools" className="sidebar-link" title={collapsed ? "Schools" : undefined} onClick={() => setMobileOpen(false)}>
-                <School size={18} />
-                <span className="s-label">Schools</span>
-              </NavLink>
+              {menuVisible("forms") && (
+                <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined} onClick={() => setMobileOpen(false)}>
+                  <FileText size={18} />
+                  <span className="s-label">Forms</span>
+                </NavLink>
+              )}
+              {menuVisible("schools") && (
+                <NavLink to="/admin/schools" className="sidebar-link" title={collapsed ? "Schools" : undefined} onClick={() => setMobileOpen(false)}>
+                  <School size={18} />
+                  <span className="s-label">Schools</span>
+                </NavLink>
+              )}
               <NavLink to="/admin/settings" className="sidebar-link" title={collapsed ? "Settings" : undefined} onClick={() => setMobileOpen(false)}>
                 <Settings size={18} />
                 <span className="s-label">Settings</span>
@@ -231,7 +257,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <MessageSquare size={18} />
                 <span className="s-label">Submissions</span>
               </NavLink>
-              {showDocuments && (
+              {showDocuments && menuVisible("documents") && (
                 <NavLink to="/staff/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>

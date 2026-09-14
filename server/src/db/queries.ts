@@ -495,7 +495,7 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
-            f.status, f.view_columns, f.code, f.submission_seq, f.doc_folder_id,
+            f.status, f.view_columns, f.code, f.submission_seq, f.doc_folder_id, f.google_form_url,
             f.created_at, f.updated_at,
             (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
@@ -543,7 +543,7 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   }
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
-            view_columns, code, submission_seq, doc_folder_id, created_at, updated_at
+            view_columns, code, submission_seq, doc_folder_id, google_form_url, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -654,6 +654,7 @@ export async function createForm(
     designerId,
     organizationId,
     docFolderId,
+    googleFormUrl,
   }: {
     title: string;
     description: string | null;
@@ -661,6 +662,7 @@ export async function createForm(
     designerId: number | null;
     organizationId: number;
     docFolderId: string | null;
+    googleFormUrl: string | null;
   },
   fields: {
     label: string;
@@ -678,13 +680,13 @@ export async function createForm(
   const code = await generateFormCode(title);
   // Insert form
   const forms = await execute<Form>(
-    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq, doc_folder_id)
+    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq, doc_folder_id, google_form_url)
      OUTPUT INSERTED.id, INSERTED.title, INSERTED.description, INSERTED.school_id,
             INSERTED.designer_id, INSERTED.organization_id, INSERTED.status,
-            INSERTED.code, INSERTED.submission_seq, INSERTED.doc_folder_id,
+            INSERTED.code, INSERTED.submission_seq, INSERTED.doc_folder_id, INSERTED.google_form_url,
             INSERTED.created_at, INSERTED.updated_at
-     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId)`,
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null }
+     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl)`,
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -716,6 +718,7 @@ export async function updateForm(
     description?: string | null;
     status?: string;
     doc_folder_id?: string | null;
+    google_form_url?: string | null;
     fields?: {
       id?: number;
       label: string;
@@ -741,11 +744,16 @@ export async function updateForm(
   const docFolderId = Object.prototype.hasOwnProperty.call(data, "doc_folder_id")
     ? data.doc_folder_id
     : existing.doc_folder_id;
+  // Same null-vs-absent handling for the Google Form URL.
+  const googleFormUrl = Object.prototype.hasOwnProperty.call(data, "google_form_url")
+    ? data.google_form_url
+    : existing.google_form_url;
 
   await execute(
     `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
-            doc_folder_id=@docFolderId, updated_at=SYSUTCDATETIME() WHERE id=@id`,
-    { id: formId, title, description, status, docFolderId: docFolderId ?? null }
+            doc_folder_id=@docFolderId, google_form_url=@googleFormUrl,
+            updated_at=SYSUTCDATETIME() WHERE id=@id`,
+    { id: formId, title, description, status, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null }
   );
 
   if (data.fields) {

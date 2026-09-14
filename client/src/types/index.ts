@@ -69,7 +69,7 @@ export type LoginMode = "select" | "password" | "maintenance";
 
 // App setting keys the client can read/write. `documents_link` stores a JSON
 // role array; `login_mode` / `maintenance_message` back the Login Mode feature.
-export type AppSettingKey = "login_mode" | "maintenance_message" | "documents_link";
+export type AppSettingKey = "login_mode" | "maintenance_message" | "documents_link" | "menu_items";
 
 // A user row for the select-mode login dropdown (no password hash, no school).
 export interface LoginUser {
@@ -124,6 +124,9 @@ export interface Form {
   // Per-form Google Drive parent folder for generated documents. NULL falls back
   // to the global env folder (see server google/docs.ts).
   doc_folder_id: string | null;
+  // Optional link to the source Google Form this form mirrors. Shown to staff so
+  // they can open it. Purely informational — no API integration.
+  google_form_url: string | null;
   // Number of submissions attached to this form. Present on list responses so
   // the admin Forms list can gate the Delete action (used forms can't be deleted).
   submission_count?: number;
