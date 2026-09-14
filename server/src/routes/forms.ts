@@ -1,6 +1,7 @@
 import { Router } from "express";
 import {
   listForms,
+  getForm,
   getFormWithFields,
   createForm,
   updateForm,
@@ -8,6 +9,8 @@ import {
   getOrganizationBySlug,
   getViewColumnsConfig,
   setViewColumns,
+  countSubmissionsForForm,
+  deleteForm,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { createFormSchema, updateFormSchema } from "../schemas.js";
@@ -74,7 +77,7 @@ formsRouter.get("/:id/public", async (req, res, next) => {
 formsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const isStaff = req.user!.role !== "admin";
-    // Admins may filter by school; staff (and CDM Contacts) see all org forms
+    // Admins may filter by school; staff (and School Contacts) see all org forms
     // (templates are org-wide and shared across schools, so school-scoping
     // would hide forms their school contributes to).
     const schoolId = !isStaff && req.query.school_id ? Number(req.query.school_id) : undefined;
@@ -206,6 +209,40 @@ formsRouter.patch("/:id/status", requireAuth, requireRoles("admin"), async (req,
       { id, status }
     );
     res.json(await getFormWithFields(id, req.user!.organization_id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: delete an UNUSED form (zero submissions). Refuses with 409 when the
+// form has any submission history: submissions.form_id is ON DELETE CASCADE, so
+// a naive delete would silently destroy every submission (and its values,
+// comments, ad-hoc fields and documents). The count is enforced here, on the
+// server, and never trusted to the client. Published forms are deletable as long
+// as they are unused.
+formsRouter.delete("/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid form id" });
+      return;
+    }
+    // Org-scoped lookup: 404 (not 403) so we never reveal forms in other orgs.
+    const existing = await getForm(id, req.user!.organization_id);
+    if (!existing) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const submissionCount = await countSubmissionsForForm(id);
+    if (submissionCount > 0) {
+      res.status(409).json({
+        error: `This form has ${submissionCount} submission${submissionCount === 1 ? "" : "s"} and cannot be deleted.`,
+        submission_count: submissionCount,
+      });
+      return;
+    }
+    await deleteForm(id, req.user!.organization_id);
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

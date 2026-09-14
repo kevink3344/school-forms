@@ -106,7 +106,7 @@ export default function App() {
         }
       />
 
-      {/* Staff + CDM Contact */}
+      {/* Staff + School Contact */}
       <Route
         path="/staff"
         element={

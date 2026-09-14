@@ -1,9 +1,9 @@
 import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { Lock } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
-import { StatusBadge } from "../../components/layout";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "resolved"];
@@ -234,7 +234,36 @@ export default function StaffSubmissionDetail() {
           </p>
         </div>
         <div className="head-actions">
-          <StatusBadge status={detail.status} />
+          <label
+            htmlFor="submission-status"
+            style={{ fontSize: 15, fontWeight: 600, color: "var(--text-muted)" }}
+          >
+            Select Status
+          </label>
+          <select
+            id="submission-status"
+            className="edit-select"
+            value={detail.status}
+            disabled={savingStatus}
+            onChange={(e) => handleStatus(e.target.value as SubmissionStatus)}
+            style={{
+              height: 40,
+              padding: "0 12px",
+              width: "auto",
+              minWidth: 160,
+              fontSize: 15,
+              fontWeight: 700,
+              background: "var(--accent)",
+              color: "#fff",
+              border: "1px solid var(--accent)",
+            }}
+          >
+            {STATUSES.map((s) => (
+              <option key={s} value={s}>
+                {STATUS_LABEL[s]}
+              </option>
+            ))}
+          </select>
           {!editing && (
             <button className="secondary-button" onClick={startEdit}>
               Edit
@@ -251,32 +280,6 @@ export default function StaffSubmissionDetail() {
 
       <div className="detail-layout">
         <section>
-          {/* Status track */}
-          <div className="card" style={{ marginBottom: 16 }}>
-            <div className="card-head">
-              <h3>Status</h3>
-            </div>
-            <div className="card-body">
-              <div className="status-track">
-                {STATUSES.map((s) => (
-                  <button
-                    key={s}
-                    className="badge-button"
-                    disabled={savingStatus || s === detail.status}
-                    onClick={() => handleStatus(s)}
-                    style={
-                      s === detail.status
-                        ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }
-                        : {}
-                    }
-                  >
-                    {STATUS_LABEL[s]}
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-
           {/* Answers */}
           <form onSubmit={handleSave}>
             <div className="card">
@@ -353,10 +356,7 @@ export default function StaffSubmissionDetail() {
             <h3>Staff-only fields</h3>
             <span className="sub">Fill in the values for this submission</span>
             <span className="lock-tag" style={{ marginLeft: "auto" }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-              </svg>
+              <Lock size={12} />
               Staff only
             </span>
           </div>
@@ -471,10 +471,7 @@ export default function StaffSubmissionDetail() {
           <div className="card-head">
             <h3>Staff comments</h3>
             <span className="lock-tag" style={{ marginLeft: "auto" }}>
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-                <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-              </svg>
+              <Lock size={12} />
               Staff only
             </span>
           </div>
@@ -514,10 +511,7 @@ export default function StaffSubmissionDetail() {
               />
               <div className="row">
                 <span className="lock-tag">
-                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none">
-                    <rect x="4" y="11" width="16" height="10" rx="1" stroke="currentColor" strokeWidth="1.8" />
-                    <path d="M8 11V7a4 4 0 018 0v4" stroke="currentColor" strokeWidth="1.8" />
-                  </svg>
+                  <Lock size={12} />
                   Only staff can see this
                 </span>
                 <div className="spacer" />

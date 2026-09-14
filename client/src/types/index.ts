@@ -124,6 +124,9 @@ export interface Form {
   // Per-form Google Drive parent folder for generated documents. NULL falls back
   // to the global env folder (see server google/docs.ts).
   doc_folder_id: string | null;
+  // Number of submissions attached to this form. Present on list responses so
+  // the admin Forms list can gate the Delete action (used forms can't be deleted).
+  submission_count?: number;
   created_at: string;
   updated_at: string;
 }

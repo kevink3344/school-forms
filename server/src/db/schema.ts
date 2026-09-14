@@ -86,6 +86,10 @@ export interface Form {
   // Per-form so different admins can route their forms' documents to different
   // Drive locations.
   doc_folder_id: string | null;
+  // Number of submissions attached to this form. Populated by listForms (computed
+  // subquery) so the admin Forms list can gate the Delete action. A form with any
+  // submissions is NOT deletable (submissions.form_id cascades on delete).
+  submission_count?: number;
 }
 
 export interface FormField {
@@ -106,15 +110,18 @@ export interface FormField {
   roles: string[] | null;
 }
 
-// Resolve the roles that may access an internal (staff_only) field. For backward
-// compatibility, a staff_only field with NULL/empty roles is treated as visible to
-// every current role (admin + staff). Parent-facing fields (staff_only=0) always
-// return null to signal "public".
+// Resolve the roles that may access an internal (staff_only) field.
+//
+// NULL/undefined roles means "unset" and defaults to every current role, which
+// keeps legacy rows (created before per-field access existed) behaving as they
+// always did. An explicitly EMPTY array means the admin deliberately granted no
+// role access, so it must resolve to [] — NOT back to all roles. Conflating the
+// two is what made removing the last role in the designer snap every access
+// button back on. Parent-facing fields (staff_only=0) always return null.
 export function fieldAccessRoles(field: Pick<FormField, "staff_only" | "roles">): string[] | null {
   if (!field.staff_only) return null;
-  const roles = field.roles?.filter(Boolean);
-  if (!roles || roles.length === 0) return [...ROLES];
-  return roles;
+  if (field.roles === null || field.roles === undefined) return [...ROLES];
+  return field.roles.filter(Boolean);
 }
 
 // Decide whether a given viewer can see a field. `viewer` is a role string, or
@@ -305,7 +312,7 @@ export const DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.users', 'active') IS NULL
      ALTER TABLE dbo.users ADD active BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1;`,
 
-  // Idempotent migration for the CDM Contact role — widens the role CHECK
+  // Idempotent migration for the School Contact role — widens the role CHECK
   // constraint to accept 'cdm_contact'. The original CREATE TABLE only runs when
   // the table is brand new, so existing deployments need their role CHECK
   // constraint replaced. Constraint names are auto-generated, so drop any CHECK

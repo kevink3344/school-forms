@@ -249,7 +249,7 @@ export default function LoginPage() {
                   </option>
                   {users.map((u) => (
                     <option key={u.id} value={u.id}>
-                      {u.display_name} · {u.email} · {u.role === "cdm_contact" ? "CDM Contact" : u.role}
+                      {u.display_name} · {u.email} · {u.role === "cdm_contact" ? "School Contact" : u.role}
                     </option>
                   ))}
                 </select>
@@ -359,7 +359,7 @@ function BrandPanel({ stats }: { stats: LoginStats | null }) {
   const n = (v: number | undefined) => (v === undefined || v === null ? "—" : v);
   return (
     <div className="login-brand">
-      <div className="logo-badge">G</div>
+      <img src="/wcpss-logo.svg" alt="Wake County Public School System" className="brand-logo" />
       <p className="brand-eyebrow">Enterprise Staff Support</p>
       <h1>Google Submissions</h1>
       <p className="brand-tagline">

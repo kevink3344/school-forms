@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { CheckCircle2, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { FormField, FieldType, FormWithFields } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
@@ -23,7 +24,7 @@ const ROLES = ["admin", "staff", "cdm_contact"] as const;
 // Human-facing label for a role in the access toggles. Falls back to the raw
 // role string so future roles still render (just less pretty).
 function roleLabel(role: string): string {
-  if (role === "cdm_contact") return "CDM Contact";
+  if (role === "cdm_contact") return "School Contact";
   return role;
 }
 
@@ -182,7 +183,10 @@ export default function AdminFormDesigner() {
           options: f.options,
           required: f.required,
           staff_only: f.staff_only,
-          roles: f.staff_only ? (f.roles && f.roles.length ? f.roles : defaultFieldRoles()) : null,
+          // Preserve the explicit selection. Only fall back to the default when
+          // roles is genuinely unset (null/undefined) — an empty array is a
+          // deliberate "no access" and must survive the round-trip.
+          roles: f.staff_only ? (f.roles ?? defaultFieldRoles()) : null,
           sort_order: i,
           placeholder: f.placeholder,
         })),
@@ -312,16 +316,7 @@ export default function AdminFormDesigner() {
                     }}
                     title={docFolderName ? `Valid folder: ${docFolderName}` : "Valid folder"}
                   >
-                    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
-                      <circle cx="12" cy="12" r="10" fill="#16a34a" />
-                      <path
-                        d="M8 12.5l2.5 2.5L16 9.5"
-                        stroke="#fff"
-                        strokeWidth="2"
-                        strokeLinecap="round"
-                        strokeLinejoin="round"
-                      />
-                    </svg>
+                    <CheckCircle2 size={16} color="#16a34a" aria-hidden="true" />
                     Valid
                   </span>
                 )}
@@ -359,9 +354,9 @@ export default function AdminFormDesigner() {
       </div>
 
       <div className="card">
-        <div className="card-head">
+        <div className="card-head" style={{ flexDirection: "column", alignItems: "flex-start", gap: 12 }}>
           <h3>Fields</h3>
-          <div className="tabs" style={{ marginLeft: "auto" }}>
+          <div className="tabs">
             <button
               type="button"
               className={`tab ${activeTab === "form" ? "active" : ""}`}
@@ -430,9 +425,7 @@ export default function AdminFormDesigner() {
           )}
 
           <button className="secondary-button" onClick={addField} style={{ marginTop: 14 }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+            <Plus size={14} />
             Add {activeTab === "staff" ? "Staff Only" : "Form"} Field
           </button>
         </div>
@@ -531,10 +524,7 @@ function FieldRow({
         )}
         <div className="filter-spacer" />
         <button className="icon-button" title="Remove field" onClick={onRemove}>
-          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <line x1="18" y1="6" x2="6" y2="18" />
-            <line x1="6" y1="6" x2="18" y2="18" />
-          </svg>
+          <X size={16} />
         </button>
       </div>
 
@@ -578,18 +568,20 @@ function FieldRow({
         </div>
       )}
 
-      <div style={{ display: "flex", gap: 18, marginTop: 12, flexWrap: "wrap", alignItems: "center" }}>
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-          <input
-            type="checkbox"
-            checked={field.required}
-            onChange={(e) => onChange({ required: e.target.checked })}
-          />
-          Required
-        </label>
+      <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 12 }}>
         {field.staff_only && (
-          <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <span style={{ fontSize: 12, color: "var(--text-muted)" }}>Access:</span>
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "var(--text-muted)",
+              }}
+            >
+              Access
+            </span>
             {ROLES.map((role) => {
               const has = (field.roles ?? defaultFieldRoles()).includes(role);
               return (
@@ -598,26 +590,44 @@ function FieldRow({
                   type="button"
                   title={`${has ? "Remove" : "Grant"} ${roleLabel(role)} access to this field`}
                   onClick={() => {
+                    // Base the toggle on the CURRENT selection. When roles is
+                    // unset we start from the default set, so the first click
+                    // flips just that one role instead of resetting everything.
                     const current = field.roles?.length ? field.roles : defaultFieldRoles();
                     const next = has ? current.filter((r) => r !== role) : [...current, role];
-                    onChange({ roles: next.length ? next : defaultFieldRoles() });
+                    // Persist the explicit selection. An empty array is a valid
+                    // value ("no role may access this field") and must NOT be
+                    // coerced back to the full role set — that fallback is what
+                    // made removing the last role snap every button back on.
+                    onChange({ roles: next });
                   }}
-                  className="badge-button"
                   style={{
                     cursor: "pointer",
-                    fontSize: 11,
-                    padding: "3px 9px",
-                    background: has ? "rgb(234,243,255)" : "transparent",
-                    color: has ? "rgb(49,93,198)" : "var(--text-muted)",
-                    borderColor: has ? "rgb(169,201,255)" : "var(--border)",
+                    fontSize: 13,
+                    fontWeight: 700,
+                    padding: "7px 14px",
+                    borderRadius: "var(--radius)",
+                    transition: "background-color .13s ease, border-color .13s ease, color .13s ease",
+                    background: has ? "var(--accent)" : "var(--card-bg)",
+                    color: has ? "#fff" : "var(--accent)",
+                    border: `1px solid ${has ? "var(--accent)" : "var(--accent)"}`,
                   }}
                 >
-                  {has ? "+" : "−"} {roleLabel(role)}
+                  {has ? "✓" : "+"} {roleLabel(role)}
                 </button>
               );
             })}
           </div>
         )}
+
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+          <input
+            type="checkbox"
+            checked={field.required}
+            onChange={(e) => onChange({ required: e.target.checked })}
+          />
+          Required
+        </label>
       </div>
     </div>
   );

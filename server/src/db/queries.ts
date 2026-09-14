@@ -496,10 +496,39 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
             f.status, f.view_columns, f.code, f.submission_seq, f.doc_folder_id,
-            f.created_at, f.updated_at
+            f.created_at, f.updated_at,
+            (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
   );
+}
+
+// Count the submissions attached to a form. Used to guard form deletion: a form
+// with any submission history must NOT be deleted, because submissions.form_id
+// cascades on delete and would silently destroy submission data.
+export async function countSubmissionsForForm(formId: number): Promise<number> {
+  const rows = await execute<{ n: number }>(
+    `SELECT COUNT(*) AS n FROM dbo.submissions WHERE form_id = @formId`,
+    { formId }
+  );
+  return rows[0]?.n ?? 0;
+}
+
+// Delete a form (org-scoped). Returns true when a row was deleted, false when no
+// matching form existed (or it belonged to another organization). Callers MUST
+// verify the form has zero submissions first — see countSubmissionsForForm.
+export async function deleteForm(id: number, organizationId?: number | null): Promise<boolean> {
+  const clauses: string[] = ["id = @id"];
+  const params: Record<string, unknown> = { id };
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
+  const deleted = await execute<{ id: number }>(
+    `DELETE FROM dbo.forms OUTPUT DELETED.id WHERE ${clauses.join(" AND ")}`,
+    params
+  );
+  return deleted.length > 0;
 }
 
 // Fetch a form that belongs to the provided organization (used for org-scoped
@@ -671,7 +700,9 @@ export async function createForm(
         staffOnly: f.staff_only ?? false,
         sortOrder: f.sort_order ?? 0,
         placeholder: f.placeholder ?? null,
-        roles: f.roles?.length ? JSON.stringify(f.roles) : null,
+        // An explicit [] ("no role may access") is stored as '[]' and must not
+        // collapse to NULL, which would mean "unset -> all roles".
+        roles: f.roles ? JSON.stringify(f.roles) : null,
       }
     );
   }
@@ -754,7 +785,8 @@ async function reconcileFormFields(
     const f = fields[i];
     const sortOrder = f.sort_order ?? i;
     const options = f.options && f.options.length ? JSON.stringify(f.options) : null;
-    const roles = f.roles?.length ? JSON.stringify(f.roles) : null;
+    // Preserve [] as '[]' (explicit "no access") rather than NULL ("unset").
+    const roles = f.roles ? JSON.stringify(f.roles) : null;
     if (f.id && existingIds.has(f.id)) {
       incomingIds.add(f.id);
       await execute(

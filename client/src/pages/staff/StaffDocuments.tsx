@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { RefreshCw, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { DocumentRow } from "../../types";
 import { PageHead } from "../../components/layout";
@@ -86,9 +87,7 @@ export default function StaffDocuments() {
         }
         actions={
           <button className="primary-button" onClick={load}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <path d="M21 12a9 9 0 1 1-2.64-6.36M21 3v6h-6" strokeLinecap="round" strokeLinejoin="round" />
-            </svg>
+            <RefreshCw size={14} />
             Refresh
           </button>
         }
@@ -109,70 +108,72 @@ export default function StaffDocuments() {
         ) : rows.length === 0 ? (
           <div className="empty-state">No generated documents yet.</div>
         ) : (
-          <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th style={{ width: 170 }}>Date</th>
-                <th>Student Name</th>
-                <th>School Name</th>
-                <th>Course Title</th>
-                <th>Phase I Result</th>
-                <th>Document</th>
-                <th>Status</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((d) => {
-                const b = docStatusBadge(d.status);
-                const docId = d.document_id;
-                return (
-                  <tr
-                    key={d.id}
-                    className={selected?.id === d.id ? "grid-row selected" : "grid-row"}
-                    onClick={() => openPanel(d)}
-                  >
-                    <td className="cell-mono" data-label="Date">{formatDate(d.created_at)}</td>
-                    <td className="cell-strong" data-label="Student Name">
-                      {d.student_name || "Unnamed submission"}
-                    </td>
-                    <td data-label="School Name">{d.school_name ?? "—"}</td>
-                    <td data-label="Course Title">{d.course_title ?? "—"}</td>
-                    <td data-label="Phase I Result">{d.phase1_result ?? "—"}</td>
-                    <td data-label="Document">
-                      {docId ? (
-                        <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
-                          <a
-                            className="link-name"
-                            href={`https://docs.google.com/document/d/${docId}/edit`}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            onClick={(e) => e.stopPropagation()}
-                          >
-                            Open
-                          </a>
-                          <button
-                            className="link-name"
-                            style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              openPanel(d);
-                            }}
-                          >
-                            View PDF
-                          </button>
-                        </span>
-                      ) : (
-                        <span className="cell-mono">—</span>
-                      )}
-                    </td>
-                    <td data-label="Status">
-                      <span className={`badge ${b.cls}`}>{b.label}</span>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+          <div className="grid-wrap">
+            <table className="grid" style={{ width: "100%", minWidth: 900, borderCollapse: "collapse" }}>
+              <thead>
+                <tr>
+                  <th style={{ width: 170 }}>Date</th>
+                  <th>Student Name</th>
+                  <th>School Name</th>
+                  <th>Course Title</th>
+                  <th>Phase I Result</th>
+                  <th>Document</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((d) => {
+                  const b = docStatusBadge(d.status);
+                  const docId = d.document_id;
+                  return (
+                    <tr
+                      key={d.id}
+                      className={selected?.id === d.id ? "grid-row selected" : "grid-row"}
+                      onClick={() => openPanel(d)}
+                    >
+                      <td className="cell-mono" data-label="Date">{formatDate(d.created_at)}</td>
+                      <td className="cell-strong" data-label="Student Name">
+                        {d.student_name || "Unnamed submission"}
+                      </td>
+                      <td data-label="School Name">{d.school_name ?? "—"}</td>
+                      <td data-label="Course Title">{d.course_title ?? "—"}</td>
+                      <td data-label="Phase I Result">{d.phase1_result ?? "—"}</td>
+                      <td data-label="Document">
+                        {docId ? (
+                          <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
+                            <a
+                              className="link-name"
+                              href={`https://docs.google.com/document/d/${docId}/edit`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              onClick={(e) => e.stopPropagation()}
+                            >
+                              Open
+                            </a>
+                            <button
+                              className="link-name"
+                              style={{ background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openPanel(d);
+                              }}
+                            >
+                              View PDF
+                            </button>
+                          </span>
+                        ) : (
+                          <span className="cell-mono">—</span>
+                        )}
+                      </td>
+                      <td data-label="Status">
+                        <span className={`badge ${b.cls}`}>{b.label}</span>
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -183,10 +184,7 @@ export default function StaffDocuments() {
             <div className="drawer-head">
               <h2>Document Details</h2>
               <button className="icon-button close" onClick={closePanel}>
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <line x1="18" y1="6" x2="6" y2="18" />
-                  <line x1="6" y1="6" x2="18" y2="18" />
-                </svg>
+                <X size={18} />
               </button>
             </div>
 

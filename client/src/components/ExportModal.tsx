@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { X } from "lucide-react";
 import { api, getToken, ApiError } from "../lib/api";
 import type { ExportColumn, ExportPreview, Form } from "../types";
 
@@ -135,10 +136,7 @@ export default function ExportModal({
         <div className="drawer-head">
           <h2>Export Submissions</h2>
           <button className="icon-button close" onClick={onClose}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <line x1="18" y1="6" x2="6" y2="18" />
-              <line x1="6" y1="6" x2="18" y2="18" />
-            </svg>
+            <X size={18} />
           </button>
         </div>
 
@@ -147,11 +145,13 @@ export default function ExportModal({
             <div className="filter-group" style={{ minWidth: 0, marginBottom: 16 }}>
               <label>Form</label>
               <select value={selectedFormId} onChange={(e) => setSelectedFormId(e.target.value)}>
-                {forms.map((f) => (
-                  <option key={f.id} value={f.id}>
-                    {f.title}
-                  </option>
-                ))}
+                {forms
+                  .filter((f) => f.status === "published")
+                  .map((f) => (
+                    <option key={f.id} value={f.id}>
+                      {f.title}
+                    </option>
+                  ))}
               </select>
             </div>
           )}

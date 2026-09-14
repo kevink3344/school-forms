@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { api, ApiError } from "../../lib/api";
+import { ChevronDown, X } from "lucide-react";
 import { parseDocumentRoles, ROLES } from "../../lib/settings";
 import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
@@ -54,7 +55,7 @@ function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (
 
 function roleBadge(role: Role): { cls: string; label: string } {
   if (role === "admin") return { cls: "badge-orange", label: "Admin" };
-  if (role === "cdm_contact") return { cls: "badge-teal", label: "CDM Contact" };
+  if (role === "cdm_contact") return { cls: "badge-teal", label: "School Contact" };
   return { cls: "badge-blue", label: "Staff" };
 }
 
@@ -87,19 +88,7 @@ function CollapsibleSection({
           <span className="collapse-title">{title}</span>
           <span className="sub">{subtitle}</span>
         </span>
-        <svg
-          className={`collapse-chevron${open ? " open" : ""}`}
-          width="16"
-          height="16"
-          viewBox="0 0 24 24"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth="2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        >
-          <polyline points="6 9 12 15 18 9" />
-        </svg>
+        <ChevronDown className={`collapse-chevron${open ? " open" : ""}`} size={16} />
       </button>
       {open && (
         <div className="collapse-body" style={bodyStyle}>
@@ -627,7 +616,7 @@ export default function AdminSettings() {
                     {role === "admin"
                       ? "Administrator"
                       : role === "cdm_contact"
-                        ? "CDM Contact"
+                        ? "School Contact"
                         : "Staff member"}
                     {has ? " — can see Documents" : " — cannot see Documents"}
                   </span>
@@ -752,10 +741,7 @@ export default function AdminSettings() {
           <div className="drawer-head">
             <h2>{orgForm.id === null ? "Add Organization" : "Edit Organization"}</h2>
             <button className="icon-button close" onClick={closeOrg} title="Close">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <X size={18} />
             </button>
           </div>
           <div className="drawer-body">
@@ -828,10 +814,7 @@ export default function AdminSettings() {
           <div className="drawer-head">
             <h2>{form.id === null ? "Add User" : "Edit User"}</h2>
             <button className="icon-button close" onClick={closeModal} title="Close">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <line x1="18" y1="6" x2="6" y2="18" />
-                <line x1="6" y1="6" x2="18" y2="18" />
-              </svg>
+              <X size={18} />
             </button>
           </div>
           <div className="drawer-body">
@@ -876,7 +859,7 @@ export default function AdminSettings() {
                   onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
                 >
                   <option value="staff">Staff</option>
-                  <option value="cdm_contact">CDM Contact</option>
+                  <option value="cdm_contact">School Contact</option>
                   <option value="admin">Admin</option>
                 </select>
               </Field>

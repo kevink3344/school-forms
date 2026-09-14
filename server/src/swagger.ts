@@ -1128,6 +1128,33 @@ export function buildSwaggerSpec(req?: Request) {
             "404": { description: "Form not found" },
           },
         },
+        delete: {
+          tags: ["Forms"],
+          summary: "Delete an unused form (admin)",
+          description:
+            "Deletes a form that has no submissions. Refuses with 409 when the form has any submission history, because submissions cascade on form delete. Published but unused forms are deletable.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "204": { description: "Deleted" },
+            "400": { description: "Invalid form id" },
+            "404": { description: "Form not found" },
+            "409": {
+              description: "Form has submissions and cannot be deleted",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      error: { type: "string" },
+                      submission_count: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
       },
       "/api/forms/{id}/status": {
         patch: {

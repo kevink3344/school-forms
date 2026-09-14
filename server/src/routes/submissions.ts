@@ -29,7 +29,7 @@ import {
 
 export const submissionsRouter = Router();
 
-// Whether the current user is school-scoped (staff or CDM Contact) rather than
+// Whether the current user is school-scoped (staff or School Contact) rather than
 // org-scoped (admin). School-scoped callers may only touch their own school's
 // submissions.
 export function isSchoolScoped(role: string): boolean {
@@ -118,7 +118,7 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
-    // Staff and CDM Contacts are school-scoped; admins are org-scoped.
+    // Staff and School Contacts are school-scoped; admins are org-scoped.
     const isStaff = req.user!.role !== "admin";
     const organizationId = req.user!.organization_id;
     const schoolId = isStaff ? req.user!.school_id : (req.query.school_id ? Number(req.query.school_id) : undefined);
@@ -144,7 +144,7 @@ submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_cont
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    // Staff and CDM Contacts can only view submissions belonging to their own school within their org
+    // Staff and School Contacts can only view submissions belonging to their own school within their org
     if (isSchoolScoped(req.user!.role)) {
       const isOwner = submission.school_id === req.user!.school_id;
       if (!isOwner) {

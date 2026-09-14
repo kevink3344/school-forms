@@ -1,5 +1,6 @@
 import { useEffect, useState, type FormEvent } from "react";
 import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { GraduationCap } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { PublicForm, FieldType } from "../../types";
 
@@ -82,10 +83,7 @@ export default function ParentSubmit() {
       <header className="banner">
         <div className="logo">
           <div className="logo-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 4L3 9l9 5 9-5-9-5z" fill="#fff" />
-              <path d="M3 13l9 5 9-5" stroke="#fff" strokeWidth="1.6" fill="none" />
-            </svg>
+            <GraduationCap size={16} color="#fff" />
           </div>
           School Forms
         </div>

@@ -432,6 +432,12 @@ export const api = {
     });
   },
 
+  // Delete an unused form (no submissions). The server refuses with 409 when the
+  // form has submission history; the error message is surfaced to the caller.
+  async deleteForm(id: number): Promise<void> {
+    return request<void>(`/api/forms/${id}`, { method: "DELETE", auth: true });
+  },
+
   // View-columns config (which columns the admin Submissions grid shows).
   // Independent of Export — Export always uses all columns.
   async getFormViewColumns(id: number): Promise<ViewColumnsConfig> {

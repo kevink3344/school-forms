@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
+import { Plus } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { Form } from "../../types";
 import { PageHead, FormStatusBadge } from "../../components/layout";
@@ -16,6 +17,8 @@ export default function AdminForms() {
   const [schools, setSchools] = useState<{ id: number; name: string }[]>([]);
   const [creating, setCreating] = useState(false);
   const [showNew, setShowNew] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState<Form | null>(null);
+  const [deleting, setDeleting] = useState(false);
 
   const load = () => {
     setLoading(true);
@@ -62,6 +65,22 @@ export default function AdminForms() {
     }
   };
 
+  const confirmDelete = async () => {
+    if (!deleteTarget) return;
+    setDeleting(true);
+    setError("");
+    try {
+      await api.deleteForm(deleteTarget.id);
+      setDeleteTarget(null);
+      load();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete form");
+      setDeleteTarget(null);
+    } finally {
+      setDeleting(false);
+    }
+  };
+
   return (
     <div>
       <PageHead
@@ -78,9 +97,7 @@ export default function AdminForms() {
         }
         actions={
           <button className="primary-button" onClick={() => setShowNew((v) => !v)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-              <path d="M12 5v14M5 12h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" />
-            </svg>
+            <Plus size={14} />
             New Form
           </button>
         }
@@ -152,9 +169,9 @@ export default function AdminForms() {
               <tr>
                 <th>Title</th>
                 <th>Status</th>
-                <th>Fields</th>
+                <th>Submissions</th>
                 <th>Created</th>
-                <th style={{ width: 200 }}>Actions</th>
+                <th style={{ width: 260 }}>Actions</th>
               </tr>
             </thead>
             <tbody>
@@ -164,7 +181,7 @@ export default function AdminForms() {
                   <td data-label="Status">
                     <FormStatusBadge status={f.status} />
                   </td>
-                  <td data-label="Fields">{f.id ? "—" : "—"}</td>
+                  <td className="cell-mono" data-label="Submissions">{f.submission_count ?? 0}</td>
                   <td className="cell-mono" data-label="Created">{formatDate(f.created_at)}</td>
                   <td>
                     <div style={{ display: "flex", gap: 8 }}>
@@ -178,12 +195,65 @@ export default function AdminForms() {
                       >
                         {f.status === "published" ? "Unpublish" : "Publish"}
                       </button>
+                      <button
+                        className="badge-button"
+                        onClick={() => setDeleteTarget(f)}
+                        disabled={(f.submission_count ?? 0) > 0}
+                        title={
+                          (f.submission_count ?? 0) > 0
+                            ? `In use — ${f.submission_count} submission${f.submission_count === 1 ? "" : "s"}`
+                            : "Delete this form"
+                        }
+                        style={{ color: (f.submission_count ?? 0) > 0 ? undefined : "var(--danger, #b93040)" }}
+                      >
+                        Delete
+                      </button>
                     </div>
                   </td>
                 </tr>
               ))}
             </tbody>
           </table>
+        </div>
+      )}
+
+      {deleteTarget && (
+        <div className="modal-overlay open" onClick={() => !deleting && setDeleteTarget(null)}>
+          <div className="modal" style={{ width: "min(460px, 92vw)" }} onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Delete form</h2>
+              <button
+                className="icon-button close"
+                onClick={() => setDeleteTarget(null)}
+                disabled={deleting}
+                aria-label="Close"
+              >
+                ✕
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+                Delete <strong>{deleteTarget.title}</strong>? This cannot be undone.
+              </p>
+              <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" }}>
+                This form has no submissions, so nothing else will be affected.
+              </p>
+            </div>
+            <div className="modal-foot">
+              <div className="spacer" />
+              <button className="secondary-button" onClick={() => setDeleteTarget(null)} disabled={deleting}>
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={confirmDelete}
+                disabled={deleting}
+                style={{ background: "var(--danger, #b93040)", borderColor: "var(--danger, #b93040)" }}
+              >
+                {deleting ? "Deleting..." : "Delete"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

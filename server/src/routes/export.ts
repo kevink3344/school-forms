@@ -12,7 +12,7 @@ import type { Role } from "../db/schema.js";
 
 export const exportRouter = Router();
 
-// Filter export columns for the requesting role. Staff (and CDM Contacts) see
+// Filter export columns for the requesting role. Staff (and School Contacts) see
 // public columns plus any staff-only column whose access roles include their
 // own role (e.g. "staff" / "cdm_contact"). Admins see everything only when they
 // opt into staff-only columns (includeStaffOnly); otherwise they see just the
@@ -99,7 +99,7 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const isStaff = req.user!.role !== "admin";
-    // Admin may filter by school; staff and CDM Contacts are locked to their own school.
+    // Admin may filter by school; staff and School Contacts are locked to their own school.
     const schoolId = isStaff
       ? req.user!.school_id ?? undefined
       : req.query.school_id
@@ -147,7 +147,7 @@ exportRouter.get("/csv", requireAuth, requireRoles("staff", "cdm_contact", "admi
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const isStaff = req.user!.role !== "admin";
-    // Admin may filter by school; staff and CDM Contacts are locked to their own school.
+    // Admin may filter by school; staff and School Contacts are locked to their own school.
     const schoolId = isStaff
       ? req.user!.school_id ?? undefined
       : req.query.school_id

@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { GraduationCap, Check } from "lucide-react";
 import { api } from "../../lib/api";
 import { StatusBadge } from "../../components/layout";
 
@@ -24,10 +25,7 @@ export default function ParentConfirmation() {
       <header className="banner">
         <div className="logo">
           <div className="logo-badge">
-            <svg width="16" height="16" viewBox="0 0 24 24" fill="none">
-              <path d="M12 4L3 9l9 5 9-5-9-5z" fill="#fff" />
-              <path d="M3 13l9 5 9-5" stroke="#fff" strokeWidth="1.6" fill="none" />
-            </svg>
+            <GraduationCap size={16} color="#fff" />
           </div>
           School Forms
         </div>
@@ -49,9 +47,7 @@ export default function ParentConfirmation() {
                 margin: "0 auto 18px",
               }}
             >
-              <svg width="32" height="32" viewBox="0 0 24 24" fill="none">
-                <path d="M20 6L9 17l-5-5" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Check size={32} strokeWidth={2.4} />
             </div>
 
             <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Thank you, your form was submitted.</h1>

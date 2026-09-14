@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
+import { Download } from "lucide-react";
 import type { Form, School, SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
@@ -106,9 +107,7 @@ export default function AdminDashboard() {
               + New Form
             </button>
             <button className="primary-button" onClick={() => setExportOpen(true)}>
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none">
-                <path d="M12 3v12M7 10l5 5 5-5M5 21h14" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <Download size={14} />
               Export
             </button>
           </>
@@ -138,11 +137,13 @@ export default function AdminDashboard() {
             onChange={(e) => setFilter("form_id", e.target.value)}
           >
             <option value="">All forms</option>
-            {forms.map((f) => (
-              <option key={f.id} value={f.id}>
-                {f.title}
-              </option>
-            ))}
+            {forms
+              .filter((f) => f.status === "published")
+              .map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title}
+                </option>
+              ))}
           </select>
         </div>
         <div className="filter-group">
