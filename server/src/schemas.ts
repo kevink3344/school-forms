@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { ROLES, FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES } from "./db/schema.js";
+import { ROLES, FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES, REPORT_FORMATS } from "./db/schema.js";
 
 // -----------------------------------------------------------------------------
 // Auth
@@ -207,3 +207,61 @@ export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateFormInput = z.infer<typeof createFormSchema>;
 export type CreateSubmissionInput = z.infer<typeof createSubmissionSchema>;
 export type CreateCommentInput = z.infer<typeof createCommentSchema>;
+
+// -----------------------------------------------------------------------------
+// Reports
+// -----------------------------------------------------------------------------
+
+// The query contract shared by the preview grid and every export format. Both
+// endpoints parse the same shape so "what you see is what you export" holds.
+export const reportQuerySchema = z.object({
+  form_id: z.coerce.number().int().positive({ message: "form_id is required" }),
+  school_id: z.coerce.number().int().positive().optional(),
+  status: z.enum(SUBMISSION_STATUS).optional(),
+  from: z.string().max(40).optional(),
+  to: z.string().max(40).optional(),
+  // Free-text row filter. Capped so a pathological term can't blow up the LIKE.
+  q: z.string().max(200).optional(),
+  // Comma-separated `field_N` keys. Unknown/unauthorized keys are dropped at the
+  // route, so an admin can't hand-craft a request to leak a staff-only column.
+  columns: z.string().max(4000).optional(),
+  // Only honored for admins; staff can never opt into staff-only columns.
+  include_staff_only: z
+    .union([z.literal("1"), z.literal("0"), z.literal("true"), z.literal("false")])
+    .optional(),
+});
+
+export type ReportQueryInput = z.infer<typeof reportQuerySchema>;
+
+// The filter subset that a Saved View persists (everything except the form).
+export const reportFiltersSchema = z.object({
+  school_id: z.number().int().positive().nullable().optional(),
+  status: z.enum(SUBMISSION_STATUS).nullable().optional(),
+  from: z.string().max(40).nullable().optional(),
+  to: z.string().max(40).nullable().optional(),
+  q: z.string().max(200).nullable().optional(),
+  include_staff_only: z.boolean().optional(),
+});
+
+const reportColumnKey = z.string().regex(/^field_\d+$/, { message: "Invalid column key" });
+
+export const createReportViewSchema = z.object({
+  name: z.string().min(1).max(120),
+  form_id: z.number().int().positive(),
+  filters: reportFiltersSchema.default({}),
+  // null / omitted means "all columns currently visible to me".
+  columns: z.array(reportColumnKey).nullable().optional(),
+  format: z.enum(REPORT_FORMATS).default("csv"),
+  is_default: z.boolean().default(false),
+});
+
+export const updateReportViewSchema = z
+  .object({
+    name: z.string().min(1).max(120).optional(),
+    form_id: z.number().int().positive().optional(),
+    filters: reportFiltersSchema.optional(),
+    columns: z.array(reportColumnKey).nullable().optional(),
+    format: z.enum(REPORT_FORMATS).optional(),
+    is_default: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });

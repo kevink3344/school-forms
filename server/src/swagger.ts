@@ -207,6 +207,63 @@ export function buildSwaggerSpec(req?: Request) {
             },
           },
         },
+        ReportPreview: {
+          type: "object",
+          properties: {
+            form_id: { type: "integer" },
+            form_title: { type: "string" },
+            school_scoped: {
+              type: "boolean",
+              description: "True when the caller is locked to their own school (staff / School Contact).",
+            },
+            columns: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ExportColumn" },
+            },
+            rows: {
+              type: "array",
+              description: "One object per submission, keyed by column key (field_N) plus submission_public_id, submitted_at and status.",
+              items: { type: "object", additionalProperties: true },
+            },
+            total: { type: "integer" },
+          },
+        },
+        ReportView: {
+          type: "object",
+          description: "A saved report configuration, owned by exactly one user.",
+          properties: {
+            id: { type: "integer" },
+            name: { type: "string" },
+            form_id: { type: "integer" },
+            filters: { type: "object", additionalProperties: true },
+            columns: {
+              type: "array",
+              items: { type: "string" },
+              nullable: true,
+              description: "Selected field_N keys; null means all columns currently visible to the user.",
+            },
+            format: { type: "string", enum: ["csv", "xlsx", "pdf"] },
+            is_default: { type: "boolean" },
+            last_used_at: { type: "string", format: "date-time", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+          },
+        },
+        ReportViewResponse: {
+          type: "object",
+          properties: {
+            view: { $ref: "#/components/schemas/ReportView" },
+          },
+        },
+        ReportViewList: {
+          type: "object",
+          properties: {
+            views: {
+              type: "array",
+              items: { $ref: "#/components/schemas/ReportView" },
+            },
+          },
+        },
         AdhocField: {
           type: "object",
           properties: {
@@ -1023,6 +1080,199 @@ export function buildSwaggerSpec(req?: Request) {
               description: "CSV download",
               content: { "text/csv": { schema: { type: "string" } } },
             },
+          },
+        },
+      },
+      "/api/reports/preview": {
+        get: {
+          tags: ["Reports"],
+          summary: "Preview report columns + rows (admin, staff)",
+          description:
+            "Builds the report table for one form. The rows returned here are exactly the rows every export format will contain, so the on-screen preview and the downloaded file always agree.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "form_id", in: "query", required: true, schema: { type: "integer" } },
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false, description: "Admin only — staff and School Contacts are always scoped to their own school." },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+            { name: "from", in: "query", schema: { type: "string" }, required: false, description: "Earliest submitted_at (inclusive)." },
+            { name: "to", in: "query", schema: { type: "string" }, required: false, description: "Latest submitted_at (inclusive)." },
+            { name: "q", in: "query", schema: { type: "string" }, required: false, description: "Free-text row filter (max 200 chars) matched against the public id, school name and every answer value." },
+            { name: "columns", in: "query", schema: { type: "string" }, required: false, description: "Comma-separated field_N keys. Keys the caller may not access are dropped server-side." },
+            { name: "include_staff_only", in: "query", schema: { type: "string" }, required: false, description: "Admin only — include staff-only columns. Ignored for staff." },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportPreview" } },
+              },
+            },
+            "400": { description: "Validation error (missing form_id, or no authorized columns selected)" },
+            "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/reports/export": {
+        get: {
+          tags: ["Reports"],
+          summary: "Download a report as CSV, Excel (.xlsx) or PDF (admin, staff)",
+          description:
+            "Accepts the same filters as /api/reports/preview and writes the identical table. `format` selects the writer.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "form_id", in: "query", required: true, schema: { type: "integer" } },
+            { name: "format", in: "query", schema: { type: "string", enum: ["csv", "xlsx", "pdf"], default: "csv" }, required: false },
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false, description: "Admin only — staff and School Contacts are always scoped to their own school." },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+            { name: "from", in: "query", schema: { type: "string" }, required: false },
+            { name: "to", in: "query", schema: { type: "string" }, required: false },
+            { name: "q", in: "query", schema: { type: "string" }, required: false },
+            { name: "columns", in: "query", schema: { type: "string" }, required: false, description: "Comma-separated field_N keys." },
+            { name: "include_staff_only", in: "query", schema: { type: "string" }, required: false, description: "Admin only." },
+          ],
+          responses: {
+            "200": {
+              description: "Report file download",
+              content: {
+                "text/csv": { schema: { type: "string" } },
+                "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": { schema: { type: "string", format: "binary" } },
+                "application/pdf": { schema: { type: "string", format: "binary" } },
+              },
+            },
+            "400": { description: "Validation error / unsupported format" },
+            "404": { description: "Form not found" },
+          },
+        },
+      },
+      "/api/reports/views": {
+        get: {
+          tags: ["Reports"],
+          summary: "List the signed-in user's saved report views",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportViewList" } },
+              },
+            },
+          },
+        },
+        post: {
+          tags: ["Reports"],
+          summary: "Save the current report configuration as a view",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["name", "form_id"],
+                  properties: {
+                    name: { type: "string", maxLength: 120 },
+                    form_id: { type: "integer" },
+                    filters: { type: "object", additionalProperties: true },
+                    columns: { type: "array", items: { type: "string" }, nullable: true },
+                    format: { type: "string", enum: ["csv", "xlsx", "pdf"], default: "csv" },
+                    is_default: { type: "boolean", default: false },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportViewResponse" } },
+              },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Form not found" },
+            "409": { description: "A view with that name already exists" },
+          },
+        },
+      },
+      "/api/reports/views/{id}": {
+        put: {
+          tags: ["Reports"],
+          summary: "Update a saved report view",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    name: { type: "string", maxLength: 120 },
+                    form_id: { type: "integer" },
+                    filters: { type: "object", additionalProperties: true },
+                    columns: { type: "array", items: { type: "string" }, nullable: true },
+                    format: { type: "string", enum: ["csv", "xlsx", "pdf"] },
+                    is_default: { type: "boolean" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportViewResponse" } },
+              },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "View not found (or not owned by the caller)" },
+            "409": { description: "A view with that name already exists" },
+          },
+        },
+        delete: {
+          tags: ["Reports"],
+          summary: "Delete a saved report view",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "204": { description: "Deleted" },
+            "404": { description: "View not found (or not owned by the caller)" },
+          },
+        },
+      },
+      "/api/reports/views/{id}/default": {
+        post: {
+          tags: ["Reports"],
+          summary: "Make a saved view the user's default",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportViewResponse" } },
+              },
+            },
+            "404": { description: "View not found (or not owned by the caller)" },
+          },
+        },
+      },
+      "/api/reports/views/{id}/use": {
+        post: {
+          tags: ["Reports"],
+          summary: "Mark a saved view as recently used",
+          description: "Stamps last_used_at so the Reports page can re-apply the view the user worked with most recently.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/ReportViewResponse" } },
+              },
+            },
+            "404": { description: "View not found (or not owned by the caller)" },
           },
         },
       },

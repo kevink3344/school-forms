@@ -277,3 +277,62 @@ export interface ViewColumnsConfig {
   columns: ExportColumn[];
   viewKeys: string[];
 }
+
+// ---------------------------------------------------------------------------
+// Reports
+// ---------------------------------------------------------------------------
+
+export type ReportFormat = "csv" | "xlsx" | "pdf";
+
+// The filter subset a Saved View persists. `columns` lives alongside (not inside)
+// the filters because it is stored in its own column on dbo.report_views.
+export interface ReportFilters {
+  school_id?: number | null;
+  status?: SubmissionStatus | null;
+  from?: string | null;
+  to?: string | null;
+  q?: string | null;
+  include_staff_only?: boolean;
+}
+
+// The full report query: the filter set plus which columns to render and in
+// what order. Both the preview grid and every export are built from this.
+export interface ReportQuery extends ReportFilters {
+  form_id: number;
+  columns?: string[] | null;
+}
+
+// Response from GET /api/reports/preview — exactly the rows the export contains.
+export interface ReportPreview {
+  form_id: number;
+  form_title: string;
+  // True when the caller is locked to their own school (staff / School Contact).
+  school_scoped: boolean;
+  columns: ExportColumn[];
+  rows: Record<string, unknown>[];
+  total: number;
+}
+
+// A saved report configuration, owned by exactly one user.
+export interface ReportView {
+  id: number;
+  name: string;
+  form_id: number;
+  filters: ReportFilters;
+  // null means "all columns currently visible to the user".
+  columns: string[] | null;
+  format: ReportFormat;
+  is_default: boolean;
+  last_used_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface ReportViewInput {
+  name: string;
+  form_id: number;
+  filters: ReportFilters;
+  columns: string[] | null;
+  format: ReportFormat;
+  is_default?: boolean;
+}

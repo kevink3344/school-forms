@@ -28,6 +28,8 @@ interface JwtUser {
   organization_id: number | null;
 }
 
+export type { JwtUser };
+
 declare global {
   namespace Express {
     interface Request {

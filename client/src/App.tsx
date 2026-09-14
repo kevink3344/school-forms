@@ -11,6 +11,7 @@ import AdminSettings from "./pages/admin/AdminSettings";
 import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
+import ReportsPage from "./pages/reports/ReportsPage";
 import ParentSubmit from "./pages/parent/ParentSubmit";
 import ParentConfirmation from "./pages/parent/ParentConfirmation";
 import HomeRedirect from "./pages/HomeRedirect";
@@ -105,6 +106,16 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      <Route
+        path="/admin/reports"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <ReportsPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
 
       {/* Staff + School Contact */}
       <Route
@@ -133,6 +144,16 @@ export default function App() {
           <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <StaffSubmissionDetail />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      <Route
+        path="/staff/reports"
+        element={
+          <ProtectedRoute roles={["staff", "cdm_contact"]}>
+            <AppShell>
+              <ReportsPage />
             </AppShell>
           </ProtectedRoute>
         }

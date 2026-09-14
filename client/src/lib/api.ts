@@ -13,6 +13,11 @@ import type {
   LoginStats,
   OrganizationWithMembers,
   PublicForm,
+  ReportFormat,
+  ReportPreview,
+  ReportQuery,
+  ReportView,
+  ReportViewInput,
   Role,
   School,
   SchoolPage,
@@ -143,6 +148,22 @@ export class ApiError extends Error {
     this.status = status;
     this.name = "ApiError";
   }
+}
+
+// Serialize a ReportQuery into the query string shared by /api/reports/preview
+// and /api/reports/export. Nullish / empty filters are omitted so the URL stays
+// readable; `columns` is only sent when a specific subset was chosen (an absent
+// param means "all columns visible to me").
+function reportQueryString(query: ReportQuery): string {
+  const qs = new URLSearchParams({ form_id: String(query.form_id) });
+  if (query.school_id != null) qs.set("school_id", String(query.school_id));
+  if (query.status) qs.set("status", query.status);
+  if (query.from) qs.set("from", query.from);
+  if (query.to) qs.set("to", query.to);
+  if (query.q && query.q.trim()) qs.set("q", query.q.trim());
+  if (query.include_staff_only) qs.set("include_staff_only", "1");
+  if (query.columns && query.columns.length) qs.set("columns", query.columns.join(","));
+  return qs.toString();
 }
 
 // ---------------------------------------------------------------------------
@@ -654,6 +675,96 @@ export const api = {
     a.click();
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
+  },
+
+  // -------------------------------------------------------------------------
+  // Reports (admin + staff)
+  //
+  // The preview and the download share one query contract, so the grid on
+  // screen is always exactly what lands in the file.
+  // -------------------------------------------------------------------------
+
+  // Serialize a ReportQuery into the query string both report endpoints accept.
+  // Empty/nullish filters are omitted so the URL stays readable.
+  // (Defined as a module-level helper below — see `reportQueryString`.)
+  async reportPreview(query: ReportQuery): Promise<ReportPreview> {
+    return request<ReportPreview>(`/api/reports/preview?${reportQueryString(query)}`, { auth: true });
+  },
+
+  // Download the report in the requested format. Fetched as a blob because the
+  // response is a file, not JSON, and then handed to the browser's downloader.
+  async reportExport(query: ReportQuery, format: ReportFormat): Promise<void> {
+    const qs = reportQueryString(query);
+    const res = await fetch(`${API_BASE}/api/reports/export?${qs}&format=${format}`, {
+      headers: { Authorization: `Bearer ${getToken()}` },
+      credentials: "include",
+    });
+    if (!res.ok) {
+      let message = "Report export failed";
+      try {
+        const body = (await res.json()) as { error?: string };
+        if (body?.error) message = body.error;
+      } catch {
+        // non-JSON error body — keep the generic message
+      }
+      throw new ApiError(res.status, message);
+    }
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `report.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  },
+
+  // --- Saved views (per-user) ---
+
+  async listReportViews(): Promise<ReportView[]> {
+    const data = await request<{ views: ReportView[] }>("/api/reports/views", { auth: true });
+    return data.views;
+  },
+
+  async createReportView(input: ReportViewInput): Promise<ReportView> {
+    const data = await request<{ view: ReportView }>("/api/reports/views", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+    return data.view;
+  },
+
+  async updateReportView(id: number, patch: Partial<ReportViewInput>): Promise<ReportView> {
+    const data = await request<{ view: ReportView }>(`/api/reports/views/${id}`, {
+      method: "PUT",
+      auth: true,
+      body: patch,
+    });
+    return data.view;
+  },
+
+  async deleteReportView(id: number): Promise<void> {
+    await request<void>(`/api/reports/views/${id}`, { method: "DELETE", auth: true });
+  },
+
+  async setDefaultReportView(id: number): Promise<ReportView> {
+    const data = await request<{ view: ReportView }>(`/api/reports/views/${id}/default`, {
+      method: "POST",
+      auth: true,
+    });
+    return data.view;
+  },
+
+  // Stamp last_used_at. Fire-and-forget from the UI's point of view.
+  async useReportView(id: number): Promise<ReportView> {
+    const data = await request<{ view: ReportView }>(`/api/reports/views/${id}/use`, {
+      method: "POST",
+      auth: true,
+    });
+    return data.view;
   },
 
   // -------------------------------------------------------------------------

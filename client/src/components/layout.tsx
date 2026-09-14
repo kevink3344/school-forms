@@ -1,13 +1,14 @@
 import { useState, useEffect, type ReactNode } from "react";
 import { NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import {
-  PanelLeftOpen,
   Menu,
+  X,
   LogOut,
   LayoutDashboard,
   FileStack,
   FileText,
   School,
+  BarChart3,
   Settings,
   MessageSquare,
 } from "lucide-react";
@@ -107,10 +108,9 @@ export function AppShell({ children }: { children: ReactNode }) {
   const { user, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  // Desktop icon-only collapse.
-  const [collapsed, setCollapsed] = useState(false);
-  // Mobile off-canvas drawer state.
-  const [mobileOpen, setMobileOpen] = useState(false);
+  // The left menu is an off-canvas drawer at every width and starts closed;
+  // the hamburger in the banner opens it.
+  const [sidebarOpen, setSidebarOpen] = useState(false);
 
   // Which roles currently see the Documents link. Reads the public
   // `documents_link` setting (JSON role array). Defaults to all roles while it
@@ -152,26 +152,31 @@ export function AppShell({ children }: { children: ReactNode }) {
   const menuVisible = (item: MenuItemKey): boolean =>
     user ? menuItems[item].includes(user.role) : false;
 
-  // Close the mobile drawer whenever the route changes.
+  // Close the drawer whenever the route changes.
   useEffect(() => {
-    setMobileOpen(false);
+    setSidebarOpen(false);
   }, [location.pathname]);
 
-  // Lock body scroll while the mobile drawer is open.
+  // Lock body scroll while the drawer is open.
   useEffect(() => {
-    document.body.style.overflow = mobileOpen ? "hidden" : "";
+    document.body.style.overflow = sidebarOpen ? "hidden" : "";
     return () => {
       document.body.style.overflow = "";
     };
-  }, [mobileOpen]);
+  }, [sidebarOpen]);
 
-  const handleToggle = () => {
-    if (window.innerWidth < 768) setMobileOpen((o) => !o);
-    else setCollapsed((c) => !c);
-  };
+  // Esc closes the drawer.
+  useEffect(() => {
+    if (!sidebarOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setSidebarOpen(false);
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [sidebarOpen]);
 
   const handleLogout = async () => {
-    setMobileOpen(false);
+    setSidebarOpen(false);
     await logout();
     navigate("/login");
   };
@@ -181,12 +186,13 @@ export function AppShell({ children }: { children: ReactNode }) {
       <header className="banner">
         <button
           className="icon-button banner-toggle"
-          title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-          onClick={handleToggle}
-          aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+          title={sidebarOpen ? "Close menu" : "Open menu"}
+          aria-label={sidebarOpen ? "Close menu" : "Open menu"}
+          aria-expanded={sidebarOpen}
+          onClick={() => setSidebarOpen((o) => !o)}
         >
-          {collapsed ? (
-            <PanelLeftOpen size={18} />
+          {sidebarOpen ? (
+            <X size={18} />
           ) : (
             <Menu size={20} />
           )}
@@ -212,40 +218,46 @@ export function AppShell({ children }: { children: ReactNode }) {
       </header>
 
       <div className="body-flex">
-        {/* Mobile drawer overlay */}
+        {/* Backdrop behind the open drawer */}
         <div
-          className={`sidebar-overlay${mobileOpen ? " open" : ""}`}
-          onClick={() => setMobileOpen(false)}
+          className={`sidebar-overlay${sidebarOpen ? " open" : ""}`}
+          onClick={() => setSidebarOpen(false)}
           aria-hidden="true"
         />
 
-        <nav className={`sidebar${collapsed ? " collapsed" : ""}${mobileOpen ? " mobile-open" : ""}`}>
-          <div className="nav-label">{collapsed ? "" : "Menu"}</div>
+        <nav className={`sidebar${sidebarOpen ? " open" : ""}`}>
+          <div className="nav-label">Menu</div>
           {user?.role === "admin" && (
             <>
-              <NavLink to="/admin" className="sidebar-link" end title={collapsed ? "Dashboard" : undefined} onClick={() => setMobileOpen(false)}>
+              <NavLink to="/admin" className="sidebar-link" end onClick={() => setSidebarOpen(false)}>
                 <LayoutDashboard size={18} />
                 <span className="s-label">Dashboard</span>
               </NavLink>
               {showDocuments && menuVisible("documents") && (
-                <NavLink to="/admin/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
+                <NavLink to="/admin/documents" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>
                 </NavLink>
               )}
               {menuVisible("forms") && (
-                <NavLink to="/admin/forms" className="sidebar-link" title={collapsed ? "Forms" : undefined} onClick={() => setMobileOpen(false)}>
+                <NavLink to="/admin/forms" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileText size={18} />
                   <span className="s-label">Forms</span>
                 </NavLink>
               )}
               {menuVisible("schools") && (
-                <NavLink to="/admin/schools" className="sidebar-link" title={collapsed ? "Schools" : undefined} onClick={() => setMobileOpen(false)}>
+                <NavLink to="/admin/schools" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <School size={18} />
                   <span className="s-label">Schools</span>
                 </NavLink>
               )}
-              <NavLink to="/admin/settings" className="sidebar-link" title={collapsed ? "Settings" : undefined} onClick={() => setMobileOpen(false)}>
+              {menuVisible("reports") && (
+                <NavLink to="/admin/reports" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
+                  <BarChart3 size={18} />
+                  <span className="s-label">Reports</span>
+                </NavLink>
+              )}
+              <NavLink to="/admin/settings" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                 <Settings size={18} />
                 <span className="s-label">Settings</span>
               </NavLink>
@@ -253,14 +265,20 @@ export function AppShell({ children }: { children: ReactNode }) {
           )}
           {(user?.role === "staff" || user?.role === "cdm_contact") && (
             <>
-              <NavLink to="/staff" className="sidebar-link" end title={collapsed ? "Submissions" : undefined} onClick={() => setMobileOpen(false)}>
+              <NavLink to="/staff" className="sidebar-link" end onClick={() => setSidebarOpen(false)}>
                 <MessageSquare size={18} />
                 <span className="s-label">Submissions</span>
               </NavLink>
               {showDocuments && menuVisible("documents") && (
-                <NavLink to="/staff/documents" className="sidebar-link" title={collapsed ? "Documents" : undefined} onClick={() => setMobileOpen(false)}>
+                <NavLink to="/staff/documents" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>
+                </NavLink>
+              )}
+              {menuVisible("reports") && (
+                <NavLink to="/staff/reports" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
+                  <BarChart3 size={18} />
+                  <span className="s-label">Reports</span>
                 </NavLink>
               )}
             </>

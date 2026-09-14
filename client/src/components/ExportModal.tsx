@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { api, getToken, ApiError } from "../lib/api";
+import ColumnsPicker, { cellText } from "./ColumnsPicker";
 import type { ExportColumn, ExportPreview, Form } from "../types";
 
 interface Props {
@@ -88,13 +89,10 @@ export default function ExportModal({
     else setChecked(new Set(all));
   };
 
-  const allChecked = availableColumns.length > 0 && availableColumns.every((c) => checked.has(c.key));
-
   const selectedColumns: ExportColumn[] = useMemo(
     () => availableColumns.filter((c) => checked.has(c.key)),
     [availableColumns, checked]
   );
-
   if (!open) return null;
 
   const handleExport = async () => {
@@ -188,44 +186,13 @@ export default function ExportModal({
             </div>
           ) : (
             <>
-              <h3
-                style={{
-                  fontSize: 13,
-                  textTransform: "uppercase",
-                  letterSpacing: "0.05em",
-                  color: "var(--text-muted)",
-                  marginBottom: 8,
-                  fontWeight: 700,
-                }}
-              >
-                Select columns to export
-              </h3>
-              <div className="col-picker">
-                <div className="cp-head">
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, cursor: "pointer" }}>
-                    <input type="checkbox" checked={allChecked} onChange={toggleAll} />
-                    Select all
-                  </label>
-                  <span>{selectedColumns.length} selected</span>
-                </div>
-                <div className="cp-grid">
-                  {availableColumns.map((c) => (
-                    <div
-                      key={c.key}
-                      className={`cp-item ${!checked.has(c.key) ? "dim" : ""}`}
-                      onClick={() => toggleColumn(c.key)}
-                    >
-                      <input
-                        type="checkbox"
-                        checked={checked.has(c.key)}
-                        onChange={() => toggleColumn(c.key)}
-                      />
-                      <span>{c.label}</span>
-                      {c.staff_only && <span className="badge badge-slate tag">Staff</span>}
-                    </div>
-                  ))}
-                </div>
-              </div>
+              <ColumnsPicker
+                columns={availableColumns}
+                checked={checked}
+                onToggle={toggleColumn}
+                onToggleAll={toggleAll}
+                heading="Select columns to export"
+              />
 
               {!isStaff && (
                 <div className="file-note" style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
@@ -256,7 +223,7 @@ export default function ExportModal({
                         {preview.rows.slice(0, 8).map((r, i) => (
                           <tr key={i}>
                             {selectedColumns.map((c) => (
-                              <td key={c.key}>{previewCell(r[c.key])}</td>
+                              <td key={c.key}>{cellText(r[c.key])}</td>
                             ))}
                           </tr>
                         ))}
@@ -286,9 +253,3 @@ export default function ExportModal({
   );
 }
 
-function previewCell(v: unknown): string {
-  if (v === null || v === undefined || v === "") return "—";
-  if (Array.isArray(v)) return v.join(", ");
-  if (typeof v === "object") return JSON.stringify(v);
-  return String(v);
-}

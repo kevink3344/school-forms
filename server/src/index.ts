@@ -15,6 +15,7 @@ import { formsRouter } from "./routes/forms.js";
 import { submissionsRouter } from "./routes/submissions.js";
 import { organizationsRouter } from "./routes/organizations.js";
 import { exportRouter } from "./routes/export.js";
+import { reportsRouter } from "./routes/reports.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { documentsRouter } from "./routes/documents.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
@@ -88,6 +89,7 @@ app.use("/api/forms", formsRouter);
 app.use("/api/submissions", submissionsRouter);
 app.use("/api/organizations", organizationsRouter);
 app.use("/api/export", exportRouter);
+app.use("/api/reports", reportsRouter);
 app.use("/api/webhook", webhookRouter);
 app.use("/api/documents", documentsRouter);
 
@@ -144,7 +146,23 @@ const server = app.listen(env.port, () => {
 async function warmDb() {
   const maxAttempts = 40;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-    const ok = await initDb();
+    // initDb() RE-THROWS on failure (it clears initPromise so a later call can
+    // retry). Without this try/catch the rejection escapes `void warmDb()` as an
+    // unhandled rejection and crashes the process on the first hard failure —
+    // which is exactly what happened when the serverless wake exceeded the
+    // per-connection retry budget. Swallow it here and keep looping.
+    let ok = false;
+    try {
+      ok = await initDb();
+    } catch (err) {
+      if (attempt === maxAttempts) {
+        // eslint-disable-next-line no-console
+        console.error(
+          "[server] DB init error on final attempt:",
+          err instanceof Error ? err.message : err
+        );
+      }
+    }
     if (ok) {
       // eslint-disable-next-line no-console
       console.log("[server] DB is ready.");

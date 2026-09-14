@@ -632,7 +632,54 @@ export const DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_documents_submission')
      CREATE INDEX IX_documents_submission ON dbo.documents(submission_id);`,
+
+  // Saved Reports views — a named, per-user report configuration: which form,
+  // which filters, which columns, and which export format. `filters` and
+  // `columns` are JSON blobs (same rationale as dbo.forms.view_columns) so the
+  // filter contract can grow without a migration. Created last because it
+  // references both dbo.users and dbo.forms.
+  `IF OBJECT_ID('dbo.report_views', 'U') IS NULL
+   CREATE TABLE dbo.report_views (
+     id              INT IDENTITY(1,1) PRIMARY KEY,
+     user_id         INT NOT NULL,
+     organization_id INT NULL,
+     name            NVARCHAR(120) NOT NULL,
+     form_id         INT NOT NULL,
+     filters         NVARCHAR(MAX) NULL,
+     columns         NVARCHAR(MAX) NULL,
+     format          NVARCHAR(10) NOT NULL CONSTRAINT DF_report_views_format DEFAULT 'csv',
+     is_default      BIT NOT NULL CONSTRAINT DF_report_views_is_default DEFAULT 0,
+     last_used_at    DATETIME2 NULL,
+     created_at      DATETIME2 NOT NULL CONSTRAINT DF_report_views_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at      DATETIME2 NOT NULL CONSTRAINT DF_report_views_updated_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_report_views_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE,
+     CONSTRAINT FK_report_views_form FOREIGN KEY (form_id) REFERENCES dbo.forms(id) ON DELETE CASCADE
+   );
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_report_views_user_name')
+     CREATE UNIQUE INDEX UX_report_views_user_name ON dbo.report_views(user_id, name);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_report_views_user')
+     CREATE INDEX IX_report_views_user ON dbo.report_views(user_id);`,
 ];
+
+// A saved report configuration. `filters`/`columns` are JSON strings in the DB
+// but are exposed to the API as parsed objects (see queries.listReportViews).
+export interface ReportView {
+  id: number;
+  user_id: number;
+  organization_id: number | null;
+  name: string;
+  form_id: number;
+  filters: string | null;
+  columns: string | null;
+  format: string;
+  is_default: boolean;
+  last_used_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+export const REPORT_FORMATS = ["csv", "xlsx", "pdf"] as const;
+export type ReportFormat = (typeof REPORT_FORMATS)[number];
 
 // -----------------------------------------------------------------------------
 // Helpers

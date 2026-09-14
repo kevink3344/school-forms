@@ -35,7 +35,7 @@ export function documentsEnabledFor(raw: string | null | undefined, role: Role):
 
 // The menu items that can be toggled from Settings → Menu Settings. Keep in sync
 // with the server's MENU_ITEM_KEYS.
-export const MENU_ITEMS = ["documents", "forms", "schools"] as const;
+export const MENU_ITEMS = ["documents", "forms", "schools", "reports"] as const;
 export type MenuItemKey = (typeof MENU_ITEMS)[number];
 
 // Human-facing label for a menu item.
@@ -43,6 +43,7 @@ export const MENU_ITEM_LABELS: Record<MenuItemKey, string> = {
   documents: "Documents",
   forms: "Forms",
   schools: "Schools",
+  reports: "Reports",
 };
 
 // Every menu item visible to every role — the default when the setting is unset.

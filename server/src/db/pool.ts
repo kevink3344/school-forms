@@ -38,7 +38,10 @@ function sleep(ms: number): Promise<void> {
 // idle and signals via ECONNRESET on the first login after wake (can exceed
 // ~4 minutes). Retry until the handshake succeeds.
 // -----------------------------------------------------------------------------
-async function connectWithRetry(attempts = 20, baseDelayMs = 3000): Promise<ConnectionPool> {
+// Retry budget sized for Azure SQL Serverless cold starts, which can exceed
+// several minutes. 60 attempts with a 60s backoff cap gives roughly 25 minutes
+// of headroom before giving up — the caller (warmDb) then keeps looping.
+async function connectWithRetry(attempts = 60, baseDelayMs = 3000): Promise<ConnectionPool> {
   for (let attempt = 1; attempt <= attempts; attempt++) {
     try {
       const newPool = await new sql.ConnectionPool(config).connect();
@@ -53,8 +56,8 @@ async function connectWithRetry(attempts = 20, baseDelayMs = 3000): Promise<Conn
       if (attempt === attempts) {
         throw err;
       }
-      // Exponential backoff with jitter; cap at 30s.
-      const backoff = Math.min(baseDelayMs * Math.pow(1.5, attempt - 1), 30000);
+      // Exponential backoff with jitter; cap at 60s.
+      const backoff = Math.min(baseDelayMs * Math.pow(1.5, attempt - 1), 60000);
       const jitter = backoff * (0.5 + Math.random() * 0.5);
       // eslint-disable-next-line no-console
       console.error(
@@ -133,11 +136,29 @@ async function backfillSubmissionIds(db: ConnectionPool): Promise<void> {
   }
 }
 
+// Single-flight pool acquisition. `pool` is only assigned once a connection
+// succeeds, so a naive `if (!pool)` guard lets every concurrent caller start its
+// OWN connectWithRetry() loop while the first is still awaiting — which is what
+// produced interleaved, constantly-resetting retry counters (and many parallel
+// connection storms) during the slow serverless wake. Sharing one in-flight
+// promise means all callers await the SAME connection attempt.
+let poolPromise: Promise<ConnectionPool> | null = null;
+
 export async function getPool(): Promise<ConnectionPool> {
-  if (!pool) {
-    pool = await connectWithRetry();
+  if (pool) return pool;
+  if (!poolPromise) {
+    poolPromise = connectWithRetry()
+      .then((p) => {
+        pool = p;
+        return p;
+      })
+      .catch((err) => {
+        // Allow a later call to retry from scratch after a hard failure.
+        poolPromise = null;
+        throw err;
+      });
   }
-  return pool;
+  return poolPromise;
 }
 
 // -----------------------------------------------------------------------------
@@ -179,4 +200,5 @@ export function resetDbPool(): void {
   }
   dbReady = false;
   initPromise = null;
+  poolPromise = null;
 }

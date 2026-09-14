@@ -896,6 +896,10 @@ export async function listSubmissions(params: {
   status?: string | null;
   from?: string | null;
   to?: string | null;
+  // Free-text row filter (Reports). Matches the submission's public id, the
+  // school name, or ANY answer value. Applied in SQL so the preview grid and
+  // every export format see exactly the same rows (WYSIWYG export).
+  q?: string | null;
 }): Promise<SubmissionRow[]> {
   const p: Record<string, unknown> = {};
   const clauses: string[] = [];
@@ -922,6 +926,22 @@ export async function listSubmissions(params: {
   if (params.to) {
     clauses.push("s.submitted_at <= @to");
     p.to = params.to;
+  }
+  if (params.q && params.q.trim()) {
+    // Escape LIKE wildcards so a literal `%` or `_` in the search term matches
+    // itself; the paired `ESCAPE '\'` clauses tell SQL Server about the escape.
+    const escaped = params.q.trim().replace(/[\\%_\[]/g, (m) => `\\${m}`);
+    p.q = `%${escaped}%`;
+    // `submission_values.value` is stored serialized (text/JSON), so this is a
+    // textual match — checkbox arrays match their stored text representation.
+    // An OPENJSON upgrade would give token-accurate array matching later.
+    clauses.push(
+      `(s.public_id LIKE @q ESCAPE '\\'` +
+        ` OR sch.name LIKE @q ESCAPE '\\'` +
+        ` OR EXISTS (SELECT 1 FROM dbo.submission_values svq` +
+        ` WHERE svq.submission_id = s.id` +
+        ` AND CAST(svq.value AS NVARCHAR(MAX)) LIKE @q ESCAPE '\\'))`
+    );
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<SubmissionRow>(
@@ -1025,6 +1045,47 @@ export async function listSubmissionValues(submissionId: number): Promise<Submis
     staff_only: r.staff_only,
     options: parseFormFieldOptions(r.rawOptions),
   }));
+}
+
+// Bulk variant of listSubmissionValues used by the export/report table builder.
+// Groups values by submission id so a whole result set is fetched with a handful
+// of chunked queries instead of one query per submission (avoids an N+1 storm on
+// large reports). SQL Server caps a request at 2100 parameters, so chunk at 1000.
+const VALUE_BATCH_SIZE = 1000;
+
+export async function listSubmissionValuesBatch(
+  submissionIds: number[]
+): Promise<Map<number, { field_id: number; value: SubmissionValue["value"] }[]>> {
+  const out = new Map<number, { field_id: number; value: SubmissionValue["value"] }[]>();
+  if (submissionIds.length === 0) return out;
+
+  for (let i = 0; i < submissionIds.length; i += VALUE_BATCH_SIZE) {
+    const chunk = submissionIds.slice(i, i + VALUE_BATCH_SIZE);
+    const params: Record<string, unknown> = {};
+    const placeholders = chunk.map((id, idx) => {
+      params[`s${idx}`] = id;
+      return `@s${idx}`;
+    });
+    interface BatchRow {
+      submission_id: number;
+      field_id: number;
+      value: string | number | boolean | null;
+      field_type: string;
+    }
+    const rows = await execute<BatchRow>(
+      `SELECT sv.submission_id, sv.field_id, sv.value, ff.type AS field_type
+       FROM dbo.submission_values sv
+       JOIN dbo.form_fields ff ON ff.id = sv.field_id
+       WHERE sv.submission_id IN (${placeholders.join(", ")})`,
+      params
+    );
+    for (const r of rows) {
+      const list = out.get(r.submission_id) ?? [];
+      list.push({ field_id: r.field_id, value: parseSubmissionValue(r.value, r.field_type) });
+      out.set(r.submission_id, list);
+    }
+  }
+  return out;
 }
 
 export async function listComments(submissionId: number): Promise<CommentRow[]> {
@@ -1457,5 +1518,235 @@ export async function setViewColumns(formId: number, viewKeys: string[]): Promis
   await execute(
     `UPDATE dbo.forms SET view_columns = @value, updated_at = SYSUTCDATETIME() WHERE id = @formId`,
     { value, formId }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// Saved Reports views (dbo.report_views)
+//
+// A view belongs to exactly one user — every read and mutation is scoped by
+// user_id in the WHERE clause, so a caller can never touch another user's row
+// even if they guess the id.
+// -----------------------------------------------------------------------------
+export interface ReportViewRow {
+  id: number;
+  user_id: number;
+  organization_id: number | null;
+  name: string;
+  form_id: number;
+  // Parsed from the stored JSON. `filters` is an object (possibly empty);
+  // `columns` is a `field_N` array or null meaning "all visible columns".
+  filters: Record<string, unknown>;
+  columns: string[] | null;
+  format: string;
+  is_default: boolean;
+  last_used_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+interface RawReportViewRow {
+  id: number;
+  user_id: number;
+  organization_id: number | null;
+  name: string;
+  form_id: number;
+  filters: string | null;
+  columns: string | null;
+  format: string;
+  is_default: boolean;
+  last_used_at: Date | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+const REPORT_VIEW_COLUMNS = `id, user_id, organization_id, name, form_id, filters, columns,
+        format, is_default, last_used_at, created_at, updated_at`;
+
+function parseJsonRecord(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+      return parsed as Record<string, unknown>;
+    }
+  } catch {
+    // fall through — a corrupt blob degrades to "no filters"
+  }
+  return {};
+}
+
+function parseJsonKeyArray(raw: string | null): string[] | null {
+  if (!raw) return null;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      const keys = parsed.filter((k): k is string => typeof k === "string" && /^field_\d+$/.test(k));
+      return keys.length ? keys : null;
+    }
+  } catch {
+    // fall through
+  }
+  return null;
+}
+
+function toReportViewRow(r: RawReportViewRow): ReportViewRow {
+  return {
+    ...r,
+    filters: parseJsonRecord(r.filters),
+    columns: parseJsonKeyArray(r.columns),
+    is_default: Boolean(r.is_default),
+  };
+}
+
+export async function listReportViews(userId: number): Promise<ReportViewRow[]> {
+  const rows = await execute<RawReportViewRow>(
+    `SELECT ${REPORT_VIEW_COLUMNS} FROM dbo.report_views
+     WHERE user_id = @userId
+     ORDER BY is_default DESC, COALESCE(last_used_at, updated_at) DESC, name ASC`,
+    { userId }
+  );
+  return rows.map(toReportViewRow);
+}
+
+export async function getReportView(id: number, userId: number): Promise<ReportViewRow | null> {
+  const rows = await execute<RawReportViewRow>(
+    `SELECT ${REPORT_VIEW_COLUMNS} FROM dbo.report_views
+     WHERE id = @id AND user_id = @userId`,
+    { id, userId }
+  );
+  return rows[0] ? toReportViewRow(rows[0]) : null;
+}
+
+// Look up a view by its (user-unique) name — used to return a friendly 409
+// instead of letting the unique index throw a raw SQL error.
+export async function findReportViewByName(
+  userId: number,
+  name: string
+): Promise<ReportViewRow | null> {
+  const rows = await execute<RawReportViewRow>(
+    `SELECT ${REPORT_VIEW_COLUMNS} FROM dbo.report_views
+     WHERE user_id = @userId AND name = @name`,
+    { userId, name }
+  );
+  return rows[0] ? toReportViewRow(rows[0]) : null;
+}
+
+async function clearDefaultReportView(userId: number): Promise<void> {
+  await execute(
+    `UPDATE dbo.report_views SET is_default = 0, updated_at = SYSUTCDATETIME()
+     WHERE user_id = @userId AND is_default = 1`,
+    { userId }
+  );
+}
+
+export async function createReportView(input: {
+  userId: number;
+  organizationId: number | null;
+  name: string;
+  formId: number;
+  filters: Record<string, unknown>;
+  columns: string[] | null;
+  format: string;
+  isDefault: boolean;
+}): Promise<ReportViewRow> {
+  if (input.isDefault) await clearDefaultReportView(input.userId);
+  const rows = await execute<{ id: number }>(
+    `INSERT INTO dbo.report_views
+       (user_id, organization_id, name, form_id, filters, columns, format, is_default)
+     OUTPUT INSERTED.id
+     VALUES (@userId, @organizationId, @name, @formId, @filters, @columns, @format, @isDefault)`,
+    {
+      userId: input.userId,
+      organizationId: input.organizationId,
+      name: input.name,
+      formId: input.formId,
+      filters: JSON.stringify(input.filters ?? {}),
+      columns: input.columns && input.columns.length ? JSON.stringify(input.columns) : null,
+      format: input.format,
+      isDefault: input.isDefault,
+    }
+  );
+  const created = await getReportView(rows[0].id, input.userId);
+  if (!created) throw new Error("Failed to load the created report view");
+  return created;
+}
+
+export async function updateReportView(
+  id: number,
+  userId: number,
+  patch: {
+    name?: string;
+    formId?: number;
+    filters?: Record<string, unknown>;
+    columns?: string[] | null;
+    format?: string;
+    isDefault?: boolean;
+  }
+): Promise<ReportViewRow | null> {
+  if (patch.isDefault) await clearDefaultReportView(userId);
+
+  const sets: string[] = ["updated_at = SYSUTCDATETIME()"];
+  const p: Record<string, unknown> = { id, userId };
+  if (patch.name !== undefined) {
+    sets.push("name = @name");
+    p.name = patch.name;
+  }
+  if (patch.formId !== undefined) {
+    sets.push("form_id = @formId");
+    p.formId = patch.formId;
+  }
+  if (patch.filters !== undefined) {
+    sets.push("filters = @filters");
+    p.filters = JSON.stringify(patch.filters ?? {});
+  }
+  if (patch.columns !== undefined) {
+    sets.push("columns = @columns");
+    p.columns = patch.columns && patch.columns.length ? JSON.stringify(patch.columns) : null;
+  }
+  if (patch.format !== undefined) {
+    sets.push("format = @format");
+    p.format = patch.format;
+  }
+  if (patch.isDefault !== undefined) {
+    sets.push("is_default = @isDefault");
+    p.isDefault = patch.isDefault;
+  }
+
+  const updated = await execute<{ id: number }>(
+    `UPDATE dbo.report_views SET ${sets.join(", ")}
+     OUTPUT INSERTED.id
+     WHERE id = @id AND user_id = @userId`,
+    p
+  );
+  if (!updated[0]) return null;
+  return getReportView(id, userId);
+}
+
+export async function deleteReportView(id: number, userId: number): Promise<boolean> {
+  const rows = await execute<{ id: number }>(
+    `DELETE FROM dbo.report_views OUTPUT DELETED.id WHERE id = @id AND user_id = @userId`,
+    { id, userId }
+  );
+  return rows.length > 0;
+}
+
+export async function setDefaultReportView(id: number, userId: number): Promise<ReportViewRow | null> {
+  const existing = await getReportView(id, userId);
+  if (!existing) return null;
+  await execute(
+    `UPDATE dbo.report_views
+     SET is_default = CASE WHEN id = @id THEN 1 ELSE 0 END, updated_at = SYSUTCDATETIME()
+     WHERE user_id = @userId`,
+    { id, userId }
+  );
+  return getReportView(id, userId);
+}
+
+// Stamp "last used" so the Reports page can auto-apply the most recent view.
+export async function touchReportView(id: number, userId: number): Promise<void> {
+  await execute(
+    `UPDATE dbo.report_views SET last_used_at = SYSUTCDATETIME() WHERE id = @id AND user_id = @userId`,
+    { id, userId }
   );
 }

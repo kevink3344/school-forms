@@ -17,7 +17,7 @@ export const MENU_ITEMS_KEY = "menu_items";
 
 // The menu items that can be toggled from Settings. Kept in sync with the
 // client's MENU_ITEMS in lib/settings.ts.
-export const MENU_ITEM_KEYS = ["documents", "forms", "schools"] as const;
+export const MENU_ITEM_KEYS = ["documents", "forms", "schools", "reports"] as const;
 export type MenuItemKey = (typeof MENU_ITEM_KEYS)[number];
 
 // Allow-list of keys that can be read/written. Never let an arbitrary key hit

@@ -1,0 +1,212 @@
+/* ============================================================================
+   School Forms — User Guide print stylesheet
+   Branded to match the app: WCPSS navy #165788 + orange #df6d1c, Open Sans.
+   Used by `npm run guide:pdf` (md-to-pdf) to render docs/guides/user-guide.md.
+   ========================================================================== */
+
+@import url('https://fonts.googleapis.com/css2?family=Open+Sans:ital,wght@0,400;0,600;0,700;1,400&family=Roboto+Mono:wght@400;500&display=swap');
+
+:root {
+  --navy: #165788;
+  --navy-strong: #10405f;
+  --orange: #df6d1c;
+  --ink: #23303a;
+  --muted: #7b8794;
+  --line: #dde3ea;
+  --line-soft: #eef1f5;
+  --tint: #f2f7fb;
+  --orange-tint: #fdf1e7;
+}
+
+/* ---------------------------------------------------------------------------
+   Page setup
+   -------------------------------------------------------------------------- */
+@page {
+  size: Letter;
+  margin: 20mm 18mm 18mm 18mm;
+}
+
+body {
+  font-family: 'Open Sans', 'Segoe UI', sans-serif;
+  font-size: 10.5pt;
+  line-height: 1.55;
+  color: var(--ink);
+  margin: 0;
+}
+
+/* ---------------------------------------------------------------------------
+   Cover page
+   -------------------------------------------------------------------------- */
+.cover {
+  text-align: center;
+  padding-top: 70mm;
+  page-break-after: always;
+}
+.cover h1 {
+  font-size: 40pt;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 4mm;
+  letter-spacing: -0.02em;
+}
+.cover h2 {
+  font-size: 20pt;
+  font-weight: 600;
+  color: var(--ink);
+  margin: 0 0 24mm;
+  border: none;
+  padding: 0;
+}
+.cover p {
+  font-size: 12pt;
+  color: var(--muted);
+  margin: 2mm 0;
+}
+.cover strong {
+  color: var(--navy);
+  font-size: 13pt;
+}
+
+/* ---------------------------------------------------------------------------
+   Headings
+   -------------------------------------------------------------------------- */
+h1 {
+  font-size: 22pt;
+  font-weight: 700;
+  color: var(--navy);
+  margin: 0 0 6mm;
+  padding-bottom: 3mm;
+  border-bottom: 3px solid var(--orange);
+  page-break-before: always;
+  page-break-after: avoid;
+}
+/* The first h1 after the contents should not force an extra blank page. */
+.cover + h1,
+h1:first-of-type {
+  page-break-before: avoid;
+}
+
+h2 {
+  font-size: 15pt;
+  font-weight: 700;
+  color: var(--ink);
+  margin: 8mm 0 3mm;
+  page-break-after: avoid;
+}
+
+h3 {
+  font-size: 12pt;
+  font-weight: 700;
+  color: var(--navy-strong);
+  margin: 6mm 0 2mm;
+  page-break-after: avoid;
+}
+
+/* ---------------------------------------------------------------------------
+   Body text
+   -------------------------------------------------------------------------- */
+p { margin: 0 0 3mm; }
+
+a { color: var(--navy); text-decoration: none; }
+
+strong { color: var(--ink); font-weight: 700; }
+
+code {
+  font-family: 'Roboto Mono', 'Courier New', monospace;
+  font-size: 9pt;
+  background: var(--tint);
+  border: 1px solid var(--line);
+  border-radius: 2px;
+  padding: 0.5mm 1.5mm;
+  color: var(--navy-strong);
+}
+
+/* ---------------------------------------------------------------------------
+   Lists
+   -------------------------------------------------------------------------- */
+ul, ol {
+  margin: 0 0 3mm;
+  padding-left: 6mm;
+}
+li { margin-bottom: 1.5mm; }
+
+/* ---------------------------------------------------------------------------
+   Tables
+   -------------------------------------------------------------------------- */
+table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 3mm 0 5mm;
+  font-size: 9.5pt;
+  page-break-inside: avoid;
+}
+thead th {
+  background: var(--navy);
+  color: #fff;
+  text-align: left;
+  font-size: 8.5pt;
+  font-weight: 700;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  padding: 2.5mm 3mm;
+}
+tbody td {
+  padding: 2.5mm 3mm;
+  border-bottom: 1px solid var(--line-soft);
+  vertical-align: top;
+}
+tbody tr:nth-child(even) { background: #fafbfc; }
+
+/* ---------------------------------------------------------------------------
+   Images (screenshots)
+   -------------------------------------------------------------------------- */
+img {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 4mm auto 2mm;
+  border: 1px solid var(--line);
+  border-radius: 3px;
+  page-break-inside: avoid;
+}
+
+/* ---------------------------------------------------------------------------
+   Blockquotes → callout boxes (Note / Warning)
+   -------------------------------------------------------------------------- */
+blockquote {
+  margin: 4mm 0;
+  padding: 3mm 4mm;
+  background: var(--tint);
+  border-left: 3px solid var(--navy);
+  border-radius: 3px;
+  font-size: 9.5pt;
+  page-break-inside: avoid;
+}
+blockquote p { margin: 0; }
+blockquote strong { color: var(--navy-strong); }
+
+/* Warning callouts (blockquotes starting with "Warning") get the orange accent. */
+blockquote.warning {
+  background: var(--orange-tint);
+  border-left-color: var(--orange);
+}
+
+/* ---------------------------------------------------------------------------
+   Contents list — tighter, no bullets
+   -------------------------------------------------------------------------- */
+.contents ul {
+  list-style: none;
+  padding-left: 0;
+}
+.contents li { margin-bottom: 1mm; }
+
+/* ---------------------------------------------------------------------------
+   Utilities
+   -------------------------------------------------------------------------- */
+.page-break { page-break-after: always; }
+
+/* Avoid a heading stranded at the bottom of a page. */
+h1 + p, h2 + p, h3 + p { page-break-before: avoid; }
+
+/* Keep a screenshot with the paragraph that introduces it. */
+p + img { page-break-before: avoid; }

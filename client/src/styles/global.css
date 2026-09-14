@@ -39,6 +39,11 @@
   --radius-sm: 2px;
   --shadow-card: 0 4px 14px rgba(22, 87, 136, 0.14);
   --shadow-2: 0 10px 24px rgba(16, 64, 95, 0.18);
+
+  /* Layout. Single source of truth for the banner height so the off-canvas
+     sidebar and its backdrop can start below it and leave the hamburger
+     clickable while the drawer is open. Overridden at the mobile breakpoint. */
+  --banner-h: 64px;
 }
 
 * { box-sizing: border-box; }
@@ -76,9 +81,12 @@ p { margin: 0; }
   align-items: center;
   gap: 16px;
   padding: 0 24px;
-  height: 64px;
+  height: var(--banner-h);
   flex-shrink: 0;
   border-bottom: 1px solid var(--border);
+  /* Above the open drawer so the hamburger stays clickable. */
+  position: relative;
+  z-index: 201;
 }
 .banner .logo { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 15px; }
 .banner .logo .logo-badge {
@@ -103,12 +111,27 @@ p { margin: 0; }
 /* Body layout */
 .body-flex { display: flex; flex: 1; min-height: 0; }
 
-/* Sidebar — light, minimal */
+/* Sidebar — off-canvas drawer, closed by default at every width.
+   Starts below the banner so the hamburger in it stays clickable. */
 .sidebar {
-  width: 180px; background: var(--card-bg); color: var(--text); padding: 16px 12px; flex-shrink: 0;
+  position: fixed;
+  top: var(--banner-h);
+  bottom: 0;
+  left: 0;
+  width: 240px;
+  z-index: 200;
+  overflow-y: auto;
+  background: var(--card-bg); color: var(--text); padding: 16px 12px;
   display: flex; flex-direction: column; gap: 2px;
-  transition: width .2s ease;
   border-right: 1px solid var(--border);
+  transform: translateX(-100%);
+  visibility: hidden;
+  transition: transform .25s ease, visibility .25s ease;
+}
+.sidebar.open {
+  transform: translateX(0);
+  visibility: visible;
+  box-shadow: 0 0 30px rgba(0, 0, 0, 0.25);
 }
 .sidebar .nav-label {
   font-size: 11px; text-transform: uppercase; letter-spacing: 0.08em; color: var(--text-muted);
@@ -123,17 +146,19 @@ p { margin: 0; }
 .sidebar-link.active { background: var(--tint); color: var(--accent); font-weight: 700; }
 .sidebar-link .s-label { font-size: 14px; }
 
-/* Sidebar collapse toggle (in banner, next to title) */
+/* Sidebar toggle (in banner, next to the logo) */
 .banner-toggle {
   flex-shrink: 0; color: var(--text-muted);
 }
 .banner-toggle:hover { background: var(--panel-bg); color: var(--text); }
 
-/* Collapsed (icon-only) state */
-.sidebar.collapsed { width: 64px; padding: 16px 8px; }
-.sidebar.collapsed .sidebar-link { justify-content: center; padding: 12px 8px; }
-.sidebar.collapsed .sidebar-link .s-label,
-.sidebar.collapsed .nav-label { display: none; }
+/* Dimmed backdrop behind the open drawer. Starts below the banner too, so it
+   never covers the hamburger. */
+.sidebar-overlay {
+  position: fixed; inset: var(--banner-h) 0 0 0; background: rgba(0, 0, 0, 0.45); z-index: 199;
+  opacity: 0; visibility: hidden; transition: opacity .2s ease, visibility .2s ease;
+}
+.sidebar-overlay.open { opacity: 1; visibility: visible; }
 
 /* Main */
 .main { flex: 1; padding: 20px 24px; min-width: 0; }
@@ -412,6 +437,16 @@ table.grid tbody tr.grid-row:hover { background: var(--panel-bg); }
 .cp-item.dim { color: var(--text-muted); }
 .cp-item .tag { margin-left: auto; }
 
+/* Column picker inside the Reports slide-out panel. The drawer is narrow and
+   full-height, so the 2-up grid collapses to one column and each row drops the
+   right-hand divider that only exists to separate the two columns. */
+.drawer-report-columns .col-picker .cp-grid { grid-template-columns: 1fr; }
+.drawer-report-columns .col-picker .cp-item,
+.drawer-report-columns .col-picker .cp-item:nth-child(2n) { border-right: none; }
+.drawer-report-columns .col-picker .cp-item:last-child { border-bottom: none; }
+.drawer-report-columns .drawer-body .file-note:first-child { margin-bottom: 14px; }
+.drawer-report-columns .drawer-body .file-note:last-child { margin-top: 14px; }
+
 .export-preview { margin-top: 18px; }
 .export-preview h3 { font-size: 13px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--text-muted); margin: 0 0 8px; font-weight: 700; }
 .export-preview .preview-table { border: 1px solid var(--border); border-radius: var(--radius); overflow: auto; max-height: 260px; }
@@ -532,10 +567,12 @@ table.grid tbody tr.grid-row:hover { background: var(--panel-bg); }
    ========================================================================= */
 @media (max-width: 768px) {
   /* Shell: turn the fixed sidebar into an off-canvas drawer */
+  :root {
+    --banner-h: 52px;
+  }
   .banner {
     padding: 0 12px;
     gap: 8px;
-    height: 52px;
   }
   .banner .logo {
     gap: 8px;
@@ -571,51 +608,9 @@ table.grid tbody tr.grid-row:hover { background: var(--panel-bg); }
     position: relative;
   }
 
-  /* Sidebar as a slide-in drawer (desktop always-visible stays as-is) */
+  /* Narrower drawer on phones */
   .sidebar {
-    position: fixed;
-    top: 0;
-    bottom: 0;
-    left: 0;
     width: min(75vw, 280px);
-    height: 100vh;
-    z-index: 200;
-    transform: translateX(-100%);
-    transition: transform 0.25s ease;
-    overflow-y: auto;
-    padding-top: 16px;
-  }
-  .sidebar.mobile-open {
-    transform: translateX(0);
-    box-shadow: 0 0 30px rgba(0, 0, 0, 0.3);
-  }
-  /* On mobile the sidebar is always full-width; ignore the collapsed pill state */
-  .sidebar.collapsed {
-    width: min(75vw, 280px);
-    padding: 16px 10px 16px;
-  }
-  .sidebar.collapsed .sidebar-link {
-    justify-content: flex-start;
-    padding: 12px;
-  }
-  .sidebar.collapsed .sidebar-link .s-label,
-  .sidebar.collapsed .nav-label {
-    display: revert;
-  }
-
-  /* Dimmed backdrop behind the open drawer */
-  .sidebar-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.45);
-    z-index: 199;
-    opacity: 0;
-    visibility: hidden;
-    transition: opacity 0.2s ease;
-  }
-  .sidebar-overlay.open {
-    opacity: 1;
-    visibility: visible;
   }
 
   .main {
