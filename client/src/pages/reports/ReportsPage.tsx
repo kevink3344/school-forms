@@ -461,7 +461,9 @@ export default function ReportsPage() {
     <tr key={String(r.submission_public_id ?? i)}>
       <td className="cell-mono">{cellText(r.submitted_at)}</td>
       {gridColumns.map((c) => (
-        <td key={c.key}>{cellText(r[c.key])}</td>
+        <td key={c.key} className={c.staff_only ? "grid-col-staff" : undefined}>
+          {cellText(r[c.key])}
+        </td>
       ))}
     </tr>
   );
@@ -778,10 +780,16 @@ export default function ReportsPage() {
             <thead>
               <tr>
                 <th>Submitted</th>
+                {/* Same treatment as the Submissions grid: the staff-only column is
+                    marked by `.grid-col-staff` rather than a per-header badge. */}
                 {gridColumns.map((c) => (
-                  <th key={c.key}>
+                  <th
+                    key={c.key}
+                    className={c.staff_only ? "grid-col-staff" : undefined}
+                    aria-label={c.staff_only ? `${c.label} (staff only)` : undefined}
+                    title={c.staff_only ? "Staff-only column" : undefined}
+                  >
                     {c.label}
-                    {c.staff_only && <span className="badge badge-slate" style={{ marginLeft: 8 }}>Staff</span>}
                   </th>
                 ))}
               </tr>

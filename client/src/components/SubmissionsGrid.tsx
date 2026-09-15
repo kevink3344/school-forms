@@ -192,13 +192,18 @@ export default function SubmissionsGrid({
               {!hiddenBase.has(BASE_KEYS.status) && <th>Status</th>}
               {!hiddenBase.has(BASE_KEYS.submitted) && <th>Submitted</th>}
               {columns.map((c) => (
-                <th key={c.key}>
+                /* Staff-only columns carry no in-header badge: it cost a column's
+                   worth of width in a grid where width is the scarce resource, and
+                   it repeated the same word once per column. The column marks
+                   itself instead (`.grid-col-staff`) and these two attributes keep
+                   the meaning available to a screen reader and to a mouse hover. */
+                <th
+                  key={c.key}
+                  className={c.staff_only ? "grid-col-staff" : undefined}
+                  aria-label={c.staff_only ? `${c.label} (staff only)` : undefined}
+                  title={c.staff_only ? "Staff-only column" : undefined}
+                >
                   {c.label}
-                  {c.staff_only && (
-                    <span className="badge badge-slate tag" style={{ marginLeft: 6 }}>
-                      Staff
-                    </span>
-                  )}
                 </th>
               ))}
               {!hiddenBase.has(BASE_KEYS.actions) && <th style={{ width: 120 }}>Actions</th>}
@@ -399,7 +404,8 @@ function StaffCell({
   }, [isEditing, mode]);
 
   // Parent fields are shown but never edited — they belong to the parent, and the
-  // staff-only save path would mislabel the audit trail.
+  // staff-only save path would mislabel the audit trail. Staff-only columns opt
+  // into the `.grid-col-staff` wash via each of the branches below.
   if (!column.staff_only) {
     return (
       <td data-label={column.label} style={{ whiteSpace: "nowrap" }}>
@@ -419,14 +425,14 @@ function StaffCell({
     // show the in-flight value rather than a control the user can keep typing in.
     if (edit.saving) {
       return (
-        <td data-label={column.label} className="grid-cell-saving">
+        <td data-label={column.label} className="grid-col-staff grid-cell-saving">
           Saving…
         </td>
       );
     }
     if (mode === "menu") {
       return (
-        <td data-label={column.label} className="grid-editable">
+        <td data-label={column.label} className="grid-col-staff grid-editable">
           <GridOptionMenu
             type={type}
             options={field.options ?? []}
@@ -441,7 +447,7 @@ function StaffCell({
       );
     }
     return (
-      <td data-label={column.label} className="grid-editable">
+      <td data-label={column.label} className="grid-col-staff grid-editable">
         <div
           className="grid-editor"
           ref={editorRef}
@@ -477,7 +483,7 @@ function StaffCell({
   }
 
   return (
-    <td data-label={column.label} className="grid-editable">
+    <td data-label={column.label} className="grid-col-staff grid-editable">
       <span
         className={`grid-cell-value ${edit.savedKeys.has(key) ? "grid-cell-saved" : ""}`}
         role="button"

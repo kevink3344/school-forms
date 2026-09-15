@@ -34,6 +34,16 @@
   --filled-fg: #124a72;
   --line-soft: #eef1f5;
 
+  /* Staff-only grid columns. These columns used to carry a "Staff" badge in their
+     header, which cost a column's worth of width in a grid where width is the
+     scarce resource and repeated the same word once per column. A pastel wash
+     marks the whole column instead. Deliberately yellow rather than the orange
+     tints above: those read as attention states (a warning, a pending item),
+     where this only says "not for parents". */
+  --staff-tint: #fdf9e6;
+  --staff-tint-hover: #faf0c6;
+  --staff-tint-line: #ecdfab;
+
   /* Shape */
   --radius: 4px;
   --radius-sm: 2px;
@@ -556,10 +566,29 @@ table.grid tbody tr.grid-group-row > td {
 }
 .grid-cell-pinned .link-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
+/* Staff-only columns. The marker is the column, not a badge: a pastel wash across
+   the header and every cell, with a hairline down each edge so the run of staff
+   columns reads as one band. These tables set `border-collapse: collapse`, so two
+   adjacent staff columns share a single 1px line instead of doubling it.
+
+   Both hovers are re-stated because they would otherwise repaint the cell and make
+   the wash flicker to blue under the pointer: the generic `tr:hover` tint and the
+   `.grid-editable:hover` below it. `.grid-editable.grid-col-staff:hover` is (0,3,0)
+   and so outranks the plain `.grid-editable:hover`, which is what the extra class
+   buys. */
+table.grid thead th.grid-col-staff,
+table.grid tbody td.grid-col-staff {
+  background: var(--staff-tint);
+  border-left: 1px solid var(--staff-tint-line);
+  border-right: 1px solid var(--staff-tint-line);
+}
+table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover); }
+
 /* A staff-only value that is editable in place. The pencil is the affordance and
    only appears on hover so a dense grid does not read as a wall of icons. */
 .grid-editable { cursor: pointer; position: relative; }
 .grid-editable:hover { background: var(--tint); }
+.grid-editable.grid-col-staff:hover { background: var(--staff-tint-hover); }
 .grid-editable .cell-edit-hint {
   margin-left: 6px; color: var(--text-muted); opacity: 0; transition: opacity .15s; vertical-align: -2px;
 }
