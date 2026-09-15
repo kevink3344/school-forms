@@ -12,6 +12,11 @@ dist/
 build/
 *.tsbuildinfo
 
+# Guide artifacts. The PDF is generated from user-guide.md by
+# `npm run guide:pdf`, and images/ holds the screenshots that feed it.
+docs/guides/images/
+docs/guides/school-forms-user-guide.pdf
+
 # Logs
 logs/
 *.log
