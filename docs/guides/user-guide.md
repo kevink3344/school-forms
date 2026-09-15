@@ -411,11 +411,17 @@ Google sent, which is what makes a re-send possible.
 
 ### Filtering
 
-The log opens showing **Failed** attempts, because those are the ones you act on. Use the
-filters above the grid to change **Status** (`Failed` / `Succeeded` / `All`), pick a single
-**Form**, filter by **Secret** (`Accepted` / `Wrong` / `Missing`), search, or restrict a date
-range. The header shows how many attempts matched and how they split between succeeded and
-failed.
+The log opens showing **All** attempts, so nothing that arrived is hidden by a default you
+did not choose. Use the filters above the grid to narrow to **Status**
+(`All` / `Failed` / `Succeeded`), a single **Form**, a **Secret** result
+(`Accepted` / `Wrong` / `Missing`), a search term, or a date range. **Clear** resets every
+filter back to **All**. The header shows how many attempts matched and how they split between
+succeeded and failed, and the rows say which is which, so you can see the failures without
+filtering for them first.
+
+> **Tip:** the dashboard, the post-publish banner, and a form's design page link here with
+> the **Failed** filter already applied, and the page honours that — but opening the log from
+> **Settings** (or the menu) always starts from **All**.
 
 ### Re-sending a response after republishing a form
 
@@ -633,7 +639,7 @@ An administrator may have hidden it in **Settings → Menu Settings**. Ask them 
 The form is not published. An administrator must click **Publish**.
 
 **Responses sent from a Google Form are not appearing.**
-Open **Settings → Webhook Log** (administrators only) and look at the **Failed** filter — see
+Open **Settings → Webhook Log** (administrators only) and set **Status** to **Failed** — see
 [2.18 Webhook Log](#218-webhook-log). If the response was rejected because the form was
 unpublished, publish the form and click **Replay** on that row; the stored response is
 re-sent. If the count at the top of the page is climbing instead, the Apps Script is posting

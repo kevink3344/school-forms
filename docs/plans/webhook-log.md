@@ -473,8 +473,13 @@ Admin-only, built from existing `global.css` classes — no new CSS unless the p
 needs a monospace block:
 
 - **Filter bar** — `.filter-bar` / `.filter-group` with a Status select
-  (`All / Failed / Succeeded`), a Form select, and From/To date inputs. Default the Status
-  filter to **Failed**, since that is the reason to open the page.
+  (`All / Failed / Succeeded`), a Form select, and From/To date inputs. ~~Default the Status
+  filter to **Failed**, since that is the reason to open the page.~~ **Changed after review:**
+  the user asked for the default to be **All**, so the page never hides attempts behind a
+  filter that was chosen for them. The `?status=failed` deep links still force **Failed**, so
+  the dashboard strip and the post-publish prompt land on failures as intended; the generic
+  **Open Webhook Log** button on Settings deliberately does *not* pre-filter, and **Clear**
+  resets to **All**.
 - **Stats strip** — "12 succeeded · 3 failed" for the current filter, reusing `.card`.
 - **Grid** — `.grid-wrap` > `table.grid`, columns:
   `Received · Status · HTTP · Form · Public ID · Error · Replay of · ⚙`

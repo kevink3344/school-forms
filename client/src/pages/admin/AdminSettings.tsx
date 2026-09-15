@@ -876,11 +876,7 @@ export default function AdminSettings() {
           </div>
         )}
         <Link
-          to={
-            webhookSummary && webhookSummary.window.failed > 0
-              ? "/admin/webhooks?status=failed"
-              : "/admin/webhooks"
-          }
+          to="/admin/webhooks"
           className="primary-button"
           style={{ textDecoration: "none" }}
         >

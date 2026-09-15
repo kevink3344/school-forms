@@ -115,9 +115,12 @@ export default function WebhookLog() {
   // rewrite the address they arrived on.
   const [searchParams] = useSearchParams();
 
+  // Defaults to All. The `status` param still wins when it is present, so the
+  // pre-filtered deep links from the dashboard strip, the post-publish prompt,
+  // and the form designer land on failures as intended.
   const [status, setStatus] = useState<WebhookEventStatus | "">(() => {
     const raw = searchParams.get("status");
-    return raw === "succeeded" || raw === "failed" ? raw : "failed";
+    return raw === "succeeded" || raw === "failed" ? raw : "";
   });
   const [formId, setFormId] = useState(() => searchParams.get("form_id") ?? "");
   const [authResult, setAuthResult] = useState<WebhookAuthResult | "">("");
@@ -202,7 +205,7 @@ export default function WebhookLog() {
 
   const clearFilters = () =>
     changeFilter(() => {
-      setStatus("failed");
+      setStatus("");
       setFormId("");
       setAuthResult("");
       setSearchInput("");
@@ -295,6 +298,11 @@ export default function WebhookLog() {
   const showingFrom = stats.total === 0 ? 0 : offset + 1;
   const showingTo = Math.min(offset + PAGE_SIZE, stats.total);
 
+  // Whether the list is being narrowed at all. The default view is unfiltered,
+  // so the empty state has to tell "nothing has ever arrived" apart from
+  // "nothing matches what you asked for" — which needs different words.
+  const isFiltered = Boolean(status || formId || authResult || search || from || to);
+
   const formOptions = useMemo(
     () => forms.slice().sort((a, b) => a.title.localeCompare(b.title)),
     [forms],
@@ -376,9 +384,11 @@ export default function WebhookLog() {
             value={status}
             onChange={(e) => changeFilter(() => setStatus(e.target.value as WebhookEventStatus | ""))}
           >
+            {/* All first, matching the Form ("All forms") and Secret ("Any")
+                filters — the default is the first option in every dropdown. */}
+            <option value="">All</option>
             <option value="failed">Failed</option>
             <option value="succeeded">Succeeded</option>
-            <option value="">All</option>
           </select>
         </div>
         <div className="filter-group">
@@ -489,8 +499,17 @@ export default function WebhookLog() {
           </div>
         ) : page.events.length === 0 ? (
           <div className="empty-state">
-            Nothing matches these filters. Every inbound attempt is recorded, so an empty list here means the
-            endpoint has not been called.
+            {isFiltered ? (
+              <>
+                Nothing matches these filters. Every inbound attempt is recorded, so widening the
+                filters — or choosing <strong>All</strong> for Status — will reveal what is there.
+              </>
+            ) : (
+              <>
+                No attempts have been recorded yet. Every inbound attempt is logged here, so an empty
+                list means Google Forms has not posted to this app.
+              </>
+            )}
           </div>
         ) : (
           <div className="grid-wrap">
