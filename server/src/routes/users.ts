@@ -33,6 +33,7 @@ usersRouter.get("/", requireAuth, requireRoles("admin"), async (req, res, next) 
         organization_slug: u.organization_slug,
         display_name: u.display_name,
         active: u.active,
+        show_on_test_screen: u.show_on_test_screen,
         created_at: u.created_at,
       }))
     );
@@ -52,7 +53,7 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const { email, password, display_name, role, school_id, organization_id } = parsed.data;
+    const { email, password, display_name, role, school_id, organization_id, show_on_test_screen } = parsed.data;
 
     const existing = await getUserByEmail(email);
     if (existing) {
@@ -62,7 +63,16 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
 
     const passwordHash = await bcrypt.hash(password, 12);
     const targetOrgId = organization_id ?? req.user!.organization_id;
-    const user = await createUser(email, passwordHash, role as Role, school_id ?? null, display_name, true, targetOrgId);
+    const user = await createUser(
+      email,
+      passwordHash,
+      role as Role,
+      school_id ?? null,
+      display_name,
+      true,
+      targetOrgId,
+      show_on_test_screen ?? false
+    );
 
     res.status(201).json({
       id: user.id,
@@ -73,6 +83,7 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
       organization_id: user.organization_id,
       display_name: user.display_name,
       active: user.active,
+      show_on_test_screen: user.show_on_test_screen,
       created_at: user.created_at,
     });
   } catch (err) {
@@ -137,6 +148,7 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       organization_id: user.organization_id,
       display_name: user.display_name,
       active: user.active,
+      show_on_test_screen: user.show_on_test_screen,
       created_at: user.created_at,
     });
   } catch (err) {

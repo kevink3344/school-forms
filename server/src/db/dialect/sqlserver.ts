@@ -25,6 +25,10 @@ export const sqlserverDialect: Dialect = {
 
   ddl: SQLSERVER_DDL_STATEMENTS,
 
+  // The ladder is cumulative, so every additive column is already covered by its
+  // own `COL_LENGTH`-guarded ALTER in `SQLSERVER_DDL_STATEMENTS`.
+  addColumns: [],
+
   insertReturning({ table, columns, returning, values }) {
     return (
       `INSERT INTO dbo.${table} (${columns.join(", ")})\n` +

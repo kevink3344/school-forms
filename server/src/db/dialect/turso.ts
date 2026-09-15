@@ -71,15 +71,16 @@ const TURSO_DDL: string[] = [
 
   // --- users -----------------------------------------------------------------
   `CREATE TABLE IF NOT EXISTS users (
-     id              INTEGER PRIMARY KEY AUTOINCREMENT,
-     email           TEXT NOT NULL COLLATE NOCASE,
-     password_hash   TEXT NOT NULL,
-     role            TEXT NOT NULL CHECK (role IN ('admin','staff','cdm_contact')),
-     school_id       INTEGER REFERENCES schools(id) ON DELETE SET NULL,
-     organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE NO ACTION,
-     display_name    TEXT NOT NULL,
-     active          BOOLEAN NOT NULL DEFAULT 1,
-     created_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+     id                   INTEGER PRIMARY KEY AUTOINCREMENT,
+     email                TEXT NOT NULL COLLATE NOCASE,
+     password_hash        TEXT NOT NULL,
+     role                 TEXT NOT NULL CHECK (role IN ('admin','staff','cdm_contact')),
+     school_id            INTEGER REFERENCES schools(id) ON DELETE SET NULL,
+     organization_id      INTEGER NOT NULL REFERENCES organizations(id) ON DELETE NO ACTION,
+     display_name         TEXT NOT NULL,
+     active               BOOLEAN NOT NULL DEFAULT 1,
+     show_on_test_screen  BOOLEAN NOT NULL DEFAULT 0,
+     created_at           TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_users_email ON users(email)`,
   `CREATE INDEX IF NOT EXISTS IX_users_school ON users(school_id)`,
@@ -231,6 +232,18 @@ export const tursoDialect: Dialect = {
   kind: "turso",
 
   ddl: TURSO_DDL,
+
+  // Columns that post-date the first Turso databases. `ddl` is the FINAL schema,
+  // so a fresh database gets these from its CREATE TABLE — but a database created
+  // before the column existed only gains it here, because SQLite has no
+  // `ALTER TABLE ADD COLUMN IF NOT EXISTS` (docs/plans/dual-db.md §5.3).
+  addColumns: [
+    {
+      table: "users",
+      column: "show_on_test_screen",
+      definition: "BOOLEAN NOT NULL DEFAULT 0",
+    },
+  ],
 
   insertReturning({ table, columns, returning, values }) {
     return (

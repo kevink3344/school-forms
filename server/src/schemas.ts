@@ -63,6 +63,10 @@ export const createUserSchema = z.object({
   role: z.enum(ROLES).default("staff"),
   school_id: z.number().int().positive().optional().nullable(),
   organization_id: z.number().int().positive().optional().nullable(),
+  // Whether the account is offered in the select-mode ("Test") login dropdown.
+  // Optional and OFF by default — a new account is never test-visible unless the
+  // caller asks for it (see `listUsersForSelect`).
+  show_on_test_screen: z.boolean().optional(),
 });
 
 export const updateUserSchema = z
@@ -73,6 +77,7 @@ export const updateUserSchema = z
     role: z.enum(ROLES).optional(),
     school_id: z.number().int().positive().optional().nullable(),
     organization_id: z.number().int().positive().optional().nullable(),
+    show_on_test_screen: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 

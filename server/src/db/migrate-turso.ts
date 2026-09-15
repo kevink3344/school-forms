@@ -66,7 +66,7 @@ const WIPE_ORDER = [...TABLES].reverse();
 const BATCH_ROWS = 200;
 
 /** Columns whose stored TEXT must read back as a real boolean. */
-const BOOLEAN_COLUMNS = ["active", "required", "staff_only", "is_default"] as const;
+const BOOLEAN_COLUMNS = ["active", "required", "staff_only", "is_default", "show_on_test_screen"] as const;
 
 /** Timestamp columns that must round-trip as ISO-8601 `...Z`. */
 const TIMESTAMP_COLUMNS = ["created_at", "updated_at", "submitted_at", "last_used_at", "staff_fields_updated_at"];

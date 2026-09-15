@@ -93,6 +93,9 @@ export interface AdminUser extends User {
   organization_name: string | null;
   organization_slug: string | null;
   active: boolean;
+  // Whether the account is offered in the select-mode ("Test") login dropdown.
+  // Server defaults it to false, so it must be opted into per user.
+  show_on_test_screen: boolean;
   created_at: string;
 }
 

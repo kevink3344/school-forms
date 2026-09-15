@@ -35,12 +35,14 @@ Key properties of the reference implementation:
 
 - Concern | File
 - **Generic key/value settings store + `login_mode`/`maintenance_message` keys | server/src/routes/settings.ts**
-- Three-button toggle UI + maintenance message editor | client/src/pages/SettingsPage.tsx (search `Login Mode`, `handleLoginModeToggle`)
+- Three-button toggle UI + maintenance message editor | client/src/pages/admin/AdminSettings.tsx (search `Login Mode`, `setLoginModeValue`)
 - Login page conditional rendering per mode | client/src/pages/LoginPage.tsx
-- Select-mode login endpoint (no password) | server/src/routes/auth.ts — `POST /api/auth/login`
+- Select-mode login endpoint (no password) | server/src/routes/auth.ts — `POST /api/auth/select`
 - Password-mode login endpoint | server/src/routes/auth.ts — `POST /api/auth/login-with-password`
+- Select-mode user list (the Test dropdown source) | server/src/db/queries.ts — `listUsersForSelect`
 - Env var override + info endpoint | server/src/routes/health.ts — `GET /api/info`
-- Settings client helper (`getPublicSetting`/`updateSetting`) | client/src/api/settings.ts
+- Settings client helper (`getPublicSetting`/`updateSetting`) | client/src/lib/settings.ts
+- Per-user Test-screen opt-in (`show_on_test_screen`) | server/src/db/schema.ts, server/src/db/dialect/turso.ts, client/src/pages/admin/AdminSettings.tsx
 
 ---
 
@@ -158,6 +160,31 @@ The client uses `loginModeOverride` purely to render an informational banner in 
 2. Add `login_mode` and `maintenance_message` to the settings allow-list.
 3. Document the `LOGIN_MODE` env var in the target project's README/deployment docs (valid values: `select`, `password`, `maintenance`; unset/invalid = no override).
 
+### Phase 7 — Curating the Test dropdown (`show_on_test_screen`)
+
+**The problem.** Once `select` mode is live, its dropdown is sourced from `GET /api/auth/users`, which naive implementations define as "every active user". In a real deployment that means the production staff directory is published, anonymously, on the login page — and mirrored on every demo/test box. Curating who appears must be an explicit admin action, and the *default* must be "not listed".
+
+**The mechanism — a per-user opt-in boolean.**
+
+1. Add a boolean column to the users table, **defaulting to off**:
+
+```sql
+   -- SQL Server
+   show_on_test_screen BIT NOT NULL CONSTRAINT DF_users_show_on_test_screen DEFAULT 0
+   -- SQLite/libSQL
+   show_on_test_screen BOOLEAN NOT NULL DEFAULT 0
+```
+
+   Because the default is `0`, the column lands *false* on every pre-existing row, so the feature is inert on an existing deployment until an admin deliberately opts someone in. That is the whole point — the migration must not silently start advertising accounts.
+2. **Add it to both DDL sources.** If the project has a cumulative SQL Server migration ladder *and* a separate final-schema DDL for another engine, the column must be added to each, plus an additive migration for databases that already exist (SQLite has no `ALTER TABLE ADD COLUMN IF NOT EXISTS`; see `docs/plans/dual-db.md` §5.3 and the `Dialect.addColumns` mechanism).
+3. **Filter the list query, not the endpoint's auth.** In `listUsersForSelect`, add `AND u.show_on_test_screen = 1` to *both* the org-scoped and unscoped `WHERE` branches. Leave every other endpoint alone.
+4. **Surface it in the users CRUD**: the field must round-trip through the create/update Zod schemas, through the hand-built response DTOs (easy to forget — the field will save fine but never display), and through the swagger component schema.
+5. **Give the admin a per-user toggle** in the user-edit drawer, next to the existing `Active` toggle, plus (optionally) a read-only "Test screen" column in the users grid so the state is scannable at a glance.
+
+**What NOT to gate.** Resist the pull toward making this a security control by also gating `POST /api/auth/select`. That endpoint is passwordless by design and is a **test affordance, not a login**: gating it converts a curation flag into a lockout (see the adaptation note below) while adding no real security — anyone who can reach the endpoint can already reach the password endpoint. Document the distinction explicitly, because "hidden from the dropdown" reads like "denied" to the next person reading the code.
+
+**Lockout trap.** If every account is hidden, the dropdown is empty and no admin can sign in *to unhide anyone*. Always leave at least one admin opted in, or make the toggle reachable from somewhere that does not depend on a session obtained through the dropdown.
+
 ---
 
 ## Adaptation Notes
@@ -177,3 +204,6 @@ The client uses `loginModeOverride` purely to render an informational banner in 
 4. Set the env var override (e.g. `LOGIN_MODE=maintenance`) → Settings UI shows the "locked" banner, buttons disabled, and the login page respects the env value even if the stored DB value differs.
 5. Non-admin users get `403` when calling the `PUT` settings endpoint directly.
 6. Unauthenticated `GET` of the setting still works (needed for the public login page).
+7. **Test-screen curation:** with every user at the default (`show_on_test_screen = false`), `GET /api/auth/users` returns `[]` and the dropdown reads "No users available". Opt one user in and they appear (in the correct org scope); opt them out and they disappear.
+8. **Curation is not a lock:** a hidden user's id still signs in via `POST /api/auth/select`. Confirm this is intentional and document it, rather than treating it as a bug.
+9. **Migration is inert on existing data:** after deploying the column to a database that already has users, every row reads `false` and nothing about the dropdown changes until an admin acts.

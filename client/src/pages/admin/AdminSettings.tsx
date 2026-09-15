@@ -112,6 +112,7 @@ interface FormState {
   school_id: string; // "" = no school
   organization_id: string; // "" = default to current admin's org
   active: boolean;
+  show_on_test_screen: boolean;
 }
 
 const EMPTY: FormState = {
@@ -123,6 +124,9 @@ const EMPTY: FormState = {
   school_id: "",
   organization_id: "",
   active: true,
+  // Off by default, matching the server: a new account is never listed on the
+  // select-mode ("Test") login screen until an admin opts it in.
+  show_on_test_screen: false,
 };
 
 // ---------------------------------------------------------------------------
@@ -239,6 +243,7 @@ export default function AdminSettings() {
       school_id: u.school_id === null ? "" : String(u.school_id),
       organization_id: u.organization_id === null ? "" : String(u.organization_id),
       active: u.active,
+      show_on_test_screen: u.show_on_test_screen,
     });
     setModalOpen(true);
     setSaveError("");
@@ -263,6 +268,7 @@ export default function AdminSettings() {
           role: form.role,
           school_id: form.school_id ? Number(form.school_id) : null,
           organization_id: form.organization_id ? Number(form.organization_id) : null,
+          show_on_test_screen: form.show_on_test_screen,
         });
         setMessage("User created.");
       } else {
@@ -273,6 +279,7 @@ export default function AdminSettings() {
           school_id: form.school_id ? Number(form.school_id) : null,
           organization_id: form.organization_id ? Number(form.organization_id) : null,
           active: form.active,
+          show_on_test_screen: form.show_on_test_screen,
         });
         setMessage("User updated.");
       }
@@ -485,18 +492,19 @@ export default function AdminSettings() {
                 <th>Role</th>
                 <th>School</th>
                 <th>Status</th>
+                <th>Test screen</th>
               </tr>
             </thead>
             <tbody>
               {loading ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
                     Loading…
                   </td>
                 </tr>
               ) : users.length === 0 ? (
                 <tr>
-                  <td colSpan={5} style={{ textAlign: "center", padding: 24 }}>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
                     No users yet. Click <strong>Add User</strong> to create one.
                   </td>
                 </tr>
@@ -514,6 +522,18 @@ export default function AdminSettings() {
                       <td data-label="Status">
                         <span className={`badge ${u.active ? "badge-green" : "badge-gray"}`}>
                           {u.active ? "Active" : "Inactive"}
+                        </span>
+                      </td>
+                      <td data-label="Test screen">
+                        <span
+                          className={`badge ${u.show_on_test_screen ? "badge-blue" : "badge-gray"}`}
+                          title={
+                            u.show_on_test_screen
+                              ? "Listed in the Select User (Test) login dropdown"
+                              : "Not listed in the Select User (Test) login dropdown"
+                          }
+                        >
+                          {u.show_on_test_screen ? "Shown" : "Hidden"}
                         </span>
                       </td>
                     </tr>
@@ -1025,6 +1045,22 @@ export default function AdminSettings() {
                   </div>
                 </Field>
               )}
+
+              {/* Curates the Select User (Test) login dropdown. Off unless an
+                  admin deliberately opts the account in. */}
+              <Field label="Show user on Test screen" full>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Toggle
+                    checked={form.show_on_test_screen}
+                    onChange={(v) => setForm((f) => ({ ...f, show_on_test_screen: v }))}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    {form.show_on_test_screen
+                      ? "Listed in the Select User (Test) dropdown"
+                      : "Not listed in the Select User (Test) dropdown"}
+                  </span>
+                </div>
+              </Field>
             </div>
           </div>
           <div className="drawer-foot">

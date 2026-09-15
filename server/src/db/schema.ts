@@ -59,6 +59,11 @@ export interface User {
   organization_id: number;
   display_name: string;
   active: boolean;
+  // Whether this account is offered in the select-mode ("Test") login dropdown.
+  // Defaults to OFF: only accounts an admin has explicitly opted in appear there,
+  // so a production-shaped user list never leaks into the test screen. This is a
+  // curation control, not a security boundary — see docs/plans/login-mode.md.
+  show_on_test_screen: boolean;
   created_at: Date;
 }
 
@@ -302,6 +307,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      school_id     INT NULL,
      display_name  NVARCHAR(120) NOT NULL,
      active        BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
+     show_on_test_screen BIT NOT NULL CONSTRAINT DF_users_show_on_test_screen DEFAULT 0,
      created_at    DATETIME2 NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_users_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE SET NULL
    );
@@ -314,6 +320,15 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // active flag to an ALREADY-EXISTING dbo.users table (safe to re-run).
   `IF COL_LENGTH('dbo.users', 'active') IS NULL
      ALTER TABLE dbo.users ADD active BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1;`,
+
+  // Idempotent migration for the "Show user on Test screen" toggle — adds the
+  // flag to an ALREADY-EXISTING dbo.users table (safe to re-run). The default is
+  // 0/OFF, so on an existing deployment the column lands false for every account
+  // and nothing changes until an admin opts a user in. That is deliberate: the
+  // test-mode dropdown must not silently start listing production accounts.
+  `IF COL_LENGTH('dbo.users', 'show_on_test_screen') IS NULL
+     ALTER TABLE dbo.users ADD show_on_test_screen BIT NOT NULL
+       CONSTRAINT DF_users_show_on_test_screen DEFAULT 0;`,
 
   // Idempotent migration for the School Contact role — widens the role CHECK
   // constraint to accept 'cdm_contact'. The original CREATE TABLE only runs when

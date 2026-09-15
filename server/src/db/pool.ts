@@ -1,4 +1,5 @@
 import { getDialect } from "./dialect/index.js";
+import type { Dialect } from "./dialect/types.js";
 import { getClient, getDbKind } from "./driver/index.js";
 import { formatSubmissionPublicId } from "./schema.js";
 
@@ -30,8 +31,29 @@ export { getClient, getDbKind };
 // -----------------------------------------------------------------------------
 async function runDdl(): Promise<void> {
   const client = getClient();
-  await client.run(getDialect(client.kind).ddl);
+  const dialect = getDialect(client.kind);
+  await client.run(dialect.ddl);
+  await applyAddColumns(dialect);
   await backfillSubmissionIds();
+}
+
+// Additive columns for databases created by an EARLIER version of the schema.
+//
+// SQL Server declares none — its ladder is `COL_LENGTH`-guarded, so the column
+// arrives with the rest of the DDL. SQLite has no `ALTER TABLE ADD COLUMN IF NOT
+// EXISTS`, so the column is added only when `PRAGMA table_info` does not already
+// list it. That makes this safe on every boot: on a fresh database the preceding
+// `ddl` batch already created the table WITH the column, so the check skips.
+// The DDL runs first precisely so that ordering — and because a no-op
+// `CREATE TABLE IF NOT EXISTS` on an existing database cannot add columns.
+async function applyAddColumns(dialect: Dialect): Promise<void> {
+  if (dialect.addColumns.length === 0) return;
+  const client = getClient();
+  for (const { table, column, definition } of dialect.addColumns) {
+    const existing = await client.query<{ name: string }>(`PRAGMA table_info(${table})`);
+    if (existing.some((c) => c.name === column)) continue;
+    await client.run([`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`]);
+  }
 }
 
 // One-time migration: convert legacy hex submission ids (`7bea...`) into the new

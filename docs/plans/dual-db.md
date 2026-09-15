@@ -206,6 +206,50 @@ statements are the only chance to get the shape right, and there is no historica
 to fall back on. That is why §9 Phase 7 pairs the import with per-table counts and checksums
 rather than trusting the copy.
 
+#### Additive columns after the fact — `Dialect.addColumns`
+
+The "fresh schema" simplification has one sharp edge, and it only appears *after* Phase 7.
+`CREATE TABLE IF NOT EXISTS` is a **no-op on a table that already exists**, so a column added to
+`TURSO_DDL` later reaches new databases only. Add a column, deploy, and every database created
+before that day silently never gets it — the DDL runs clean, and the first query referencing the
+column fails at runtime.
+
+SQLite offers no `ALTER TABLE ADD COLUMN IF NOT EXISTS`, so the fix is a descriptor list plus a
+guarded `ALTER`:
+
+```ts
+// dialect/types.ts
+export interface AddColumn {
+  table: string;       // e.g. "users"
+  column: string;      // must match the name in `ddl`
+  definition: string;  // everything after the name — type, constraints, default
+}
+
+export interface Dialect {
+  readonly ddl: string[];
+  /** Additive columns for databases created before the column existed. */
+  readonly addColumns: AddColumn[];
+  // …
+}
+```
+
+- `dialect/turso.ts` — one entry per post-launch column, kept in step with the column's
+  definition in `TURSO_DDL`.
+- `dialect/sqlserver.ts` — `addColumns: []`. The ladder is cumulative, so each additive column
+  already has its own `COL_LENGTH`-guarded `ALTER`. Declaring it here as well would double-apply.
+- `db/pool.ts` — `runDdl()` runs `ddl` first, then `applyAddColumns()`, which checks
+  `PRAGMA table_info(<table>)` and issues `ALTER TABLE <table> ADD COLUMN <column> <definition>`
+  only when the name is missing.
+
+Order matters: `ddl` must run first, so a fresh database gets the column from its `CREATE TABLE`
+and `applyAddColumns` finds nothing to do. Running it on every boot is therefore safe and
+idempotent, and the `PRAGMA` check — not a version table — is the source of truth for "does this
+column exist".
+
+**Make the default safe for existing rows.** A new column lands with its declared default on
+every existing row, so `DEFAULT 0`/`false` is what decides whether an existing deployment changes
+behaviour on deploy. Prefer the inert default and let an explicit action turn the feature on.
+
 ---
 
 ## 6. Blast radius
@@ -893,4 +937,5 @@ and re-run it on the night, and if there is no appetite for running two engines 
 | 2026-09-14 | Initial draft for review. |
 | 2026-09-14 | **rev. 2 — Option B confirmed.** Turso must carry the existing production data. §3 (data copy in scope; only *continuous replication* stays out), §7 rewritten as a resolved decision, §9 Phase 7 promoted from conditional to mandatory, §9 total restated at 16–20 days, §11 gained the two-connection note for the migration script, §12 gained a migration-parity test row, §13 gained data-loss and snapshot-freshness risks, §14 gained the one-way-copy cost, §15 relabelled as *routes* (the letters collided with §7's Option A/B) with a single recommended path, §16 re-ordered so data volume is the top open item, §17 (this table). |
 | 2026-09-14 | **re-measured after the Staff Comments feature was removed.** §4.1: 11 tables, 39 `DDL_STATEMENTS`, 81 DML-leading literals, 50 `execute<>` in `queries.ts`, 1,737/719 lines. §4.2: 15 `OUTPUT INSERTED`, 18 divergent DML, 33 `SYSUTCDATETIME()`, 271 `dbo.`, 10 `IDENTITY`, 17 FKs. §10.3: 8 cascade / 4 set-null / 5 no-action. §10.4: 9 client date sites. Also corrected several out-of-date figures in §5.1, §5.3, §6, §8.2, §8.4, §8.5 and §9 (the earlier draft carried a 37-statement ladder and 286 `dbo.` sites). |
+| 2026-09-15 | **rev. 4 — additive columns after cut-over.** New §5.3 sub-section (`Dialect.addColumns`). The plan's "fresh schema, no ladder" simplification had a gap: because `CREATE TABLE IF NOT EXISTS` is a no-op on an existing table, a column added to `TURSO_DDL` after cut-over reaches new databases only, and the failure is silent until the first query touches it. Documented the fix — an `AddColumn[]` per dialect (empty on SQL Server, whose ladder already covers each column) applied by `pool.applyAddColumns()` via a `PRAGMA table_info` existence check, run after `ddl` on every boot. Also recorded the `DEFAULT`-decides-blast-radius point for existing rows. |
 | 2026-09-15 | **rev. 3 — corrections from implementation.** Added the two divergences the first draft missed: `SELECT TOP 1` (**8** sites — a select-list token, not a rewritable one) and `CAST(x AS NVARCHAR(MAX))` (**1**); together they returned HTTP 500 from 8 endpoints under Turso. §4.2: `OUTPUT DELETED` (**2**) was also missing, so the divergent-DML subtotal is **20**, not 18. §5.1: added both missed constructs as explicit rows. §10.2: the two `IS NULL` forms were labelled **backwards** — corrected, plus the audit result that no site is currently exposed. §10.3: recorded that `PRAGMA foreign_keys = ON` *did* take effect against the live Turso endpoint. **§10.7 (new): return-type parity** — `DATETIME2`→`Date` vs TEXT→`string`, `BIT`→`boolean` vs `0`/`1` — invisible to any SQL-level audit, and the cause of a `RangeError` → 500 on `/api/export/preview` and `/api/reports/preview`. §11: the implemented env names are `TURSO_DB_URL`/`TURSO_DB_APIKEY` (the plan's names remain valid aliases). Also recording: `@libsql/client` is hoisted to the workspace root, not `server/`; libSQL named args are `$`-prefixed, so parameterless statements need `args: {}`; `'a' + 'b'` is arithmetic (`0`) in SQLite, not concatenation; and a cross-backend HTTP parity harness found all three blocking bugs that 19 green unit tests missed. |

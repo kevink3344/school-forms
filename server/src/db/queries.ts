@@ -199,15 +199,20 @@ export async function setSetting(key: string, value: string): Promise<string> {
 
 // Minimal user rows for the select-mode login dropdown. Never returns a
 // password hash — only the fields the dropdown label needs. Only active users in
-// active organizations are listed (inactive orgs are excluded from sign-in).
+// active organizations are listed (inactive orgs are excluded from sign-in), and
+// only users an admin has opted in via "Show user on Test screen": the flag is
+// OFF by default, so the test dropdown stays empty until it is deliberately
+// populated rather than mirroring the real user list. That is a curation
+// control, not a security boundary — `POST /api/auth/select` is passwordless and
+// is intentionally left able to sign in a hidden user (docs/plans/login-mode.md).
 export async function listUsersForSelect(organizationId?: number | null): Promise<
   { id: number; display_name: string; email: string; role: Role }[]
 > {
   const params: Record<string, unknown> = {};
   const where =
     organizationId !== undefined && organizationId !== null
-      ? "WHERE u.organization_id = @organizationId AND u.active = 1 AND o.active = 1"
-      : "WHERE u.active = 1 AND o.active = 1";
+      ? "WHERE u.organization_id = @organizationId AND u.active = 1 AND o.active = 1 AND u.show_on_test_screen = 1"
+      : "WHERE u.active = 1 AND o.active = 1 AND u.show_on_test_screen = 1";
   if (organizationId !== undefined && organizationId !== null) params.organizationId = organizationId;
   return execute<{ id: number; display_name: string; email: string; role: Role }>(
     `SELECT u.id, u.display_name, u.email, u.role
@@ -371,7 +376,7 @@ export function featureToSchool(
 // -----------------------------------------------------------------------------
 export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, created_at
      FROM dbo.users WHERE email = @email`,
     { email }
   );
@@ -380,7 +385,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getUserById(id: number): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, created_at
      FROM dbo.users WHERE id = @id`,
     { id }
   );
@@ -394,12 +399,24 @@ export async function createUser(
   schoolId: number | null,
   displayName: string,
   active = true,
-  organizationId: number | null = null
+  organizationId: number | null = null,
+  // Defaults to OFF so a new account never appears on the test screen until an
+  // admin opts it in — see `listUsersForSelect`.
+  showOnTestScreen = false
 ): Promise<User> {
   const rows = await execute<User>(
     dialect().insertReturning({
       table: "users",
-      columns: ["email", "password_hash", "role", "school_id", "display_name", "active", "organization_id"],
+      columns: [
+        "email",
+        "password_hash",
+        "role",
+        "school_id",
+        "display_name",
+        "active",
+        "organization_id",
+        "show_on_test_screen",
+      ],
       returning: [
         "id",
         "email",
@@ -409,11 +426,13 @@ export async function createUser(
         "organization_id",
         "display_name",
         "active",
+        "show_on_test_screen",
         "created_at",
       ],
-      values: "@email, @passwordHash, @role, @schoolId, @displayName, @active, @organizationId",
+      values:
+        "@email, @passwordHash, @role, @schoolId, @displayName, @active, @organizationId, @showOnTestScreen",
     }),
-    { email, passwordHash, role, schoolId, displayName, active, organizationId }
+    { email, passwordHash, role, schoolId, displayName, active, organizationId, showOnTestScreen }
   );
   return rows[0];
 }
@@ -435,7 +454,7 @@ export async function listUsers(organizationId?: number | null): Promise<AdminUs
   if (where) params.organizationId = organizationId;
   return execute<AdminUserRow>(
     `SELECT u.id, u.email, u.password_hash, u.role, u.school_id, u.organization_id,
-            u.display_name, u.active, u.created_at,
+            u.display_name, u.active, u.show_on_test_screen, u.created_at,
             s.name AS school_name,
             o.name AS organization_name,
             o.slug AS organization_slug
@@ -450,7 +469,15 @@ export async function listUsers(organizationId?: number | null): Promise<AdminUs
 
 export async function updateUser(
   id: number,
-  data: { display_name?: string; email?: string; active?: boolean; school_id?: number | null; role?: Role; organization_id?: number | null }
+  data: {
+    display_name?: string;
+    email?: string;
+    active?: boolean;
+    school_id?: number | null;
+    role?: Role;
+    organization_id?: number | null;
+    show_on_test_screen?: boolean;
+  }
 ): Promise<User | null> {
   const existing = await getUserById(id);
   if (!existing) return null;
@@ -461,13 +488,15 @@ export async function updateUser(
   const schoolId = data.school_id === undefined ? existing.school_id : data.school_id;
   const role = data.role ?? existing.role;
   const organizationId = data.organization_id === undefined ? existing.organization_id : data.organization_id;
+  const showOnTestScreen = data.show_on_test_screen ?? existing.show_on_test_screen;
 
   const rows = await execute<User>(
     dialect().updateReturning({
       table: "users",
       set:
         "display_name = @displayName, email = @email, active = @active,\n" +
-        "         school_id = @schoolId, role = @role, organization_id = @organizationId",
+        "         school_id = @schoolId, role = @role, organization_id = @organizationId,\n" +
+        "         show_on_test_screen = @showOnTestScreen",
       where: "id = @id",
       returning: [
         "id",
@@ -478,10 +507,11 @@ export async function updateUser(
         "organization_id",
         "display_name",
         "active",
+        "show_on_test_screen",
         "created_at",
       ],
     }),
-    { id, displayName, email, active, schoolId, role, organizationId }
+    { id, displayName, email, active, schoolId, role, organizationId, showOnTestScreen }
   );
   return rows[0] ?? null;
 }

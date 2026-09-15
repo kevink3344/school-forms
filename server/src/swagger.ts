@@ -61,11 +61,33 @@ export function buildSwaggerSpec(req?: Request) {
           properties: {
             id: { type: "integer" },
             email: { type: "string", format: "email" },
-            role: { type: "string", enum: ["admin", "staff"] },
+            role: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
             school_id: { type: "integer", nullable: true },
             organization_id: { type: "integer", nullable: true },
             display_name: { type: "string" },
           },
+        },
+        // The admin /api/users shape: the safe user fields plus the school/org
+        // display names, the active flag and the test-screen opt-in.
+        AdminUser: {
+          allOf: [
+            { $ref: "#/components/schemas/User" },
+            {
+              type: "object",
+              properties: {
+                school_name: { type: "string", nullable: true },
+                organization_name: { type: "string", nullable: true },
+                organization_slug: { type: "string", nullable: true },
+                active: { type: "boolean" },
+                show_on_test_screen: {
+                  type: "boolean",
+                  description:
+                    "Whether the account appears in the select-mode (\"Test\") login dropdown. Defaults to false, so only explicitly opted-in accounts are listed.",
+                },
+                created_at: { type: "string", format: "date-time" },
+              },
+            },
+          ],
         },
         AuthResponse: {
           type: "object",
@@ -450,6 +472,12 @@ export function buildSwaggerSpec(req?: Request) {
         get: {
           tags: ["Auth"],
           summary: "List users for the select-mode login dropdown",
+          description:
+            "Anonymous. Returns ONLY active users in active organizations that an admin has\n" +
+            "opted in via `show_on_test_screen` — the flag defaults to false, so the dropdown\n" +
+            "stays empty until accounts are deliberately added. This curates the test screen;\n" +
+            "it is not a security boundary, because POST /api/auth/select is passwordless and\n" +
+            "still accepts a hidden user's id.",
           security: [],
           parameters: [
             { name: "org", in: "query", required: false, schema: { type: "string" }, description: "Organization slug to scope results (e.g. academics)" },
@@ -467,7 +495,7 @@ export function buildSwaggerSpec(req?: Request) {
                         id: { type: "integer" },
                         display_name: { type: "string" },
                         email: { type: "string", format: "email" },
-                        role: { type: "string", enum: ["admin", "staff"] },
+                        role: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
                       },
                     },
                   },
@@ -1660,7 +1688,7 @@ export function buildSwaggerSpec(req?: Request) {
           responses: {
             "200": {
               description: "OK — safe user list (no password hashes)",
-              content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/User" } } } },
+              content: { "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/AdminUser" } } } },
             },
             "401": { description: "Unauthorized" },
             "403": { description: "Forbidden (not admin)" },
@@ -1681,9 +1709,14 @@ export function buildSwaggerSpec(req?: Request) {
                     email: { type: "string", format: "email" },
                     password: { type: "string", minLength: 8 },
                     display_name: { type: "string" },
-                    role: { type: "string", enum: ["admin", "staff"] },
+                    role: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
                     school_id: { type: "integer", nullable: true },
                     organization_id: { type: "integer", nullable: true },
+                    show_on_test_screen: {
+                      type: "boolean",
+                      description:
+                        "Offer this account in the select-mode (\"Test\") login dropdown. Defaults to false.",
+                    },
                   },
                 },
               },
@@ -1713,10 +1746,15 @@ export function buildSwaggerSpec(req?: Request) {
                   properties: {
                     email: { type: "string", format: "email" },
                     display_name: { type: "string" },
-                    role: { type: "string", enum: ["admin", "staff"] },
+                    role: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
                     school_id: { type: "integer", nullable: true },
                     active: { type: "boolean" },
                     organization_id: { type: "integer", nullable: true },
+                    show_on_test_screen: {
+                      type: "boolean",
+                      description:
+                        "Show this user in the select-mode (\"Test\") login dropdown. Off by default.",
+                    },
                   },
                 },
               },

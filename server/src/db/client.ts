@@ -53,6 +53,7 @@ export const BOOLEAN_COLUMNS: ReadonlySet<string> = new Set([
   "required",
   "staff_only",
   "is_default",
+  "show_on_test_screen",
 ]);
 
 // -----------------------------------------------------------------------------

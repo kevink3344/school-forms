@@ -368,6 +368,7 @@ export const api = {
     role: Role;
     school_id?: number | null;
     organization_id?: number | null;
+    show_on_test_screen?: boolean;
   }): Promise<AdminUser> {
     return request<AdminUser>("/api/users", {
       method: "POST",
@@ -385,6 +386,7 @@ export const api = {
       role?: Role;
       school_id?: number | null;
       organization_id?: number | null;
+      show_on_test_screen?: boolean;
     }
   ): Promise<AdminUser> {
     return request<AdminUser>(`/api/users/${id}`, {

@@ -40,11 +40,37 @@ export interface DeleteReturningOptions {
   returning: string[];
 }
 
+/**
+ * A column that a database created by an EARLIER version of `ddl` is missing.
+ *
+ * SQL Server declares none: its ladder is cumulative and every `ALTER TABLE ADD`
+ * is `COL_LENGTH`-guarded, so the column arrives with the rest of the schema.
+ * SQLite has no `ALTER TABLE ADD COLUMN IF NOT EXISTS` and its DDL is the final
+ * shape rather than a ladder, so a Turso database created before the column
+ * existed would never gain it. `pool.ts` applies these only when `PRAGMA
+ * table_info` does not already list the column (docs/plans/dual-db.md §5.3).
+ */
+export interface AddColumn {
+  /** The table the column belongs to, e.g. `users`. */
+  table: string;
+  /** The column name exactly as it appears in `ddl`. */
+  column: string;
+  /** Everything after the name — type, constraints, default. */
+  definition: string;
+}
+
 export interface Dialect {
   readonly kind: DbKind;
 
   /** The schema statements run once at boot (idempotent). */
   readonly ddl: string[];
+
+  /**
+   * Additive columns for databases created before the column existed. Applied
+   * by `pool.ts` after `ddl`; empty on SQL Server, whose ladder already covers
+   * them. Keep each entry in step with the column's definition in `ddl`.
+   */
+  readonly addColumns: AddColumn[];
 
   insertReturning(o: InsertReturningOptions): string;
   updateReturning(o: UpdateReturningOptions): string;
