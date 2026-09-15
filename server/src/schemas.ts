@@ -150,7 +150,13 @@ export const createFormSchema = z.object({
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
   generate_form_fields: z.boolean().optional(),
-  fields: z.array(fieldSchema).min(1),
+  // Optional on create. The New Form modal collects a title and an optional
+  // school and nothing else — the admin lands in the designer and adds fields
+  // there ("Create & Design"). Requiring a field here made that flow
+  // impossible: every attempt died on "Validation failed" before a form row was
+  // ever inserted. `updateFormSchema.fields` is already optional, so this only
+  // brings creation in line with how forms are actually authored.
+  fields: z.array(fieldSchema).default([]),
 });
 
 export const updateFormSchema = z.object({
