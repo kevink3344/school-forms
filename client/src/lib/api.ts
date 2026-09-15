@@ -474,6 +474,28 @@ export const api = {
     });
   },
 
+  // Retire a form without destroying anything it has collected. Unlike deleteForm
+  // this works on a form with submissions. The server remembers the status the
+  // form held so restoreForm can put it back exactly as it was.
+  async archiveForm(id: number): Promise<FormWithFields> {
+    return request<FormWithFields>(`/api/forms/${id}/status`, {
+      method: "PATCH",
+      auth: true,
+      body: { status: "archived" },
+    });
+  },
+
+  // Return an archived form to the status it held before archiving. `restore` is
+  // an action rather than a status, so the server reads the remembered value
+  // instead of trusting the caller to name it.
+  async restoreForm(id: number): Promise<FormWithFields> {
+    return request<FormWithFields>(`/api/forms/${id}/status`, {
+      method: "PATCH",
+      auth: true,
+      body: { restore: true },
+    });
+  },
+
   // Ask the server to generate form fields from the linked Google Form. Not yet
   // implemented server-side (needs the Google Forms OAuth scope) — returns 501
   // with an actionable message until that credential is configured.

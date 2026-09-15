@@ -644,6 +644,14 @@ Or, if the package already uses a runner, add the new test file path to it.
   entries moved from `admin` to `staff`, and `/api/export/preview` gained
   `cdm_contact`. Both operations were re-labelled "(admin, staff, School Contact)"
   in the spec descriptions. `swagger.test.ts` stayed green throughout (36/36).
+- **Archive & restore revision (2026-09-15).** `PATCH /api/forms/{id}/status` now carries *three*
+  request shapes instead of one — `{status:"draft"|"published"}`, `{status:"archived"}` and
+  `{restore:true}` — plus a nullable `pre_archive_status` on the `Form` schema and a new `409`
+  for restoring a form that is not archived. Once again **no route was added or removed**, so
+  `routes/inventory.ts`, the documented path count and the coverage test are untouched;
+  `swagger.test.ts` stayed green (36/36). `DELETE /api/forms/{id}`'s description gained a
+  cross-reference to archiving as the non-destructive alternative. See
+  [delete-form.md](../plans/delete-form.md) §10.
 
 ### 8.4 Adjacent data-layer fix: `IF EXISTS` is not portable
 

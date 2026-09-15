@@ -137,6 +137,13 @@ export function buildSwaggerSpec(req?: Request) {
             designer_id: { type: "integer", nullable: true },
             organization_id: { type: "integer", nullable: true },
             status: { type: "string", enum: ["draft", "published", "archived"] },
+            pre_archive_status: {
+              type: "string",
+              enum: ["draft", "published", "archived"],
+              nullable: true,
+              description:
+                "The status this form held immediately before it was archived, so `{ restore: true }` can return it to exactly that state. Non-null only while `status` is `archived`.",
+            },
             code: { type: "string", nullable: true },
             submission_seq: { type: "integer" },
             doc_folder_id: { type: "string", nullable: true, description: "Google Drive parent folder for this form's generated documents. NULL falls back to the global env folder." },
@@ -1471,7 +1478,7 @@ export function buildSwaggerSpec(req?: Request) {
           tags: ["Forms"],
           summary: "Delete an unused form (admin)",
           description:
-            "Deletes a form that has no submissions. Refuses with 409 when the form has any submission history, because submissions cascade on form delete. Published but unused forms are deletable.",
+            "Deletes a form that has no submissions. Refuses with 409 when the form has any submission history, because submissions cascade on form delete. Published but unused forms are deletable.\n\nThis is the hard, irreversible option. To retire a form that already has submissions, use `PATCH /api/forms/{id}/status` with `{ \"status\": \"archived\" }` instead — archiving keeps every submission and can be undone.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
           responses: {
@@ -1498,7 +1505,13 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/forms/{id}/status": {
         patch: {
           tags: ["Forms"],
-          summary: "Publish/unpublish a form (draft|published|archived) — admin",
+          summary: "Publish / unpublish / archive / restore a form — admin",
+          description:
+            "Three request shapes, all returning the updated form.\n\n" +
+            "- `{ \"status\": \"draft\" | \"published\" }` — set the status explicitly. This is also how an archived form is brought back to a chosen status; it clears `pre_archive_status`.\n" +
+            "- `{ \"status\": \"archived\" }` — retire the form non-destructively. Every submission is kept (unlike `DELETE /api/forms/{id}`, which refuses once a form has any). The status held at that moment is remembered in `pre_archive_status`. Idempotent: archiving an already-archived form leaves the remembered status untouched.\n" +
+            "- `{ \"restore\": true }` — return an archived form to the status it held before archiving. Fails with 409 if the form is not archived. Forms archived before `pre_archive_status` existed fall back to `draft`, never to `published`.\n\n" +
+            "Archived and draft forms are excluded from the parent-facing `GET /api/forms/public` routes and from the in-app form selectors.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
           requestBody: {
@@ -1507,8 +1520,18 @@ export function buildSwaggerSpec(req?: Request) {
               "application/json": {
                 schema: {
                   type: "object",
-                  required: ["status"],
-                  properties: { status: { type: "string", enum: ["draft", "published", "archived"] } },
+                  properties: {
+                    status: {
+                      type: "string",
+                      enum: ["draft", "published", "archived"],
+                      description: "Set the status. Mutually exclusive with `restore`.",
+                    },
+                    restore: {
+                      type: "boolean",
+                      description:
+                        "Restore an archived form to its pre-archive status. Mutually exclusive with `status`.",
+                    },
+                  },
                 },
               },
             },
@@ -1518,8 +1541,9 @@ export function buildSwaggerSpec(req?: Request) {
               description: "OK — updated form",
               content: { "application/json": { schema: { $ref: "#/components/schemas/Form" } } },
             },
-            "400": { description: "Invalid status" },
+            "400": { description: "Invalid status, or a missing id/status/restore" },
             "404": { description: "Form not found" },
+            "409": { description: "Restore requested for a form that is not archived" },
           },
         },
       },

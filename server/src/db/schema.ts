@@ -75,6 +75,11 @@ export interface Form {
   designer_id: number | null;
   organization_id: number;
   status: FormStatus;
+  // The status this form held immediately before it was archived, so Restore
+  // returns it to exactly what it was (a published form comes back published,
+  // a draft comes back a draft) instead of guessing. NULL whenever the form is
+  // not currently archived. See archiveForm / restoreForm in queries.ts.
+  pre_archive_status: FormStatus | null;
   view_columns: string | null;
   // Short, human-readable, globally-unique code used as the prefix of submission
   // ids (e.g. `CDM`). Nullable — forms without a code fall back to `SUB`.
@@ -387,6 +392,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      designer_id INT NULL,
      status      NVARCHAR(20) NOT NULL CONSTRAINT DF_forms_status DEFAULT 'draft'
                  CHECK (status IN ('draft','published','archived')),
+     pre_archive_status NVARCHAR(20) NULL,
      created_at  DATETIME2 NOT NULL CONSTRAINT DF_forms_created_at DEFAULT SYSUTCDATETIME(),
      updated_at  DATETIME2 NOT NULL CONSTRAINT DF_forms_updated_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_forms_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE CASCADE,
@@ -452,6 +458,19 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.forms', 'submission_seq') IS NULL
      ALTER TABLE dbo.forms ADD submission_seq INT NOT NULL
        CONSTRAINT DF_forms_submission_seq DEFAULT 0;`,
+
+  // ---------------------------------------------------------------------
+  // Archive & Restore — forms.pre_archive_status. A form that is retired is
+  // archived rather than deleted, so its submissions survive. The status it
+  // held at the moment it was archived is remembered here so Restore can put
+  // it back exactly as it was instead of always landing on `draft`.
+  //
+  // Deliberately NOT constrained by a CHECK: this is a historical record, not
+  // an active state, and the only writer is `archiveForm`, which copies the
+  // current `status` — itself already CHECK-constrained.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.forms', 'pre_archive_status') IS NULL
+     ALTER TABLE dbo.forms ADD pre_archive_status NVARCHAR(20) NULL;`,
 
   // ---------------------------------------------------------------------
   // Incremental Submission IDs — submissions.submission_seq. Stored so the

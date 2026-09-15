@@ -4,6 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
 import ColumnsPicker, { cellText } from "../../components/ColumnsPicker";
 import { useAuth } from "../../context/AuthContext";
+import { selectableForms } from "../../lib/forms";
 import type {
   ExportColumn,
   Form,
@@ -150,9 +151,25 @@ export default function ReportsPage() {
       .listForms()
       .then((f) => {
         if (cancelled) return;
-        setForms(f);
-        // Land on the first form so the grid has something to show.
-        setState((s) => (s.formId == null && f.length ? { ...s, formId: f[0].id } : s));
+        // Only published forms can be reported on — a draft has no settled
+        // fields yet and an archived form has been retired. Filtering here keeps
+        // the picker and the default selection honest: with nothing published
+        // there is nothing to land on, so the page falls through to its "no
+        // published forms" prompt.
+        //
+        // Note the one path that can still point at a non-published form: a
+        // saved View is applied by `form_id` on mount (see `applyView`) and is
+        // an explicit user configuration, so it is deliberately not re-checked
+        // against this list. The picker below is the surface that must never
+        // offer a draft or archived form, and it cannot.
+        const reportable = selectableForms(f);
+        setForms(reportable);
+        // Land on the first published form so the grid has something to show.
+        // Reads from `reportable`, never from the raw response — the raw list's
+        // first entry may be a draft or an archived form.
+        setState((s) =>
+          s.formId == null && reportable.length ? { ...s, formId: reportable[0].id } : s,
+        );
       })
       .catch(() => {});
     return () => {
@@ -742,7 +759,11 @@ export default function ReportsPage() {
 
       {/* Preview grid */}
       {state.formId == null ? (
-        <div className="empty-state">Select a form to build a report.</div>
+        <div className="empty-state">
+          {forms.length === 0
+            ? "No published forms yet. Publish a form on the Forms page to build a report from it."
+            : "Select a form to build a report."}
+        </div>
       ) : loading && !preview ? (
         <div className="loading-state">
           <div className="spinner" /> Loading report…

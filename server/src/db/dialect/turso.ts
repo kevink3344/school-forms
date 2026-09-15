@@ -96,6 +96,7 @@ const TURSO_DDL: string[] = [
      organization_id INTEGER NOT NULL REFERENCES organizations(id) ON DELETE NO ACTION,
      status          TEXT NOT NULL DEFAULT 'draft'
                      CHECK (status IN ('draft','published','archived')),
+     pre_archive_status TEXT,
      code            TEXT COLLATE NOCASE,
      submission_seq  INTEGER NOT NULL DEFAULT 0,
      view_columns    TEXT,
@@ -269,6 +270,14 @@ export const tursoDialect: Dialect = {
       table: "users",
       column: "show_on_test_screen",
       definition: "BOOLEAN NOT NULL DEFAULT 0",
+    },
+    {
+      // Archive & Restore. Holds the status a form held just before it was
+      // archived so Restore can return it to exactly that status; NULL for any
+      // form that is not currently archived.
+      table: "forms",
+      column: "pre_archive_status",
+      definition: "TEXT",
     },
   ],
 

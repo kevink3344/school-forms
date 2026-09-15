@@ -11,10 +11,13 @@ import {
   setViewColumns,
   countSubmissionsForForm,
   deleteForm,
+  archiveForm,
+  restoreForm,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { createFormSchema, updateFormSchema } from "../schemas.js";
 import { validateDriveFolder } from "../google/docs.js";
+import { FORM_STATUS } from "../db/schema.js";
 
 export const formsRouter = Router();
 
@@ -231,25 +234,70 @@ formsRouter.post("/:id/generate-fields", requireAuth, requireRoles("admin"), asy
   }
 });
 
-// Admin: publish/unpublish a form — org-scoped
+// Admin: change a form's status — org-scoped. Three shapes, one route:
+//
+//   { status: "draft" | "published" }  explicitly set the status. Also used to
+//                                      bring an archived form back, in which
+//                                      case the archive marker is cleared.
+//   { status: "archived" }             retire the form. Remembers the status it
+//                                      held at that moment so it can be restored
+//                                      to exactly that state later.
+//   { restore: true }                  return an archived form to the status it
+//                                      held before archiving (see restoreForm).
+//
+// Archiving is deliberately the non-destructive counterpart to DELETE: it keeps
+// every submission, unlike `DELETE /:id`, which refuses once a form has any.
 formsRouter.patch("/:id/status", requireAuth, requireRoles("admin"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid form id" });
+      return;
+    }
+    const organizationId = req.user!.organization_id;
+    // Restore is an action, not a status — it reads the remembered status from
+    // the row rather than trusting the client to name it.
+    const wantsRestore = req.body?.restore === true;
     const status = req.body?.status;
-    if (!["draft", "published", "archived"].includes(status)) {
+    // Same vocabulary as the CHECK constraint — sourced from schema.ts so the
+    // route can never accept a status the database would reject.
+    if (!wantsRestore && !(FORM_STATUS as readonly string[]).includes(status)) {
       res.status(400).json({ error: "Invalid status" });
       return;
     }
-    const existing = await getFormWithFields(id, req.user!.organization_id);
+    // Org-scoped lookup: 404 (not 403) so we never reveal forms in other orgs.
+    const existing = await getFormWithFields(id, organizationId);
     if (!existing) {
       res.status(404).json({ error: "Form not found" });
       return;
     }
+
+    if (wantsRestore) {
+      const restored = await restoreForm(id, organizationId);
+      if (!restored) {
+        res.status(409).json({ error: "This form is not archived." });
+        return;
+      }
+      res.json(await getFormWithFields(id, organizationId));
+      return;
+    }
+
+    if (status === "archived") {
+      // No-op when already archived; the marker keeps its original value so a
+      // later Restore still lands on the right status.
+      await archiveForm(id, organizationId);
+      res.json(await getFormWithFields(id, organizationId));
+      return;
+    }
+
+    // Explicit set. Clearing `pre_archive_status` here is what makes this double
+    // as "restore to a chosen status": no stale marker survives a restore, so a
+    // later archive records the current status afresh.
     await execute(
-      `UPDATE dbo.forms SET status=@status, updated_at=SYSUTCDATETIME() WHERE id=@id`,
+      `UPDATE dbo.forms SET status=@status, pre_archive_status=NULL, updated_at=SYSUTCDATETIME() WHERE id=@id`,
       { id, status }
     );
-    res.json(await getFormWithFields(id, req.user!.organization_id));
+    res.json(await getFormWithFields(id, organizationId));
   } catch (err) {
     next(err);
   }

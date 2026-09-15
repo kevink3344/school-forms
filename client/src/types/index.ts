@@ -122,6 +122,9 @@ export interface Form {
   designer_id: number | null;
   organization_id: number | null;
   status: FormStatus;
+  // The status this form held immediately before it was archived, so Restore can
+  // return it to exactly that state. Non-null only while `status` is "archived".
+  pre_archive_status: FormStatus | null;
   code: string | null;
   submission_seq: number;
   // Per-form Google Drive parent folder for generated documents. NULL falls back

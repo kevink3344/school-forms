@@ -8,6 +8,7 @@ import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
+import { selectableForms } from "../../lib/forms";
 import { useAuth } from "../../context/AuthContext";
 
 interface Filters {
@@ -192,13 +193,11 @@ export default function AdminDashboard() {
             onChange={(e) => setFilter("form_id", e.target.value)}
           >
             <option value="">All forms</option>
-            {forms
-              .filter((f) => f.status === "published")
-              .map((f) => (
-                <option key={f.id} value={f.id}>
-                  {f.title}
-                </option>
-              ))}
+            {selectableForms(forms).map((f) => (
+              <option key={f.id} value={f.id}>
+                {f.title}
+              </option>
+            ))}
           </select>
         </div>
         <div className="filter-group">

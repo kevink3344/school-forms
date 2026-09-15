@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { api, getToken, ApiError } from "../lib/api";
 import ColumnsPicker, { cellText } from "./ColumnsPicker";
+import { selectableForms } from "../lib/forms";
 import type { ExportColumn, ExportPreview, Form } from "../types";
 
 interface Props {
@@ -42,14 +43,26 @@ export default function ExportModal({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
+  // Only published forms are offered here — the same rule the dashboard, staff
+  // queue and reports selectors use (see lib/forms.ts).
+  const selectable = useMemo(() => selectableForms(forms), [forms]);
+  // The caller may hand us a form that is no longer selectable, because it was
+  // archived or unpublished while this page was open. Fall back to the first
+  // selectable form so the picker and the preview never disagree, and the select
+  // never renders blank.
+  const effectiveFormId = useMemo(() => {
+    if (selectable.some((f) => String(f.id) === selectedFormId)) return selectedFormId;
+    return selectable[0] ? String(selectable[0].id) : "";
+  }, [selectable, selectedFormId]);
+
   useEffect(() => {
-    if (!open || !selectedFormId) return;
+    if (!open || !effectiveFormId) return;
     let cancelled = false;
     setLoading(true);
     setError("");
     api
       .exportPreview({
-        form_id: Number(selectedFormId),
+        form_id: Number(effectiveFormId),
         school_id: schoolId ? Number(schoolId) : undefined,
         status: status || undefined,
       })
@@ -72,7 +85,7 @@ export default function ExportModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedFormId, schoolId, status]);
+  }, [open, effectiveFormId, schoolId, status]);
 
   const availableColumns = useMemo(() => preview?.columns || [], [preview]);
 
@@ -101,7 +114,7 @@ export default function ExportModal({
     setError("");
     try {
       const token = getToken();
-      const qs = new URLSearchParams({ form_id: selectedFormId });
+      const qs = new URLSearchParams({ form_id: effectiveFormId });
       if (schoolId) qs.set("school_id", schoolId);
       if (status) qs.set("status", status);
       // Staff-only fields are included by default. The server ignores the flag for
@@ -142,17 +155,15 @@ export default function ExportModal({
         </div>
 
         <div className="drawer-body">
-          {forms.length > 1 && (
+          {selectable.length > 1 && (
             <div className="filter-group" style={{ minWidth: 0, marginBottom: 16 }}>
               <label>Form</label>
-              <select value={selectedFormId} onChange={(e) => setSelectedFormId(e.target.value)}>
-                {forms
-                  .filter((f) => f.status === "published")
-                  .map((f) => (
-                    <option key={f.id} value={f.id}>
-                      {f.title}
-                    </option>
-                  ))}
+              <select value={effectiveFormId} onChange={(e) => setSelectedFormId(e.target.value)}>
+                {selectable.map((f) => (
+                  <option key={f.id} value={f.id}>
+                    {f.title}
+                  </option>
+                ))}
               </select>
             </div>
           )}

@@ -558,8 +558,8 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
-            f.status, f.view_columns, f.code, f.submission_seq, f.doc_folder_id, f.google_form_url,
-            f.created_at, f.updated_at,
+            f.status, f.pre_archive_status, f.view_columns, f.code, f.submission_seq,
+            f.doc_folder_id, f.google_form_url, f.created_at, f.updated_at,
             (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
@@ -610,11 +610,71 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   }
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
-            view_columns, code, submission_seq, doc_folder_id, google_form_url, created_at, updated_at
+            pre_archive_status, view_columns, code, submission_seq, doc_folder_id,
+            google_form_url, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
   return rows[0] ?? null;
+}
+
+// Archive a form (org-scoped): retire it without destroying anything.
+//
+// Archiving is the non-destructive alternative to deleting a form that has
+// submission history. It records the status the form held at this moment in
+// `pre_archive_status` and then flips `status` to 'archived', in ONE statement
+// so the two can never disagree. `WHERE status <> 'archived'` makes the call
+// idempotent: archiving an already-archived form leaves `pre_archive_status`
+// pointing at the original status instead of overwriting it with 'archived'
+// (which would make Restore land on 'archived' and appear to do nothing).
+//
+// Returns true when a row was updated, false when no such form existed in the
+// org or it was already archived.
+export async function archiveForm(id: number, organizationId?: number | null): Promise<boolean> {
+  const clauses: string[] = ["id = @id", "status <> 'archived'"];
+  const params: Record<string, unknown> = { id };
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
+  const updated = await execute<{ id: number }>(
+    dialect().updateReturning({
+      table: "forms",
+      set: "pre_archive_status = status, status = 'archived', updated_at = SYSUTCDATETIME()",
+      where: clauses.join(" AND "),
+      returning: ["id"],
+    }),
+    params
+  );
+  return updated.length > 0;
+}
+
+// Restore an archived form (org-scoped) to the status it held before archiving.
+//
+// `COALESCE(pre_archive_status, 'draft')` is the safety net for legacy rows that
+// were archived before this column existed: they have no remembered status, so
+// they come back as a draft — never accidentally published to parents. The
+// marker is cleared in the same statement so a later archive records afresh.
+//
+// Returns true when a row was updated, false when no such form existed in the
+// org or it was not archived.
+export async function restoreForm(id: number, organizationId?: number | null): Promise<boolean> {
+  const clauses: string[] = ["id = @id", "status = 'archived'"];
+  const params: Record<string, unknown> = { id };
+  if (organizationId !== undefined && organizationId !== null) {
+    clauses.push("organization_id = @organizationId");
+    params.organizationId = organizationId;
+  }
+  const updated = await execute<{ id: number }>(
+    dialect().updateReturning({
+      table: "forms",
+      set: "status = COALESCE(pre_archive_status, 'draft'), pre_archive_status = NULL, updated_at = SYSUTCDATETIME()",
+      where: clauses.join(" AND "),
+      returning: ["id"],
+    }),
+    params
+  );
+  return updated.length > 0;
 }
 
 export async function listFormFields(formId: number): Promise<FormField[]> {
@@ -831,6 +891,12 @@ export async function updateForm(
   const title = data.title ?? existing.title;
   const description = data.description === undefined ? existing.description : data.description;
   const status = data.status ?? existing.status;
+  // Invariant: `pre_archive_status` is only meaningful while a form is archived.
+  // `updateForm` is the other writer of `status`, so an edit that moves a form
+  // out of 'archived' must clear the marker — otherwise a stale value would
+  // survive and a later Archive/Restore pair would restore the wrong status.
+  // (The form designer never sends `status`, so in practice this preserves it.)
+  const preArchiveStatus = status === "archived" ? existing.pre_archive_status : null;
   // `doc_folder_id` is nullable: an explicitly-supplied null clears it, an absent
   // key leaves it unchanged. `??` would conflate null with "not provided", so
   // check presence explicitly.
@@ -844,9 +910,18 @@ export async function updateForm(
 
   await execute(
     `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
+            pre_archive_status=@preArchiveStatus,
             doc_folder_id=@docFolderId, google_form_url=@googleFormUrl,
             updated_at=SYSUTCDATETIME() WHERE id=@id`,
-    { id: formId, title, description, status, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null }
+    {
+      id: formId,
+      title,
+      description,
+      status,
+      preArchiveStatus,
+      docFolderId: docFolderId ?? null,
+      googleFormUrl: googleFormUrl ?? null,
+    }
   );
 
   if (data.fields) {

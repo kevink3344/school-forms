@@ -9,6 +9,7 @@ import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
+import { selectableForms } from "../../lib/forms";
 
 // ---------------------------------------------------------------------------
 // The staff and School Contact queue.
@@ -34,7 +35,7 @@ export default function StaffQueue() {
   const [exportOpen, setExportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
-  // "" means "all reports". A school normally has exactly one form, in which
+  // "" means "all forms". A school normally has exactly one form, in which
   // case we select it outright rather than offering a choice that isn't one.
   const [formFilter, setFormFilter] = useState("");
 
@@ -82,7 +83,7 @@ export default function StaffQueue() {
     };
   }, [statusFilter, formFilter]);
 
-  // Load forms so the queue can be scoped to one report and the Export drawer
+  // Load forms so the queue can be scoped to one form and the Export drawer
   // can present a form selector (both scoped to this school).
   useEffect(() => {
     let cancelled = false;
@@ -100,6 +101,15 @@ export default function StaffQueue() {
     };
   }, []);
 
+  // Only published forms are offered in the Forms dropdown — drafts are still
+  // being written and archived forms have been retired, so neither is a sensible
+  // "form" to scope the queue to. Submissions belonging to an unpublished form
+  // are still reachable: they stay in the queue under "All forms". The
+  // auto-select above deliberately keys off the *unfiltered* list so that one
+  // live form beside an archived one does not silently scope the queue and hide
+  // the archived form's submissions.
+  const selectable = selectableForms(forms);
+
   const counts = {
     submitted: rows.filter((r) => r.status === "submitted").length,
     in_review: rows.filter((r) => r.status === "in_review").length,
@@ -113,8 +123,8 @@ export default function StaffQueue() {
   // organization, so their headline is the organization, not a school.
   const schoolScoped = user?.role === "cdm_contact";
 
-  // `extrasLoading` covers the frame where the report changed but its columns
-  // have not arrived yet, so the grid does not flash the previous report's.
+  // `extrasLoading` covers the frame where the form changed but its columns
+  // have not arrived yet, so the grid does not flash the previous form's.
   const busy = loading || extrasLoading;
 
   return (
@@ -128,13 +138,13 @@ export default function StaffQueue() {
         }
         actions={
           <>
-            {/* Column choice is per form, so with "All reports" selected there is
+            {/* Column choice is per form, so with "All forms" selected there is
                 nothing to choose from. Say so beside the button — a disabled
                 button on its own explains nothing, and its title only appears on
-                hover. On a single-report school the form is auto-selected, so the
+                hover. On a single-form school the form is auto-selected, so the
                 button is enabled from the first render. */}
             {!formId && (
-              <span className="head-hint">Select a single report to choose columns</span>
+              <span className="head-hint">Select a single form to choose columns</span>
             )}
             <button
               className="secondary-button"
@@ -142,7 +152,7 @@ export default function StaffQueue() {
               title={
                 formId
                   ? "Choose which form fields appear as columns"
-                  : "Select a single report to choose columns"
+                  : "Select a single form to choose columns"
               }
               onClick={openPicker}
             >
@@ -168,14 +178,14 @@ export default function StaffQueue() {
       >
         {forms.length > 1 && (
           <div className="filter-group">
-            <label htmlFor="sq-report">Report</label>
+            <label htmlFor="sq-form">Forms</label>
             <select
-              id="sq-report"
+              id="sq-form"
               value={formFilter}
               onChange={(e) => setFormFilter(e.target.value)}
             >
-              <option value="">All reports</option>
-              {forms.map((f) => (
+              <option value="">All forms</option>
+              {selectable.map((f) => (
                 <option key={f.id} value={f.id}>
                   {f.title}
                 </option>
@@ -222,7 +232,7 @@ export default function StaffQueue() {
           edit={edit}
           emptyMessage={
             formFilter
-              ? "No submissions for this report yet."
+              ? "No submissions for this form yet."
               : schoolScoped
                 ? "No submissions for your school yet."
                 : "No submissions yet."
@@ -237,13 +247,12 @@ export default function StaffQueue() {
         onToggle={toggleColumn}
         onToggleAll={toggleAll}
         onClose={closePicker}
-        scopeLabel="this report"
       />
 
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        formId={formFilter || (forms[0] ? String(forms[0].id) : "")}
+        formId={formFilter || (selectable[0] ? String(selectable[0].id) : "")}
         forms={forms}
         isStaff
       />

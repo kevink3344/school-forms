@@ -1,8 +1,17 @@
 # Plan — Delete an Unused Form
 
-**Status:** Draft for review
+**Status:** Shipped — and extended; see §10.
 **Date:** 2026-09-13
 **Area:** Admin → Forms (`/admin/forms`)
+
+> **⚠️ Partly superseded by §10 (2026-09-15).** §4.5 and §8 open decision 4 recommended
+> **hard delete only**, waving archiving off as "a separate, already-existing concept". That was
+> overruled. The guard this plan depends on is also *why the feature looked broken*: both live
+> forms have submissions, so Delete was disabled on every row — and a disabled button that still
+> reads "Delete" is indistinguishable from a broken one. **Delete is retained for
+> submission-free forms, and Archive was built beside it** as the always-available,
+> non-destructive option. Everything else here — the cascade warning in §2, the server-side
+> zero-submission guard, the org scoping — stands, and §10 builds directly on it.
 
 ---
 
@@ -100,6 +109,11 @@ should be cleanable. The submission count is the real gate, not the status. (If 
 require unpublishing first, that's a one-line tightening — see §8 Open Decisions.)
 
 ### 4.5 Hard delete vs. soft delete (archive)
+
+> **⚠️ Recommendation superseded by §10 (2026-09-15).** "Archive remains a separate,
+> already-existing concept" is no longer the position — the user asked for Delete to *be*
+> Archive, and the outcome was to keep both. Read this section as the analysis that was
+> available at the time; §10 records what shipped and why.
 
 The schema already has an `archived` status. Options:
 
@@ -254,8 +268,14 @@ Add a **Delete** button per row, next to Edit / Publish:
    `submission_count` to disable the button up front (option b)?
 3. **Confirmation UX** — a proper modal (recommended) or `window.confirm` for the first cut?
 4. **Hard delete vs. archive** — hard delete (recommended, matches the ask) or repurpose the
-   existing `archived` status as a soft delete?
+   existing `archived` status as a soft delete? → **Overruled 2026-09-15 (§10): both.** Delete
+   stays, Archive was added. Neither alone was sufficient.
 5. **Bulk delete** — out of scope for this plan; call out if wanted later.
+
+> Decisions **1** (unused *published* forms are deletable), **2** (settled as option **(b)** —
+> pre-computed `submission_count`, not optimism) and **3** (a proper modal, not
+> `window.confirm`) were all settled during implementation as recommended. Decision 4 was
+> settled **against** the recommendation. See §10.
 
 ---
 
@@ -269,3 +289,149 @@ Add a **Delete** button per row, next to Edit / Publish:
 | `client/src/lib/api.ts` | Add `deleteForm(id)`. |
 | `client/src/pages/admin/AdminForms.tsx` | Add the Delete button + confirm + error handling. |
 | `docs/plans/delete-form.md` | This plan. |
+
+The table above describes the first cut. §10.6 lists the files touched by the Archive/Delete
+extension, and §10.4 the five form-selector surfaces the second half of the follow-up request
+affected.
+
+---
+
+## 10. Post-implementation change — Archive is added, Delete is kept (2026-09-15)
+
+**Asked for as:** *"Clicking "Delete" on the form does not delete it. Acutally, this should say
+"Archive" and not delete. Also, when a form is "Unpublished", it should not show up in the form
+selector on the dashboard."*
+
+Two defects in one report. The first turned out to be **this plan working exactly as designed**
+— which is precisely why it read as a bug.
+
+### 10.1 Why Delete looked like it did nothing
+
+`DELETE /api/forms/{id}` refuses any form with submission history (§4.3), and the button was
+disabled up front from the `submission_count` that `GET /api/forms` already returns — that is
+§6.2 option **(b)**, not the option this plan recommended. Both live forms have submissions (16
+and 6), so **every** Delete button in the list was `disabled`. The tooltip explaining it only
+appears on hover.
+
+The user's instinct was the right fix: the action they actually wanted is non-destructive.
+Loosening the guard instead would have cascade-deleted real submissions — see §2. So **both**
+actions now exist:
+
+| Action | Enabled when | Effect |
+| --- | --- | --- |
+| **Delete** | `submission_count === 0` | Hard `DELETE`. `form_fields` cascade. Irreversible. |
+| **Archive** | always | `status = 'archived'`. Every submission kept. Reversible. |
+
+Delete's tooltip now names the alternative rather than only stating the refusal:
+*"In use — 16 submissions. Use Archive to retire it without losing data."*
+
+### 10.2 `pre_archive_status` — remembering what the form was
+
+Restoring straight to `draft` would be wrong: a form that was **published** when it was archived
+should come back published, which is what makes Archive safe to point at a live form. A new
+nullable `forms.pre_archive_status` column records the status held at archive time.
+
+| Choice | Why |
+| --- | --- |
+| Written by archive, cleared by restore and by an explicit `status` set | It is a **bookmark, not a history** — one nullable column instead of an audit table. |
+| `NULL` means "not currently archived" | The invariant, maintained in one place per writer. |
+| Deliberately **not** CHECK-constrained | It is a historical record, not an active state, and its only writer (`archiveForm`) copies `status` — itself already CHECK-constrained. A constraint here would duplicate a rule that cannot be violated. |
+| Legacy rows restore to **`draft`** | `COALESCE(pre_archive_status, 'draft')` — a form archived before the column existed has no remembered status, so it comes back *hidden*, never silently re-published to parents. |
+| Declared in **two** places under Turso | The `CREATE TABLE` in `dialect/turso.ts` **and** the dialect's `addColumns` list, which `pool.ts` applies only when `PRAGMA table_info` lacks the column. Declaring it in one place only is the known drift trap in `dual-db.md`. SQL Server needed a single `COL_LENGTH`-guarded statement instead, since its DDL ladder is cumulative. |
+
+### 10.3 One route, three shapes
+
+`PATCH /api/forms/{id}/status` already existed for publish/unpublish. Rather than add two
+routes, it now accepts:
+
+| Body | Meaning |
+| --- | --- |
+| `{ "status": "draft" \| "published" }` | Set it explicitly. Also how an archived form is brought back to a *chosen* status; clears the marker. |
+| `{ "status": "archived" }` | Retire it. Recalls the status held at that moment. |
+| `{ "restore": true }` | Return it to the status it held before archiving. **409** if the form is not archived. |
+
+Restore is an **action, not a status**, so the client never names a target status — the server
+reads it from the row. The route validates against `FORM_STATUS` imported from `schema.ts`
+rather than an inline array, so it cannot accept a status the database would reject. Both
+queries are org-scoped and both are **idempotent** — `archiveForm` carries
+`status <> 'archived'`, `restoreForm` carries `status = 'archived'` — so a double-click cannot
+overwrite the bookmark with `'archived'`, which would make Restore land back on archived and
+appear to do nothing.
+
+`updateForm` is the *other* writer of `status`, so it maintains the invariant too: an edit that
+moves a form out of `archived` clears the marker, otherwise a stale value would survive to
+mislead a later Archive → Restore pair.
+
+**`GET /api/forms` stays unfiltered.** Archiving must not hide a form from the management
+surface, or Restore would be unreachable. Filtering belongs to the consumers, not the source.
+
+### 10.4 The second defect: unpublished forms in the dashboard selector
+
+The published-only filter had been **copy-pasted into five places and drifted** — two filtered,
+three did not, the dashboard's own selector among the three. That divergence is what the user
+saw.
+
+There is now one definition, `selectableForms()` in `client/src/lib/forms.ts`, and all five
+surfaces call it:
+
+| Surface | Behaviour |
+| --- | --- |
+| `AdminDashboard.tsx` — filter select | Published only |
+| `StaffQueue.tsx` — report select | Published only |
+| `ReportsPage.tsx` — report select **and** the default landing | Published only; also fixes a real bug where the first entry of the **unfiltered** list — potentially a draft — was auto-selected |
+| `ExportModal.tsx` — form dropdown | Published only; falls back to the first selectable form if the chosen one stops being selectable while the modal is open |
+| `AdminForms.tsx` — the list itself | **Deliberately unfiltered** — it is the management surface |
+
+Two further deliberate exceptions, both commented in place:
+
+- `StaffQueue`'s "is there more than one form?" gate reads the **raw** list, so one published
+  form sitting beside an archived one does not silently scope the queue.
+- `ReportsPage`'s saved-**View** auto-apply lands on the View's stored `form_id` without
+  re-checking it, because a saved View is an explicit user configuration.
+
+The vocabulary matters here: there is no `unpublished` status. `FORM_STATUS` is
+`draft | published | archived`, and the UI's "Unpublish" sets `draft`. Both `draft` and
+`archived` are therefore "not published", and one helper covers both. Parents were never
+affected — they go through `GET /api/forms/public`, which the server has always filtered.
+
+### 10.5 UI
+
+- A **Show archived (N)** toggle above the list, **off by default**, disabled at 0. Archived
+  rows render at `opacity: 0.6`, badged **Archived**, sorted below the live ones.
+- Row actions — live: Edit / Publish-Unpublish / Archive / Delete (disabled when in use);
+  archived: Edit / **Restore** / Delete (disabled).
+- **One** confirmation modal for all three verbs, branching on which was clicked. Delete keeps
+  the **danger** button; Restore uses the **primary** button. Archive states its submission
+  count and that the form will disappear from the dashboard, staff queue and report selectors.
+
+### 10.6 Files touched
+
+| File | Change |
+| --- | --- |
+| `server/src/db/schema.ts` | `Form.pre_archive_status`; the column in the `dbo.forms` DDL; a `COL_LENGTH`-guarded migration. |
+| `server/src/db/dialect/turso.ts` | The column in `CREATE TABLE forms` **and** in `addColumns`. |
+| `server/src/db/queries.ts` | `archiveForm` / `restoreForm`; `pre_archive_status` added to the `listForms` and `getForm` projections; the invariant in `updateForm`. |
+| `server/src/routes/forms.ts` | `PATCH /:id/status` handles all three shapes, with 400/404/409 paths. |
+| `server/src/swagger.ts` | `pre_archive_status` on the schema; the three request shapes; a cross-reference from `DELETE`. |
+| `client/src/lib/forms.ts` | **New** — `selectableForms()`. |
+| `client/src/types/index.ts`, `client/src/lib/api.ts` | `pre_archive_status`; `archiveForm(id)` / `restoreForm(id)`. |
+| `client/src/pages/admin/AdminForms.tsx` | Archive/Restore, the Show-archived toggle, the tri-purpose modal. |
+| `AdminDashboard.tsx`, `StaffQueue.tsx`, `ReportsPage.tsx`, `components/ExportModal.tsx` | Share `selectableForms`. |
+| `docs/plans/feature-backlog.md` §9.11, `docs/features/swagger-ui.md` §8.3 | Registered. |
+
+### 10.7 Verified (live dev servers, Turso, admin role)
+
+`npx tsc --noEmit` (server) and `npx tsc -b` (client) clean; `npx vitest run` **36/36**;
+`npm run build` **1910 modules**.
+
+| Check | Result |
+| --- | --- |
+| Both live forms' Delete buttons | ✅ `disabled`, titles *"In use — 16 submissions. Use Archive to retire it without losing data."* / *"… 6 submissions …"* |
+| Archive round trip on the **draft** form (id 1, 6 submissions) | ✅ modal copy exact; confirm button computed `rgb(22, 87, 136)` — primary, not danger; the row left the list; the toggle read **Show archived (1)**; the revealed row carried `opacity` 0.6 and the **Archived** badge |
+| Restore | ✅ came back to **Draft**, the status it actually held — not a blanket fallback — with `pre_archive_status` `NULL` again and **all 6 submissions intact** |
+| Dashboard, Staff Queue, Reports and Export selectors | ✅ each listed only *CDM Google Form*; the draft form was absent from all four |
+| **Zero** published forms (temporarily unpublished, then reverted) | ✅ every selector collapsed to its placeholder — the Reports select held no value and nothing was auto-landed in the selector. The saved-View path in §10.4 is the one by-design exception. |
+| `pre_archive_status` on the wire | ✅ `GET /api/forms` returned `published / null` and `draft / null` |
+
+The round trip was run on the **draft** form and the database was left exactly as found. Nothing
+here archives a *published* form, so no parent-facing behaviour was exercised.
