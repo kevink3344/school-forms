@@ -7,7 +7,6 @@ import {
   LayoutDashboard,
   FileStack,
   FileText,
-  School,
   BarChart3,
   Settings,
   Download,
@@ -35,8 +34,8 @@ export function statusBadge(status: string): { cls: string; label: string } {
       return { cls: "badge-amber", label: "In Review" };
     case "flagged":
       return { cls: "badge-red", label: "Flagged" };
-    case "resolved":
-      return { cls: "badge-green", label: "Resolved" };
+    case "completed":
+      return { cls: "badge-green", label: "Completed" };
     default:
       return { cls: "badge-slate", label: status };
   }
@@ -117,7 +116,10 @@ export function AppShell({ children }: { children: ReactNode }) {
   const userMenuRef = useRef<HTMLDivElement>(null);
 
   // Which roles currently see the Documents link, from the public
-  // `documents_link` setting (see lib/useDocumentsEnabled).
+  // `documents_link` setting (see lib/useDocumentsEnabled). This is the ONLY
+  // gate for Documents — it is intentionally absent from MENU_ITEMS, so there is
+  // exactly one per-role switch for the link and no way for a second one to
+  // override it.
   const showDocuments = useDocumentsEnabled(user?.role);
 
   // Menu visibility per item, from the `menu_items` setting. Defaults to
@@ -272,7 +274,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <LayoutDashboard size={18} />
                 <span className="s-label">Dashboard</span>
               </NavLink>
-              {showDocuments && menuVisible("documents") && (
+              {showDocuments && (
                 <NavLink to="/admin/documents" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>
@@ -284,12 +286,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span className="s-label">Forms</span>
                 </NavLink>
               )}
-              {menuVisible("schools") && (
-                <NavLink to="/admin/schools" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
-                  <School size={18} />
-                  <span className="s-label">Schools</span>
-                </NavLink>
-              )}
+              {/* Schools is no longer a sidebar item — it renders as a
+                  collapsible section on the Settings page. */}
               {menuVisible("reports") && (
                 <NavLink to="/admin/reports" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <BarChart3 size={18} />
@@ -308,7 +306,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Download size={18} />
                 <span className="s-label">Submissions</span>
               </NavLink>
-              {showDocuments && menuVisible("documents") && (
+              {showDocuments && (
                 <NavLink to="/staff/documents" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileStack size={18} />
                   <span className="s-label">Documents</span>

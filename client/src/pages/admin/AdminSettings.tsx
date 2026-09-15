@@ -5,6 +5,7 @@ import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_
 import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
+import SchoolsPanel from "./SchoolsPanel";
 
 // login mode options displayed in the Settings → Login Mode panel.
 const LOGIN_MODES: { value: LoginMode; label: string; desc: string; tone: string }[] = [
@@ -677,6 +678,11 @@ export default function AdminSettings() {
           the menu for that role; it does not delete any data or change permissions on
           the underlying pages.
         </p>
+        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+          <strong>Documents</strong> is not listed here. It is controlled by the
+          Documents Link panel above, which also decides whether the documents API
+          accepts a request.
+        </p>
         <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
           {MENU_ITEMS.map((item) => (
             <div key={item}>
@@ -831,6 +837,18 @@ export default function AdminSettings() {
               )}
             </tbody>
           </table>
+      </CollapsibleSection>
+
+      {/* Schools panel — the district school list. This used to be its own page
+          at /admin/schools; it now lives here so all data administration is in
+          one place. It renders its own toolbar, table, and pager, so the body
+          padding is removed to keep it flush with the section. */}
+      <CollapsibleSection
+        title="Schools"
+        subtitle="Loaded from the district data source. Import is manual."
+        bodyStyle={{ padding: 0 }}
+      >
+        <SchoolsPanel />
       </CollapsibleSection>
 
       {/* Create / edit organization — right slide-out drawer */}

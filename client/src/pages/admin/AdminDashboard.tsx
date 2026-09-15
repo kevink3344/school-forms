@@ -156,7 +156,7 @@ export default function AdminDashboard() {
             <option value="submitted">Submitted</option>
             <option value="in_review">In Review</option>
             <option value="flagged">Flagged</option>
-            <option value="resolved">Resolved</option>
+            <option value="completed">Completed</option>
           </select>
         </div>
         <div className="filter-group">

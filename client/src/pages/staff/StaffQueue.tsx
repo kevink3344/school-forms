@@ -64,7 +64,7 @@ export default function StaffQueue() {
     submitted: rows.filter((r) => r.status === "submitted").length,
     in_review: rows.filter((r) => r.status === "in_review").length,
     flagged: rows.filter((r) => r.status === "flagged").length,
-    resolved: rows.filter((r) => r.status === "resolved").length,
+    completed: rows.filter((r) => r.status === "completed").length,
   };
 
   const openSubmission = (publicId: string) => navigate(`/staff/${publicId}`);
@@ -133,7 +133,7 @@ export default function StaffQueue() {
           { value: "submitted", label: "Submitted" },
           { value: "in_review", label: "In Review" },
           { value: "flagged", label: "Flagged" },
-          { value: "resolved", label: "Resolved" },
+          { value: "completed", label: "Completed" },
         ].map((t) => (
           <button
             key={t.value}

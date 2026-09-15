@@ -2,7 +2,6 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { School, SchoolFacets, SchoolPage } from "../../types";
-import { PageHead } from "../../components/layout";
 
 const PAGE_SIZE = 50;
 
@@ -28,7 +27,16 @@ function valueFor(school: School, label: string): string {
   }
 }
 
-export default function AdminSchools() {
+// ---------------------------------------------------------------------------
+// Schools panel
+//
+// The district school list, rendered inside a collapsible section on the
+// Settings page. It deliberately renders no <PageHead> — the section header
+// supplies the title and description — and every element is flush with the
+// section body (`bodyStyle={{ padding: 0 }}`) so the toolbar, table, and pager
+// read as one card instead of a card nested inside a card.
+// ---------------------------------------------------------------------------
+export default function SchoolsPanel() {
   const [columns, setColumns] = useState<string[]>([]);
   const [page, setPage] = useState<SchoolPage | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
@@ -118,29 +126,35 @@ export default function AdminSchools() {
   const rows = page?.rows ?? [];
 
   return (
-    <div>
-      <PageHead
-        title="Schools"
-        subtitle="Schools loaded from the district data source. Import is manual."
-        actions={
-          <button className="primary-button" onClick={handleImport} disabled={importing}>
-            {importing ? "Importing..." : "Import Schools"}
-          </button>
-        }
-      />
-
-      {error && (
-        <div className="alert-error" role="alert">
-          {error}
-        </div>
-      )}
-      {message && (
-        <div className="alert-success" role="status">
-          {message}
+    <>
+      {(error || message) && (
+        <div style={{ padding: "14px 16px 0" }}>
+          {error && (
+            <div className="alert-error" role="alert">
+              {error}
+            </div>
+          )}
+          {message && (
+            <div className="alert-success" role="status">
+              {message}
+            </div>
+          )}
         </div>
       )}
 
-      <div className="filter-bar">
+      {/* Filter toolbar. Reuses .filter-bar for its flex layout but drops the
+          frame (top/left/right border + radius) so it sits flush inside the
+          section, reading as the card's header row. */}
+      <div
+        className="filter-bar"
+        style={{
+          marginBottom: 0,
+          borderTop: "none",
+          borderLeft: "none",
+          borderRight: "none",
+          borderRadius: 0,
+        }}
+      >
         <div className="filter-group">
           <label htmlFor="school-search">Search</label>
           <input
@@ -183,71 +197,66 @@ export default function AdminSchools() {
             Clear
           </button>
         )}
+        <button className="primary-button" onClick={handleImport} disabled={importing}>
+          {importing ? "Importing..." : "Import Schools"}
+        </button>
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h3>
-            {total} school{total === 1 ? "" : "s"}
-          </h3>
-        </div>
-        <div className="card-body" style={{ padding: 0 }}>
-          <table className="grid">
-            <thead>
-              <tr>
+      <table className="grid">
+        <thead>
+          <tr>
+            {(columns.length ? columns : ["Name"]).map((label) => (
+              <th key={label}>{label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {loading ? (
+            <tr>
+              <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
+                Loading…
+              </td>
+            </tr>
+          ) : rows.length === 0 ? (
+            <tr>
+              <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
+                No schools yet. Click <strong>Import Schools</strong> to load data.
+              </td>
+            </tr>
+          ) : (
+            rows.map((school) => (
+              <tr key={school.id}>
                 {(columns.length ? columns : ["Name"]).map((label) => (
-                  <th key={label}>{label}</th>
+                  <td key={label} data-label={label}>{valueFor(school, label)}</td>
                 ))}
               </tr>
-            </thead>
-            <tbody>
-              {loading ? (
-                <tr>
-                  <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
-                    Loading…
-                  </td>
-                </tr>
-              ) : rows.length === 0 ? (
-                <tr>
-                  <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
-                    No schools yet. Click <strong>Import Schools</strong> to load data.
-                  </td>
-                </tr>
-              ) : (
-                rows.map((school) => (
-                  <tr key={school.id}>
-                    {(columns.length ? columns : ["Name"]).map((label) => (
-                      <td key={label} data-label={label}>{valueFor(school, label)}</td>
-                    ))}
-                  </tr>
-                ))
-              )}
-            </tbody>
-          </table>
-        </div>
-        <div className="card-foot" style={{ display: "flex", alignItems: "center", gap: 12 }}>
-          <button
-            className="secondary-button"
-            disabled={loading || currentPage <= 1}
-            onClick={() => load(currentPage - 1)}
-          >
-            <ChevronLeft size={16} />
-            <span>Prev</span>
-          </button>
-          <span style={{ fontSize: 13 }}>
-            Page {currentPage} of {totalPages}
-          </span>
-          <button
-            className="secondary-button"
-            disabled={loading || currentPage >= totalPages}
-            onClick={() => load(currentPage + 1)}
-          >
-            <span>Next</span>
-            <ChevronRight size={16} />
-          </button>
-          <span style={{ fontSize: 13, marginLeft: "auto" }}>{total} total</span>
-        </div>
+            ))
+          )}
+        </tbody>
+      </table>
+
+      <div className="card-foot">
+        <button
+          className="secondary-button"
+          disabled={loading || currentPage <= 1}
+          onClick={() => load(currentPage - 1)}
+        >
+          <ChevronLeft size={16} />
+          <span>Prev</span>
+        </button>
+        <span style={{ fontSize: 13 }}>
+          Page {currentPage} of {totalPages}
+        </span>
+        <button
+          className="secondary-button"
+          disabled={loading || currentPage >= totalPages}
+          onClick={() => load(currentPage + 1)}
+        >
+          <span>Next</span>
+          <ChevronRight size={16} />
+        </button>
+        <span style={{ fontSize: 13, marginLeft: "auto" }}>{total} total</span>
       </div>
-    </div>
+    </>
   );
 }

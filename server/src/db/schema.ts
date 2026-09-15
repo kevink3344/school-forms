@@ -7,7 +7,7 @@ export const SUBMISSION_STATUS = [
   "submitted",
   "in_review",
   "flagged",
-  "resolved",
+  "completed",
 ] as const;
 export const FIELD_TYPES = [
   "text",
@@ -506,7 +506,8 @@ export const DDL_STATEMENTS: string[] = [
      form_id      INT NOT NULL,
      school_id    INT NULL,
      status       NVARCHAR(20) NOT NULL CONSTRAINT DF_submissions_status DEFAULT 'submitted'
-                  CHECK (status IN ('submitted','in_review','flagged','resolved')),
+                  CONSTRAINT CK_submissions_status
+                  CHECK (status IN ('submitted','in_review','flagged','completed')),
      submitted_at DATETIME2 NOT NULL CONSTRAINT DF_submissions_submitted_at DEFAULT SYSUTCDATETIME(),
      updated_at   DATETIME2 NOT NULL CONSTRAINT DF_submissions_updated_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_submissions_form FOREIGN KEY (form_id) REFERENCES dbo.forms(id) ON DELETE CASCADE,
@@ -659,6 +660,43 @@ export const DDL_STATEMENTS: string[] = [
      CREATE UNIQUE INDEX UX_report_views_user_name ON dbo.report_views(user_id, name);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_report_views_user')
      CREATE INDEX IX_report_views_user ON dbo.report_views(user_id);`,
+
+  // ---------------------------------------------------------------------
+  // Rename the submission status "resolved" -> "completed".
+  //
+  // Three things move together: the value stored on existing rows, the CHECK
+  // constraint that enumerates the allowed values, and the status captured inside
+  // each saved report view's `filters` JSON.
+  //
+  // Order matters. The legacy constraint is dropped BEFORE the rows are updated,
+  // otherwise the UPDATE trips it. The constraint is then re-added under an
+  // explicit name (CK_submissions_status) so a future value change can target it
+  // without hunting for a server-generated name in sys.check_constraints — the
+  // original inline CHECK was unnamed, which is precisely this problem. Fresh
+  // databases already get the named constraint from CREATE TABLE above, so every
+  // branch here is a no-op for them.
+  `DECLARE @legacy_ck sysname;
+   SELECT TOP 1 @legacy_ck = name FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.submissions')
+      AND name <> 'CK_submissions_status';
+   IF @legacy_ck IS NOT NULL
+     EXEC('ALTER TABLE dbo.submissions DROP CONSTRAINT ' + @legacy_ck);
+
+   UPDATE dbo.submissions SET status = N'completed' WHERE status = N'resolved';
+
+   IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_submissions_status')
+     ALTER TABLE dbo.submissions
+       ADD CONSTRAINT CK_submissions_status
+       CHECK (status IN ('submitted','in_review','flagged','completed'));`,
+
+  // The same rename inside saved report views. `filters` is written with
+  // JSON.stringify (compact — no spaces), so this literal replace is exact, and
+  // the LIKE guard makes it a no-op for any view that never filtered by status.
+  // Skipping this would leave those views filtering on a value that no longer
+  // exists, silently matching nothing.
+  `UPDATE dbo.report_views
+      SET filters = REPLACE(filters, N'"status":"resolved"', N'"status":"completed"')
+    WHERE filters LIKE N'%"status":"resolved"%';`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

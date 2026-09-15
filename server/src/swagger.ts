@@ -133,7 +133,7 @@ export function buildSwaggerSpec(req?: Request) {
             form_name: { type: "string" },
             school_id: { type: "integer", nullable: true },
             organization_id: { type: "integer", nullable: true },
-            status: { type: "string", enum: ["submitted", "in_review", "flagged", "resolved"] },
+            status: { type: "string", enum: ["submitted", "in_review", "flagged", "completed"] },
             submission_seq: { type: "integer", nullable: true },
             submitted_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
@@ -1509,7 +1509,7 @@ export function buildSwaggerSpec(req?: Request) {
                 schema: {
                   type: "object",
                   required: ["status"],
-                  properties: { status: { type: "string", enum: ["submitted", "in_review", "flagged", "resolved"] } },
+                  properties: { status: { type: "string", enum: ["submitted", "in_review", "flagged", "completed"] } },
                 },
               },
             },

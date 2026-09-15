@@ -10,14 +10,22 @@ export const settingsRouter = Router();
 export const DOCUMENTS_LINK_KEY = "documents_link";
 
 // Menu visibility — which sidebar items are shown, by role. Stored as a JSON
-// object of `{ [menuKey]: Role[] }`, e.g. `{"documents":["admin","staff"]}`.
+// object of `{ [menuKey]: Role[] }`, e.g. `{"forms":["admin","staff"]}`.
 // A missing key (or a null/blank setting) means "visible to every role", so
 // legacy rows keep working. An explicitly empty array hides that item for all.
+// Unknown keys are ignored, which is what lets a row written by an earlier
+// version — still carrying the retired `documents` and `schools` keys — keep
+// parsing cleanly instead of needing a migration.
 export const MENU_ITEMS_KEY = "menu_items";
 
 // The menu items that can be toggled from Settings. Kept in sync with the
 // client's MENU_ITEMS in lib/settings.ts.
-export const MENU_ITEM_KEYS = ["documents", "forms", "schools", "reports"] as const;
+//
+// Documents is deliberately NOT here — it is governed by `documents_link` (the
+// Documents Link panel), which also gates the /api/documents endpoints. Having it
+// in both places meant a hidden `menu_items.documents` silently overrode a visible
+// `documents_link`, so the admin's Documents Link toggles appeared to do nothing.
+export const MENU_ITEM_KEYS = ["forms", "reports"] as const;
 export type MenuItemKey = (typeof MENU_ITEM_KEYS)[number];
 
 // Allow-list of keys that can be read/written. Never let an arbitrary key hit

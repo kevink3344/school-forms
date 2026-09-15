@@ -107,7 +107,7 @@ New staff members can click **Create an account** to register.
 
 After signing in, the menu is hidden to give your work the full width of the screen. Click the
 menu button in the top-left to slide it out; it lists the sections available to your role.
-Administrators see **Dashboard**, **Forms**, **Schools**, **Reports**, and **Settings**; Staff
+Administrators see **Dashboard**, **Forms**, **Reports**, and **Settings**; Staff
 and School Contacts see **Submissions** and **Reports**. The **Documents** item appears when
 your administrator has enabled it.
 
@@ -133,7 +133,7 @@ Use the filter bar at the top of the Dashboard to narrow the list:
 
 - **School** — all schools, or one specific school
 - **Form** — all forms, or one published form
-- **Status** — Submitted, In Review, Flagged, or Resolved
+- **Status** — Submitted, In Review, Flagged, or Completed
 - **Date from** / **Date to** — restrict by submission date
 
 Click **Clear** to reset the filters.
@@ -147,8 +147,9 @@ Click **Export** on the Dashboard to open the export panel.
 
 ![Export panel](images/03-export-drawer.png)
 
-1. Tick the columns you want. Use **Select all** to include everything.
-2. Administrators can also tick **Include staff-only fields** to add internal columns.
+1. Tick the columns to show in the preview. Use **Select all** to include everything.
+2. Staff-only fields are included by default. They are labelled with a **Staff** badge so
+   you can spot them.
 3. Check the **Preview** table to confirm the output.
 4. Click **Export CSV** to download the file.
 
@@ -242,7 +243,7 @@ A confirmation dialog appears. Click **Delete** to confirm.
 
 ## 2.10 Managing schools
 
-The **Schools** page lists the schools loaded from the district data source.
+On **Settings**, expand **Schools** to see the list loaded from the district data source.
 
 ![Schools](images/07-schools.png)
 
@@ -296,17 +297,25 @@ Expand **Documents Link** to control which roles see the **Documents** item in t
 
 Each role has a toggle. Switch it on to show the Documents link for that role, or off to hide it.
 
+This is the **only** control for the Documents item. Unlike the other sidebar links, Documents is
+not repeated under Menu Settings, because this setting also decides whether the documents API
+accepts a request.
+
 ## 2.14 Menu Settings
 
 Expand **Menu Settings** to control which sidebar items each role can see.
 
 ![Menu Settings](images/12-menu-settings.png)
 
-The panel is grouped by menu item — **Documents**, **Forms**, and **Schools** — with a toggle
-for each role. Switch a toggle off to hide that item from that role.
+The panel is grouped by menu item — **Forms** and **Reports** — with a toggle for each role.
+Switch a toggle off to hide that item from that role.
 
 > **Note:** Hiding a menu item only removes it from the sidebar. It does not delete any data or
 > change permissions on the underlying page.
+
+> **Note:** **Documents** is not listed here. Use
+> [Documents Link](#213-documents-link) above to show or hide it — that setting also decides
+> whether the documents API accepts a request.
 
 ## 2.15 Slack notifications
 
@@ -352,7 +361,8 @@ it as CSV, Excel, or PDF. Whatever is on screen is exactly what lands in the fil
    **Format** (`CSV`, `Excel`, or `PDF`).
 4. Click **Export** to download. The preview grid updates as you change the filters.
 
-Administrators can also tick **Include** under **Staff-only** to add internal columns.
+Staff-only fields are included by default and are labelled with a **Staff** badge in the
+column panel and the preview header. Untick any you don't want before exporting.
 Un-ticking every column falls back to all columns you have access to, so a report is
 never empty by accident.
 
@@ -377,7 +387,7 @@ Use the **Table** and **Cards** buttons to switch between layouts:
 
 ![Card view](images/15-staff-queue-cards.png)
 
-Use the status tabs — **All**, **Submitted**, **In Review**, **Flagged**, **Resolved** — to
+Use the status tabs — **All**, **Submitted**, **In Review**, **Flagged**, **Completed** — to
 filter the list. Click **Review** on any row to open the submission.
 
 ## 3.2 Reviewing a submission
@@ -396,7 +406,7 @@ Use the **Select Status** dropdown in the page header to change the status.
 
 ![Select Status](images/16-submission-detail.png)
 
-Choose **Submitted**, **In Review**, **Flagged**, or **Resolved**. The change saves
+Choose **Submitted**, **In Review**, **Flagged**, or **Completed**. The change saves
 immediately.
 
 ## 3.4 Editing parent answers
@@ -475,7 +485,7 @@ is your only reference for the submission.
 | **Submitted** | Received and awaiting review |
 | **In Review** | Currently being reviewed by staff |
 | **Flagged** | Needs attention or follow-up |
-| **Resolved** | Reviewed and complete |
+| **Completed** | Reviewed and complete |
 
 **Forms**
 

@@ -24,7 +24,6 @@ interface ReportState {
   status: SubmissionStatus | "";
   from: string;
   to: string;
-  includeStaffOnly: boolean;
 }
 
 const EMPTY_STATE: ReportState = {
@@ -33,7 +32,6 @@ const EMPTY_STATE: ReportState = {
   status: "",
   from: "",
   to: "",
-  includeStaffOnly: false,
 };
 
 const STATUSES: { value: SubmissionStatus | ""; label: string }[] = [
@@ -41,7 +39,7 @@ const STATUSES: { value: SubmissionStatus | ""; label: string }[] = [
   { value: "submitted", label: "Submitted" },
   { value: "in_review", label: "In Review" },
   { value: "flagged", label: "Flagged" },
-  { value: "resolved", label: "Resolved" },
+  { value: "completed", label: "Completed" },
 ];
 
 const FORMATS: { value: ReportFormat; label: string }[] = [
@@ -54,6 +52,8 @@ const FORMATS: { value: ReportFormat; label: string }[] = [
 // filter is passed in rather than read from `state` because the caller debounces
 // it separately. Nullish and empty values are dropped by reportQueryString, so
 // "unset" and "omitted" are the same thing here.
+// Staff-only fields are no longer opt-in — they are always part of a report, and
+// the column picker (which starts fully ticked) is how you narrow the selection.
 function buildReportQuery(
   state: ReportState,
   q: string,
@@ -66,7 +66,9 @@ function buildReportQuery(
     from: state.from || null,
     to: state.to || null,
     q: q || null,
-    include_staff_only: state.includeStaffOnly,
+    // Always on. The server still needs the flag to authorize the staff-only
+    // columns; it is simply no longer something the user chooses.
+    include_staff_only: true,
     columns,
   };
 }
@@ -253,7 +255,7 @@ export default function ReportsPage() {
     from: state.from || null,
     to: state.to || null,
     q: qDebounced || null,
-    include_staff_only: state.includeStaffOnly,
+    include_staff_only: true,
   });
 
   const applyView = (view: ReportView) => {
@@ -267,7 +269,6 @@ export default function ReportsPage() {
       status: (view.filters.status ?? "") as SubmissionStatus | "",
       from: view.filters.from ?? "",
       to: view.filters.to ?? "",
-      includeStaffOnly: !!view.filters.include_staff_only,
     });
     setFormat(view.format);
     setChecked(new Set(view.columns ?? []));
@@ -537,25 +538,14 @@ export default function ReportsPage() {
           />
         </div>
 
-        {isAdmin && (
-          <div className="filter-group" style={{ minWidth: 0 }}>
-            <label>Staff-only</label>
-            <label style={{ display: "flex", alignItems: "center", gap: 8, padding: "8px 0", fontSize: 13 }}>
-              <input
-                type="checkbox"
-                checked={state.includeStaffOnly}
-                onChange={(e) => patch({ includeStaffOnly: e.target.checked })}
-              />
-              Include
-            </label>
-          </div>
-        )}
+        {/* Staff-only fields are no longer opt-in, so there is no toggle here —
+            every report includes them and the column picker narrows from there. */}
 
         <button
           className="clear"
           onClick={() => {
             setQInput("");
-            setState((s) => ({ ...EMPTY_STATE, formId: s.formId, includeStaffOnly: s.includeStaffOnly }));
+            setState((s) => ({ ...EMPTY_STATE, formId: s.formId }));
             setActiveViewId(null);
           }}
         >

@@ -6,7 +6,6 @@ import RegisterPage from "./pages/RegisterPage";
 import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminForms from "./pages/admin/AdminForms";
 import AdminFormDesigner from "./pages/admin/AdminFormDesigner";
-import AdminSchools from "./pages/admin/AdminSchools";
 import AdminSettings from "./pages/admin/AdminSettings";
 import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
@@ -77,13 +76,12 @@ export default function App() {
           </ProtectedRoute>
         }
       />
+      {/* Schools moved into Settings — keep the old URL working for bookmarks. */}
       <Route
         path="/admin/schools"
         element={
           <ProtectedRoute roles={["admin"]}>
-            <AppShell>
-              <AdminSchools />
-            </AppShell>
+            <Navigate to="/admin/settings" replace />
           </ProtectedRoute>
         }
       />

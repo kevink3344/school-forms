@@ -2,7 +2,7 @@
 
 export type Role = "admin" | "staff" | "cdm_contact";
 export type FormStatus = "draft" | "published" | "archived";
-export type SubmissionStatus = "submitted" | "in_review" | "flagged" | "resolved";
+export type SubmissionStatus = "submitted" | "in_review" | "flagged" | "completed";
 export type FieldType =
   | "text"
   | "textarea"

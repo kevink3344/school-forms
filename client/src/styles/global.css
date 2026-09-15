@@ -611,6 +611,36 @@ table.grid tbody tr.grid-row:hover { background: var(--panel-bg); }
 .edit-input:focus, .edit-select:focus, .edit-textarea:focus { border-color: var(--accent); }
 .edit-select { appearance: auto; }
 
+/* The status pill in the submission-detail header — the one .edit-select that is a
+   filled accent control rather than a plain field box.
+   It draws its own chevron instead of the native one, because Chrome pins the
+   native arrow to a fixed inset from the right border and ignores padding-right,
+   so there is no way to give it breathing room. `appearance: none` plus a
+   background SVG puts the arrow at an inset we choose. The chevron colour is
+   baked into the SVG ($fff) since a background image cannot inherit `color`.
+   `background-color` rather than the `background` shorthand is required — the
+   shorthand would reset background-image and silently erase the chevron.
+   Height is deliberately absent: .edit-select already pins it to --control-h so
+   the pill lines up with the Edit / Back buttons beside it. Width is auto with a
+   min-width so the pill grows with the longest status label instead of clipping. */
+.edit-select.status-select {
+  appearance: none;
+  width: auto;
+  min-width: 160px;
+  /* Left inset matches the text inset; the larger right inset reserves room for
+     the chevron and keeps the label from running under it. */
+  padding: 0 38px 0 14px;
+  font-size: 15px;
+  font-weight: 700;
+  background-color: var(--accent);
+  color: #fff;
+  border: 1px solid var(--accent);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='%23fff' stroke-width='2.75' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 18px center;
+  background-size: 15px 15px;
+}
+
 /* Submission answers — tabular label/value columns */
 .field-list { display: flex; flex-direction: column; gap: 10px; }
 .field { display: grid; grid-template-columns: 260px 1fr; column-gap: 28px; align-items: start; }

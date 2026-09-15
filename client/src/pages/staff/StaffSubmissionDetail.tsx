@@ -7,7 +7,7 @@ import { useAuth } from "../../context/AuthContext";
 import { useDocumentsEnabled } from "../../lib/useDocumentsEnabled";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
 
-const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "resolved"];
+const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "completed"];
 
 export default function StaffSubmissionDetail() {
   const { publicId } = useParams<{ publicId: string }>();
@@ -249,22 +249,10 @@ export default function StaffSubmissionDetail() {
           </label>
           <select
             id="submission-status"
-            className="edit-select"
+            className="edit-select status-select"
             value={detail.status}
             disabled={savingStatus}
             onChange={(e) => handleStatus(e.target.value as SubmissionStatus)}
-            style={{
-              // No height here: .edit-select already pins it to --control-h, so
-              // this pill lines up with the Edit / Back buttons beside it.
-              padding: "0 12px",
-              width: "auto",
-              minWidth: 160,
-              fontSize: 15,
-              fontWeight: 700,
-              background: "var(--accent)",
-              color: "#fff",
-              border: "1px solid var(--accent)",
-            }}
           >
             {STATUSES.map((s) => (
               <option key={s} value={s}>
@@ -713,7 +701,7 @@ const STATUS_LABEL: Record<SubmissionStatus, string> = {
   submitted: "Submitted",
   in_review: "In Review",
   flagged: "Flagged",
-  resolved: "Resolved",
+  completed: "Completed",
 };
 
 function valuesToDraft(values: SubmissionValueRow[]): Record<number, string | number | boolean | string[] | null> {

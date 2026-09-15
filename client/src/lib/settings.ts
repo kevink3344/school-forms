@@ -35,14 +35,20 @@ export function documentsEnabledFor(raw: string | null | undefined, role: Role):
 
 // The menu items that can be toggled from Settings → Menu Settings. Keep in sync
 // with the server's MENU_ITEM_KEYS.
-export const MENU_ITEMS = ["documents", "forms", "schools", "reports"] as const;
+//
+// Documents is deliberately NOT in this list. It already has its own per-role
+// control — `documents_link`, the Documents Link panel — which additionally gates
+// the /api/documents endpoints. Listing it here too gave one link two per-role
+// switches, and the generic one silently overrode the specific one: an admin
+// could switch Documents on in the Documents Link panel and still see no link,
+// with nothing on screen explaining why. Forms and Reports have no dedicated
+// control of their own, so they belong here.
+export const MENU_ITEMS = ["forms", "reports"] as const;
 export type MenuItemKey = (typeof MENU_ITEMS)[number];
 
 // Human-facing label for a menu item.
 export const MENU_ITEM_LABELS: Record<MenuItemKey, string> = {
-  documents: "Documents",
   forms: "Forms",
-  schools: "Schools",
   reports: "Reports",
 };
 

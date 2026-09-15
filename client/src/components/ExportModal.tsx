@@ -11,8 +11,9 @@ interface Props {
   forms: Form[];
   schoolId?: string;
   status?: string;
-  /** When true, the "include staff-only fields" toggle is hidden and staff-only
-   *  columns are never selectable. Defaults to false (i.e. admin). */
+  /** When true the caller is a staff member: the CSV request is not marked as
+   *  including staff-only fields, and the server scopes the export to their own
+   *  school. Defaults to false (i.e. admin). */
   isStaff?: boolean;
 }
 
@@ -28,7 +29,6 @@ export default function ExportModal({
   const [selectedFormId, setSelectedFormId] = useState(formId);
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
-  const [includeStaffOnly, setIncludeStaffOnly] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [exporting, setExporting] = useState(false);
@@ -37,7 +37,6 @@ export default function ExportModal({
     if (open) {
       setSelectedFormId(formId);
       setChecked(new Set());
-      setIncludeStaffOnly(false);
       setError("");
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -57,8 +56,10 @@ export default function ExportModal({
       .then((p) => {
         if (cancelled) return;
         setPreview(p);
-        // Default: all non-staff-only columns checked
-        setChecked(new Set(p.columns.filter((c) => !c.staff_only).map((c) => c.key)));
+        // Default: every column ticked, staff-only fields included. The server
+        // only ever returns staff-only columns the caller is allowed to see, so
+        // this cannot reveal one to staff.
+        setChecked(new Set(p.columns.map((c) => c.key)));
       })
       .catch((err) => {
         if (cancelled) return;
@@ -103,7 +104,9 @@ export default function ExportModal({
       const qs = new URLSearchParams({ form_id: selectedFormId });
       if (schoolId) qs.set("school_id", schoolId);
       if (status) qs.set("status", status);
-      if (includeStaffOnly) qs.set("include_staff_only", "1");
+      // Staff-only fields are included by default. The server ignores the flag for
+      // staff, who only ever receive the staff-only columns their role grants.
+      if (!isStaff) qs.set("include_staff_only", "1");
 
       const res = await fetch(`/api/export/csv?${qs.toString()}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -193,19 +196,6 @@ export default function ExportModal({
                 onToggleAll={toggleAll}
                 heading="Select columns to export"
               />
-
-              {!isStaff && (
-                <div className="file-note" style={{ marginTop: 14, display: "flex", alignItems: "center", gap: 8 }}>
-                  <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
-                    <input
-                      type="checkbox"
-                      checked={includeStaffOnly}
-                      onChange={(e) => setIncludeStaffOnly(e.target.checked)}
-                    />
-                    Include staff-only fields
-                  </label>
-                </div>
-              )}
 
               {preview && (
                 <div className="export-preview" style={{ marginTop: 16 }}>

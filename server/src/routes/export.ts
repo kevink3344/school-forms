@@ -20,7 +20,7 @@ export const exportRouter = Router();
 // -----------------------------------------------------------------------------
 // GET /api/export/preview?form_id=&status=&school_id= — column preview for UI
 // Available to admin AND staff. Staff are always scoped to their own school and
-// can never see staff-only columns.
+// only ever see the staff-only columns their role is granted.
 // -----------------------------------------------------------------------------
 exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
@@ -44,10 +44,12 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
       return;
     }
 
-    let rawColumns = await getExportColumns(formId);
-    // Staff see public columns plus any staff-only column whose roles include "staff".
-    rawColumns = filterColumnsForRole(rawColumns, req.user!.role, false);
-    const columns = withFieldId(rawColumns);
+    const rawColumns = await getExportColumns(formId);
+    // Staff-only columns are always part of the preview: for an admin that is
+    // every column, and for staff the role branch of filterColumnsForRole ignores
+    // this flag and grants only the staff-only columns their role is allowed to
+    // see. This keeps the preview in step with /csv, which includes them too.
+    const columns = withFieldId(filterColumnsForRole(rawColumns, req.user!.role, true));
 
     const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status });
     const rows = await buildExportRows(columns, submissions);
