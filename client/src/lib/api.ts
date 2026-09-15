@@ -124,15 +124,55 @@ async function request<T>(path: string, opts: RequestOptions = {}): Promise<T> {
   return await handleError(res);
 }
 
+// The server answers a zod failure with `{ error: "Validation failed",
+// details: parsed.error.flatten() }` — the same shape on every route that
+// validates a body. `flatten()` gives fieldErrors keyed by API field name, plus
+// formErrors for issues about the object itself.
+interface ValidationDetails {
+  fieldErrors?: Record<string, string[] | undefined> | null;
+  formErrors?: string[] | null;
+}
+
+// Turn the server's validation `details` into one readable fragment. Anything
+// unrecognised (a different error format, a string, null) returns "" so the
+// caller keeps the `error`/`message` it already had rather than losing it.
+function formatValidationDetails(details: unknown): string {
+  if (!details || typeof details !== "object") return "";
+  const { fieldErrors, formErrors } = details as ValidationDetails;
+  const parts: string[] = [];
+  if (fieldErrors && typeof fieldErrors === "object") {
+    for (const [field, messages] of Object.entries(fieldErrors)) {
+      for (const message of messages ?? []) {
+        // Field names arrive snake_cased from the API; "school id" reads better
+        // to an admin than "school_id".
+        parts.push(`${field.replace(/_/g, " ")}: ${message}`);
+      }
+    }
+  }
+  if (Array.isArray(formErrors)) {
+    for (const message of formErrors) parts.push(message);
+  }
+  return parts.join("; ");
+}
+
 // Parse a failed response into an ApiError. When the status is 401 the access
 // token could not be refreshed (session is genuinely gone), so we clear it to
 // keep the app from retrying with a dead token.
 async function handleError(res: Response): Promise<never> {
   let detail = res.statusText;
   try {
-    const data = (await res.json()) as { error?: string; message?: string } | null;
+    const data = (await res.json()) as {
+      error?: string;
+      message?: string;
+      details?: unknown;
+    } | null;
     if (data?.error) detail = data.error;
     else if (data?.message) detail = data.message;
+    // Every caller surfaces `err.message` verbatim, so fold the per-field
+    // reasons into it here — otherwise a failed save says only "Validation
+    // failed" and never names the field that was rejected.
+    const reasons = formatValidationDetails(data?.details);
+    if (reasons) detail = `${detail} — ${reasons}`;
   } catch {
     // ignore parse errors
   }
