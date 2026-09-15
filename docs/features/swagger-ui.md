@@ -144,8 +144,8 @@ export function buildSwaggerSpec(req?: Request) {
 | POST | `/api/forms` | admin | Form |
 | GET | `/api/forms/public` | none | Form |
 | GET | `/api/forms/{id}/public` | none | Form |
-| GET | `/api/forms/{id}/columns` | admin | Form → ViewColumnsConfig |
-| PUT | `/api/forms/{id}/columns` | admin | Form → ViewColumnsConfig |
+| GET | `/api/forms/{id}/columns` | staff/admin/School Contact | Form → ViewColumnsConfig |
+| PUT | `/api/forms/{id}/columns` | staff/admin/School Contact | Form → ViewColumnsConfig |
 | POST | `/api/submissions` | none | Submission |
 | GET | `/api/submissions` | staff/admin | Submission |
 | GET | `/api/submissions/{publicId}/public` | none | Submission |
@@ -285,6 +285,106 @@ Its routes are listed in §3.3:
 `POST /api/submissions/{publicId}/documents`,
 `GET /api/submissions/{publicId}/documents`,
 `POST /api/documents/{id}/retry`.
+
+### 4.4 `ViewColumnsConfig` — add `configured` (implemented), then make it per-user
+
+The `ViewColumnsConfig` schema already existed, but its `viewKeys` was ambiguous:
+an **empty array** and an **unset** form both serialized to "no keys", so a client
+could not tell "this form has never been configured, show everything" apart from
+"the user deliberately chose no columns". `configured` resolves that, and the two
+`/api/forms/{id}/columns` paths now describe the rule.
+
+> **Later revision (2026-09-16).** `configured` and the empty-vs-unset rule are
+> unchanged, but the store moved from `forms.view_columns` to
+> **`user_form_view_columns(user_id, form_id, view_columns)`**. The two paths were
+> opened from `admin` to `staff`/`cdm_contact` at the same time, so `viewKeys` is
+> now *this caller's* selection rather than a per-form shared one. The table below
+> still describes the read branches exactly; only the row the value comes from
+> changed. See [`view-designer.md` §9](../plans/view-designer.md).
+
+```ts
+ViewColumnsConfig: {
+  type: "object",
+  properties: {
+    columns: { type: "array", items: { $ref: "#/components/schemas/ExportColumn" } },
+    viewKeys: {
+      type: "array",
+      items: { type: "string" },
+      description: "Subset of column keys currently shown. Equals all column keys when unconfigured; empty array for an explicit empty selection.",
+    },
+    hiddenBase: {
+      type: "array",
+      items: { type: "string" },
+      description: "Standard grid columns this caller has turned off, as `base_*` keys. Never lists Student / School — that column cannot be removed.",
+    },
+    configured: {
+      type: "boolean",
+      description: "True when this caller has an explicitly saved selection for the form. False only when no row exists — the caller should then apply its own default rather than showing every column.",
+    },
+  },
+},
+```
+
+**The read rule (`getViewColumnsConfig(formId, userId)`) — three branches:**
+
+| Stored row for `(userId, formId)` | `viewKeys` | `configured` |
+| --------------------- | ---------- | ------------ |
+| absent / `NULL` / unparseable | every column key | `false` |
+| `'[]'` (explicit empty selection) | `[]` | `true` |
+| non-empty | the stored keys, normalized to `field_N`; unknown ("ghost") keys dropped | `true` |
+
+If **every** stored entry was a ghost key, the result falls back to every key with
+`configured: true` — the caller is considered configured, they just no longer have
+any of the fields they referenced.
+
+> **Later revision (2026-09-16).** The row now also carries the *standard* grid columns the
+> caller turned off, and the stored JSON gained a second shape:
+> `{"fields":[12,16,…],"hidden":["base_status",…]}`. A bare array still reads correctly and
+> means "nothing hidden" — which is the whole reason the **hidden** set is what gets stored:
+> no row written before the change needs migrating, and a standard column added later defaults
+> to visible instead of silently vanishing for everyone. `hiddenBase` is that `hidden` list,
+> filtered to `base_*` keys. See [`view-designer.md` §11](../plans/view-designer.md).
+
+**The write rule (`setViewColumns(formId, userId, viewKeys, hiddenBase)`):** always writes
+`JSON.stringify({ fields: ids, hidden })`, and the stored value is **never `NULL`**. An empty
+selection persists as the string `'{"fields":[],"hidden":[]}'`, deliberately not `NULL`,
+because `NULL` reads back as "show everything". This is what lets a user uncheck every
+column and have it stick. It also no longer touches `forms.updated_at` — a personal grid
+preference must not look like a form edit in the audit trail.
+
+`hidden_base` on the request body is optional and defaults to `[]`. The route rejects a
+non-array, or any entry that is not a `base_*` string — and that is the *only* check. The
+standard columns are a client rendering concern, so the server does **not** test those keys
+against a list of its own; an unknown `base_*` key is stored and then ignored by the client.
+The field keys in `view_keys`, by contrast, *are* validated against the form's real fields.
+The two arrays also carry **opposite polarity** — a field key means *show*, a base key means
+*hide*.
+
+`columns` (the full `ExportColumn` list the caller can choose from) is unaffected
+by the selection, and staff-only columns are always returned **last**, so a client
+that renders the list in order gets "Staff Only fields at the end" for free. Note
+that it never contains the standard grid columns — those come from
+`/api/submissions`, which is exactly why the client, not this endpoint, is the
+authority on them, and why `hidden_base` is accepted without validation.
+
+**`ExportColumn` also carries `type` and `options`.** Added so a caller that cannot
+reach the admin-only `GET /api/forms/{id}` can still render and edit a cell. They
+are populated on every column of `/api/export/preview`, which makes the metadata
+role-filtered by construction — the preview only ever returns columns the caller
+may see.
+
+| `ExportColumn` field | Type | Notes |
+| -------------------- | ---- | ----- |
+| `key` | `string` | `field_N` |
+| `label` | `string` | Field label |
+| `staff_only` | `boolean` | Drives the grid's inline-edit affordance |
+| `roles` | `string[] \| null` | **Not** returned by `/api/export/preview` — don't depend on it |
+| `type` | `FieldType` | For picking the editor control |
+| `options` | `string[] \| null` | For `select` / `checkbox` / `radio` editors |
+
+**Related auth change:** `/api/export/preview` is now
+`requireRoles("staff","cdm_contact","admin")`. Its inventory entry stays `staff`,
+which is the label this codebase uses for "any signed-in staff-like role".
 
 ---
 
@@ -533,3 +633,34 @@ Or, if the package already uses a runner, add the new test file path to it.
   including the new `AdhocField`, `SchoolPage`, `ImportResult`, `Error`, and
   `Document`. Swagger UI renders at `/api/docs` with `/api/docs.json` as the
   spec source.
+- `ViewColumnsConfig` gained `configured` and the empty-vs-unset rule while
+  building the [view designer](../plans/view-designer.md). No new route was added,
+  so `routes/inventory.ts` and the coverage test were untouched — only the schema
+  and the two existing path descriptions changed. See §4.4.
+- **Per-user revision (2026-09-16).** The same area was then opened to `staff` and
+  `cdm_contact` and re-pointed at `user_form_view_columns`. No route was added or
+  removed either, so the path count and the coverage test are again unchanged — but
+  `routes/inventory.ts` **was** touched this time: both `/api/forms/{id}/columns`
+  entries moved from `admin` to `staff`, and `/api/export/preview` gained
+  `cdm_contact`. Both operations were re-labelled "(admin, staff, School Contact)"
+  in the spec descriptions. `swagger.test.ts` stayed green throughout (36/36).
+
+### 8.4 Adjacent data-layer fix: `IF EXISTS` is not portable
+
+Recorded here because it was found while live-testing this area, though it is not
+part of the Swagger surface.
+
+The libSQL driver is a **token rewriter, not a SQL parser**. It handles `dbo.`
+prefixes, `SYSUTCDATETIME()`, `NVARCHAR(MAX)` and `N'…'`; anything it cannot
+rewrite is handed to SQLite verbatim and fails at parse time. A T-SQL
+`IF EXISTS (…) … ELSE …` upsert in `updateSubmissionValues` therefore raised
+`SQL_PARSE_ERROR` on **every** staff-only cell save under `DB_MODE=turso` — a
+runtime `500` that typecheck, `npm run build` and the full test suite all reported
+as green.
+
+The portable replacement — identical SQL on both dialects, and requiring no schema
+change — is `UPDATE` followed by `INSERT … SELECT … WHERE NOT EXISTS`. The rule is
+now enforced by the `TSQL_ONLY` block in `server/src/db/driver/libsql.test.ts`,
+which fails the suite if an `IF EXISTS (` reappears in the shared data layer.
+`docs/plans/dual-db.md` holds the full dialect contract.
+

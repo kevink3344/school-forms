@@ -500,11 +500,19 @@ export const api = {
     return request<ViewColumnsConfig>(`/api/forms/${id}/columns`, { auth: true });
   },
 
-  async setFormViewColumns(id: number, viewKeys: string[]): Promise<ViewColumnsConfig> {
+  // `hiddenBase` names the standard grid columns to turn off, as `base_*` keys.
+  // Omitted means "show them all", which is what a caller that only picks form
+  // fields wants — and it leaves an existing row's hidden set untouched only if
+  // it was already empty, so every caller that shows the picker passes it.
+  async setFormViewColumns(
+    id: number,
+    viewKeys: string[],
+    hiddenBase: string[] = []
+  ): Promise<ViewColumnsConfig> {
     return request<ViewColumnsConfig>(`/api/forms/${id}/columns`, {
       method: "PUT",
       auth: true,
-      body: { view_keys: viewKeys },
+      body: { view_keys: viewKeys, hidden_base: hiddenBase },
     });
   },
 

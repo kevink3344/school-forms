@@ -254,6 +254,10 @@ export interface ExportColumn {
   label: string;
   staff_only: boolean;
   roles: string[] | null;
+  // The underlying form-field type. Carried with the column so a grid can render
+  // and edit a value without a second, admin-only call to GET /api/forms/:id.
+  type: FieldType;
+  options: string[] | null;
 }
 
 export interface ExportPreview {
@@ -262,12 +266,25 @@ export interface ExportPreview {
   total: number;
 }
 
-// Per-form config returned by GET/PUT /api/forms/:id/columns — which subset of
-// columns the admin Submissions grid shows. `viewKeys` defaults to all keys when
-// the form has no saved config. Export is separate and always shows all columns.
+// Per-user, per-form config returned by GET/PUT /api/forms/:id/columns — which
+// subset of columns this user's Submissions grid shows. Everyone with access to
+// the form (admin, staff, School Contact) may keep their own selection; nobody
+// can see or overwrite anyone else's. `viewKeys` defaults to all keys when this
+// user has no saved config. Export is separate and always shows all columns.
+//
+// `configured` distinguishes "this user has not chosen yet" (false, and viewKeys
+// is every column) from "the user deliberately chose nothing" (true, viewKeys is
+// empty). Only the former should trigger a caller's own default — otherwise
+// unchecking every column would silently turn them all back on.
 export interface ViewColumnsConfig {
   columns: ExportColumn[];
   viewKeys: string[];
+  // The standard grid columns this user has turned OFF, as `base_*` keys. Empty
+  // for any config saved before those columns became hideable — absence means
+  // "shown", so an old config and a base column added later both default to on.
+  // Student / School is never listed; it is the grid's identity column.
+  hiddenBase: string[];
+  configured: boolean;
 }
 
 // ---------------------------------------------------------------------------

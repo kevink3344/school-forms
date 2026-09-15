@@ -3,6 +3,22 @@
 > **Status:** Draft for review
 > **Date:** 2026-08-27
 > **Audience:** Product & Engineering review
+>
+> **⚠️ Superseded in part by [`view-designer.md`](./view-designer.md) (2026-09-15).**
+> The storage, canonical columns query and both `/api/forms/{id}/columns` endpoints
+> from this plan were built and are unchanged — see §3.1–3.3. Everything this plan
+> placed **in the Form Designer page** (§3.6) moved to the dashboard grid itself,
+> which now owns the column picker, the frozen first column and inline editing of
+> staff-only fields. Decision 3 in §8 below is superseded by that move.
+>
+> **⚠️ Further superseded (2026-09-16).** The store described in §3.1 is **no longer
+> `forms.view_columns`**. The feature was extended from admins to every role, which
+> required per-user state: it now lives in `user_form_view_columns(user_id, form_id)`
+> with a unique index on the pair, and `getViewColumnsConfig` / `setViewColumns` take a
+> `userId`. `forms.view_columns` is retained only as the one-off backfill source. The
+> endpoints, the `configured` flag and the `'[]'`-not-`NULL` write rule are otherwise
+> exactly as documented here. Read [`view-designer.md`](./view-designer.md) §9 before
+> relying on any storage detail below.
 
 ---
 
@@ -324,9 +340,23 @@ Ensure `thead th` and the grid footer span the full width; add `scrollbar` styli
 
 ## 8. Decisions (confirmed 2026-08-27)
 
-1. **Empty selection → show all.** An admin unchecking every column saves an empty list, which
+1. ~~**Empty selection → show all.** An admin unchecking every column saves an empty list, which
    `setViewColumns` collapses to `NULL`, so the grid falls back to showing all columns (no crash,
-   no "no columns" empty state). Communicated in the picker footer.
+   no "no columns" empty state). Communicated in the picker footer.~~
+   **REVERSED — see [`view-designer.md`](./view-designer.md) D8.** An empty selection is now a
+   real, empty selection: it persists as `'[]'` (never `NULL`) and the grid falls back to the four
+   base columns plus Actions. Collapsing to `NULL` made "no columns chosen" indistinguishable from
+   "never configured", which the dashboard's default-selection logic depends on telling apart.
+   `ViewColumnsConfig` now carries a `configured: boolean` flag for exactly this reason.
+   **AND AGAIN — see [`view-designer.md`](./view-designer.md) §11.** The four base columns are no
+   longer fixed: they are chooser entries like any other, `hiddenBase` records the ones a user
+   turned off, and an empty selection now yields **Student / School alone** — the one column that
+   cannot be removed, which is what still keeps the grid from ever being blank.
 2. **Reordering is deferred to Phase 2.** The initial picker only chooses *which* columns display.
-3. **The config UI lives on the Form Designer page**, not the Submissions toolbar. The Submissions
-   page only reads the saved config and renders the filtered grid.
+   *Still current — restated as D5 in `view-designer.md`.*
+3. ~~**The config UI lives on the Form Designer page**, not the Submissions toolbar. The Submissions
+   page only reads the saved config and renders the filtered grid.~~
+   **SUPERSEDED — see [`view-designer.md`](./view-designer.md) D9.** The config UI moved to the
+   Submissions dashboard toolbar (§3.6 of this plan was never built on the Form Designer), where
+   the columns being chosen are actually visible.
+

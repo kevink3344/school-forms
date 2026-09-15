@@ -1,10 +1,13 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import { Download } from "lucide-react";
+import { Columns3, Download } from "lucide-react";
 import type { Form, School, SubmissionRow } from "../../types";
-import { PageHead, StatusBadge } from "../../components/layout";
+import { PageHead } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
+import ColumnsDrawer from "../../components/ColumnsDrawer";
+import SubmissionsGrid from "../../components/SubmissionsGrid";
+import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 import { useAuth } from "../../context/AuthContext";
 
 interface Filters {
@@ -30,6 +33,37 @@ export default function AdminDashboard() {
     status: "",
     from: "",
     to: "",
+  });
+
+  // ---------------------------------------------------------------------------
+  // Extra-column state. Everything below only has meaning once a single form is
+  // selected — with "All forms" the grid shows its four base columns and there is
+  // no per-form data to render.
+  // ---------------------------------------------------------------------------
+  const formId = filters.form_id ? Number(filters.form_id) : 0;
+
+  // Everything form-scoped — the available columns, the picker selection and
+  // inline editing — comes from one shared hook, so the staff queue gets the
+  // identical grid rather than a copy of it. `extrasLoading` covers the frame
+  // where the form changed but its columns have not arrived yet.
+  const {
+    visibleColumns,
+    pickerColumns,
+    hiddenBase,
+    valuesByPublicId,
+    fieldMeta,
+    extrasLoading,
+    pickerOpen,
+    openPicker,
+    closePicker,
+    checked,
+    toggleColumn,
+    toggleAll,
+    edit,
+  } = useSubmissionGrid({
+    formId,
+    status: filters.status || undefined,
+    schoolId: filters.school_id ? Number(filters.school_id) : undefined,
   });
 
   // Load forms + schools once
@@ -78,14 +112,14 @@ export default function AdminDashboard() {
   const setFilter = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
+  // Clear resets every filter including the form. Leaving the form selected used
+  // to mean "Clear" could not get you back to the full list.
   const clearFilters = () =>
-    setFilters((prev) => ({
-      ...prev,
-      school_id: "",
-      status: "",
-      from: "",
-      to: "",
-    }));
+    setFilters({ school_id: "", form_id: "", status: "", from: "", to: "" });
+
+  // Load forms + schools once
+
+  const busy = loading || extrasLoading;
 
   return (
     <div>
@@ -105,6 +139,27 @@ export default function AdminDashboard() {
           <>
             <button className="secondary-button" onClick={() => navigate("/admin/forms")}>
               + New Form
+            </button>
+            {/* Column choice is per form — there is no sensible set for "All
+                forms", where the union of every form's fields would be enormous
+                and mostly empty. The reason is also spelled out beside the
+                button: a disabled button explains nothing on its own, and its
+                `title` only appears on hover. */}
+            {!formId && (
+              <span className="head-hint">Select a single form to choose columns</span>
+            )}
+            <button
+              className="secondary-button"
+              disabled={!formId}
+              title={
+                formId
+                  ? "Choose which form fields appear as columns"
+                  : "Select a single form to choose columns"
+              }
+              onClick={openPicker}
+            >
+              <Columns3 size={14} />
+              Columns
             </button>
             <button className="primary-button" onClick={() => setExportOpen(true)}>
               <Download size={14} />
@@ -173,16 +228,32 @@ export default function AdminDashboard() {
         </button>
       </div>
 
-      {loading ? (
+      {busy ? (
         <div className="loading-state">
           <div className="spinner" /> Loading submissions...
         </div>
       ) : (
         <SubmissionsGrid
           rows={submissions}
+          columns={visibleColumns}
+          hiddenBase={hiddenBase}
+          valuesByPublicId={valuesByPublicId}
+          fieldMeta={fieldMeta}
           onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
+          submissionPath={(publicId) => `/admin/submissions/${publicId}`}
+          edit={edit}
         />
       )}
+
+      {/* Column picker — right slide-out panel, same pattern as the Reports page */}
+      <ColumnsDrawer
+        open={pickerOpen}
+        columns={pickerColumns}
+        checked={checked}
+        onToggle={toggleColumn}
+        onToggleAll={toggleAll}
+        onClose={closePicker}
+      />
 
       <ExportModal
         open={exportOpen}
@@ -196,92 +267,3 @@ export default function AdminDashboard() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Submissions grid — shares the same layout/CSS as the staff "My School
-// Submissions" table: Student/School, Submission ID, Status, Submitted, Actions.
-// ---------------------------------------------------------------------------
-function SubmissionsGrid({
-  rows,
-  onOpen,
-}: {
-  rows: SubmissionRow[];
-  onOpen: (publicId: string) => void;
-}) {
-  if (!rows.length) {
-    return <div className="empty-state">No submissions for the selected filters.</div>;
-  }
-
-  return (
-    <div className="card">
-      <div className="card-head">
-        <h3>Submissions</h3>
-        <span className="sub" style={{ marginLeft: "auto" }}>
-          {rows.length} result{rows.length !== 1 ? "s" : ""}
-        </span>
-      </div>
-      <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
-        <thead>
-          <tr>
-            <th>Student / School</th>
-            <th>Submission ID</th>
-            <th>Status</th>
-            <th>Submitted</th>
-            <th style={{ width: 120 }}>Actions</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((s) => (
-            <tr key={s.public_id}>
-              <td className="cell-strong" style={{ whiteSpace: "nowrap" }} data-label="Student / School">
-                <a
-                  className="link-name"
-                  href={`/admin/submissions/${s.public_id}`}
-                  onClick={(e) => {
-                    e.preventDefault();
-                    onOpen(s.public_id);
-                  }}
-                >
-                  {s.student_name || "Unnamed submission"}
-                </a>
-                <span className="cell-mono" style={{ marginLeft: 8, whiteSpace: "nowrap" }}>
-                  {s.school_name ?? "—"}
-                </span>
-              </td>
-              <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
-              <td data-label="Status">
-                <StatusBadge status={s.status} />
-              </td>
-              <td className="cell-mono" data-label="Submitted">{formatDate(s.submitted_at)}</td>
-              <td>
-                <button className="badge-button" onClick={() => onOpen(s.public_id)}>
-                  Review
-                </button>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-function shortId(id: string): string {
-  if (id.length <= 10) return id;
-  return `${id.slice(0, 8)}…`;
-}
-
-function formatDate(v: string | null): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return v;
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
-}

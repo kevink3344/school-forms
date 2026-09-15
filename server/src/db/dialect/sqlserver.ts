@@ -90,6 +90,21 @@ export const sqlserverDialect: Dialect = {
     );
   },
 
+  upsertUserFormViewColumns() {
+    // Keyed on the (user_id, form_id) unique index. MERGE rather than an
+    // UPDATE-then-INSERT pair so the read and the write cannot interleave with
+    // another request for the same pair.
+    return (
+      `MERGE dbo.user_form_view_columns AS target\n` +
+      `     USING (SELECT @userId AS user_id, @formId AS form_id) AS source\n` +
+      `     ON target.user_id = source.user_id AND target.form_id = source.form_id\n` +
+      `     WHEN MATCHED THEN UPDATE SET target.columns = @value,\n` +
+      `                                  target.updated_at = SYSUTCDATETIME()\n` +
+      `     WHEN NOT MATCHED THEN INSERT (user_id, form_id, columns, updated_at)\n` +
+      `       VALUES (source.user_id, source.form_id, @value, SYSUTCDATETIME());`
+    );
+  },
+
   submissionValueSubquery(label) {
     return (
       `(SELECT TOP 1 sv.value\n` +

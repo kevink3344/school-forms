@@ -274,7 +274,9 @@ are waiting on a decision. They are the cheapest items in this document.
 | 9.5 | **`DOCUMENT_STATUS` vocabulary collision** | — | `"Completed"` already means *document generation finished*, while `SUBMISSION_STATUS` now also has `"completed"`. Two unrelated meanings, one word. Relevant to §5.1 and §9.3; worth settling the naming before building on top of either. |
 | 9.6 | **PDF preview does not render in the VS Code browser** | — | **Not a bug.** VS Code's integrated browser is Electron and does not bundle Chrome's PDF viewer. Verified correct in real Chrome. Fixing it for VS Code would require a JS renderer (pdf.js) — a real dependency. Decision needed: accept, or bundle pdf.js. |
 | 9.7 | `.env.example` has real-looking `DB_SERVER`/`DB_USER` | S | No password present. Hygiene only. |
-| 9.8 | `docs/plans/view-designer.md` is an **empty file** | S | Either write it or delete it. |
+| ~~9.8~~ | ~~`docs/plans/view-designer.md` is an **empty file**~~ | — | **CLOSED 2026-09-15.** [view-designer.md](./view-designer.md) is now a full plan (644 lines) and its first phase has been **implemented**: the per-form column chooser on the Submissions dashboard, the frozen first column, staff-only columns pinned last, and inline editing of staff-only cells. See also §5.1 and the `configured` flag in `docs/features/swagger-ui.md` §4.4. **Extended 2026-09-16** to all roles — see the row below. |
+| ~~9.9~~ | ~~The column chooser worked only for admins~~ | — | **CLOSED 2026-09-16.** Reported as *"I do not see the COLUMNS for staff or school contacts. This feature should be for all."* Three causes: `/staff` was a separate page with its own table, both `/api/forms/{id}/columns` routes were `admin`-only, and the store was per-form shared. Fixed by opening the routes to `staff`/`cdm_contact`, moving the store to per-user `user_form_view_columns`, and rebuilding the staff queue on the shared `SubmissionsGrid` + `useSubmissionGrid` + `ColumnsDrawer`. Full write-up in [view-designer.md](./view-designer.md) §9. |
+| ~~9.10~~ | ~~Only the form's *fields* were removable; the standard columns were fixed~~ | — | **CLOSED 2026-09-16.** Reported as *"Except the first column, all columns should be removable. when you click on 'Columns'"*. Submission ID, Status, Submitted and Actions left the fixed set and joined `ColumnsPicker` as ordinary rows; only **Student / School** is locked (it names the row, links to the submission and is the frozen column). What the user turned off is stored as a `hidden` list beside the field ids — which is why nothing needed migrating and why a standard column added later defaults to visible. Full write-up in [view-designer.md](./view-designer.md) §11. |
 
 ---
 
@@ -289,7 +291,7 @@ Plan docs that exist and are waiting:
 | `docs/plans/organization-drive-folder.md` | Draft for review | Per-org `GOOGLE_DOC_FOLDER_ID`; today it is one global env value. Matters once there is more than one org. |
 | `docs/plans/mailjet-setup.md` | Reusable guide | See §5.3. |
 | `docs/plans/school-year.md` | — | Feeds §5.2. |
-| `docs/plans/view-designer.md` | **Empty** | See §9.8. |
+| `docs/plans/view-designer.md` | **Implemented** | See §9.8 and §9.9. Dashboard column chooser, frozen first column, staff-only inline editing — for **every role** since 2026-09-16. `submission-view.md` decisions 1 and 3 were superseded by it. |
 
 ---
 

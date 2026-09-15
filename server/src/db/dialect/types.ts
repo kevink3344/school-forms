@@ -86,6 +86,13 @@ export interface Dialect {
   upsertSchoolFromSource(): string;
 
   /**
+   * Upsert one `user_form_view_columns` row keyed on (user_id, form_id): the
+   * per-user set of grid columns for one form. Params: `@userId`, `@formId`,
+   * `@value` (a JSON array of field ids, e.g. `[11,9]`).
+   */
+  upsertUserFormViewColumns(): string;
+
+  /**
    * Parenthesised scalar subquery yielding the first non-null value of one
    * submission field, correlated on the outer alias `s` (a `submissions` row)
    * and ordered by `form_fields.sort_order`.

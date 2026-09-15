@@ -212,10 +212,13 @@ export function buildSwaggerSpec(req?: Request) {
             label: { type: "string" },
             staff_only: { type: "boolean" },
             roles: { type: "array", items: { type: "string" }, nullable: true, description: "Roles that may access a staff-only column; null for public columns." },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"], description: "The field's control type. Present on export-preview columns so a client can pick an editor without a second request." },
+            options: { type: "array", items: { type: "string" }, nullable: true, description: "Allowed values for select/checkbox/radio fields; null otherwise." },
           },
         },
         ViewColumnsConfig: {
           type: "object",
+          description: "One user's column selection for one form. Stored per (user, form) in dbo.user_form_view_columns, so saving never affects what another user sees.",
           properties: {
             columns: {
               type: "array",
@@ -223,8 +226,17 @@ export function buildSwaggerSpec(req?: Request) {
             },
             viewKeys: {
               type: "array",
-              description: "The subset of column keys currently displayed in the Submissions grid. When unconfigured, this equals all column keys.",
+              description: "The subset of column keys currently displayed in the Submissions grid. When the form is unconfigured for this user this equals all column keys; when the caller has explicitly saved an empty selection it is an empty array.",
               items: { type: "string" },
+            },
+            hiddenBase: {
+              type: "array",
+              description: "The standard grid columns this user has turned off, as `base_*` keys. Empty for every config saved before those columns became hideable, which is why absence means 'shown'. The first column (Student / School) is never listed — it cannot be turned off.",
+              items: { type: "string" },
+            },
+            configured: {
+              type: "boolean",
+              description: "Whether this user has an explicitly saved selection for this form. False only when they never saved one, in which case `viewKeys` is every column and a caller should apply its own default rather than showing all columns.",
             },
           },
         },
@@ -925,8 +937,8 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/forms/{id}/columns": {
         get: {
           tags: ["Forms"],
-          summary: "Get a form's view-columns config (admin)",
-          description: "Returns the full column list plus the subset of `viewKeys` currently shown in the Submissions grid. This is independent of Export — Export always uses all columns.",
+          summary: "Get your view-columns config for a form (admin, staff, School Contact)",
+          description: "Returns the full column list plus the subset of `viewKeys` you currently show in the Submissions grid, and a `configured` flag saying whether you have ever saved a selection. The config is per user, so this can only ever read your own — it cannot expose another user's choice. This is independent of Export — Export always uses all columns.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
           responses: {
@@ -941,8 +953,8 @@ export function buildSwaggerSpec(req?: Request) {
         },
         put: {
           tags: ["Forms"],
-          summary: "Save a form's view-columns config (admin)",
-          description: "`view_keys` must be an array of `field_N` strings. Stored per-form and only affects the Submissions grid display — Export is unchanged.",
+          summary: "Save your view-columns config for a form (admin, staff, School Contact)",
+          description: "`view_keys` must be an array of `field_N` strings, and optional `hidden_base` an array of `base_*` keys naming the standard columns to hide (the first column, Student / School, is not one of them). Stored per (user, form) and only affects your own Submissions grid display — Export is unchanged, and other users' selections are untouched. An empty `view_keys` is a valid, meaningful selection and is stored as such (it reads back as `configured: true` with `viewKeys: []`), so it is not treated as 'reset to all columns'.",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
           requestBody: {
@@ -956,6 +968,11 @@ export function buildSwaggerSpec(req?: Request) {
                     view_keys: {
                       type: "array",
                       description: "e.g. [\"field_1\", \"field_3\"]",
+                      items: { type: "string" },
+                    },
+                    hidden_base: {
+                      type: "array",
+                      description: "Standard grid columns to hide, e.g. [\"base_status\", \"base_submitted\"]. Omit or send [] to show them all.",
                       items: { type: "string" },
                     },
                   },

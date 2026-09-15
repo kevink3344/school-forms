@@ -54,7 +54,17 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
     const rows = await buildExportRows(columns, submissions);
 
     res.json({
-      columns: columns.map((c) => ({ key: c.key, label: c.label, staff_only: c.staff_only })),
+      columns: columns.map((c) => ({
+        key: c.key,
+        label: c.label,
+        staff_only: c.staff_only,
+        // Carried so the Submissions grid can render a value and choose an
+        // editor straight from this response. It previously read them from
+        // GET /api/forms/:id, which is admin-only — staff and School Contacts
+        // need the same grid, and this keeps it to one request.
+        type: c.type,
+        options: c.options,
+      })),
       rows,
       total: rows.length,
     });

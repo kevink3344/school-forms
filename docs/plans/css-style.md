@@ -59,12 +59,27 @@ Shell/layout: `app-shell`, `banner`, `logo`, `logo-badge`, `logo-text`, `actions
 Surfaces: `card`, `card-head`, `card-body`, `card-foot`, `panel`, `divider`, `collapse-head`,
 `collapse-title-wrap`, `collapse-title`, `collapse-body`, `sub`.
 
-Tables/lists: `grid`, `grid-wrap`, `grid-row`, `cell-strong`, `cell-mono`, `queue-list`,
-`queue-item`, `field-list`, `field`, `f-label`, `f-value`, `status-track`, `badge`,
-`badge-blue`, `badge-button`, `view-toggle`.
+Tables/lists: `grid`, `grid-wrap`, `grid-scroll`, `grid-scroll-top`,
+`grid-scroll-top-active`, `grid-scroll-top-inner`, `grid-row`, `cell-strong`, `cell-mono`,
+`grid-cell-pinned`, `grid-cell-editable`, `queue-list`, `queue-item`, `field-list`, `field`,
+`f-label`, `f-value`, `status-track`, `badge`, `badge-blue`, `badge-button`, `view-toggle`.
+
+> `.grid-scroll-top*` is the **top mirror** of the Submissions grid's horizontal scrollbar
+> (see `view-designer.md` §10). `.grid-scroll-top-inner` must keep `height: 1px` — a
+> zero-height spacer registers as degenerate and is not counted as scrollable overflow, which
+> makes the bar visible but unscrollable.
 
 Forms/controls: `filter-bar`, `filter-group`, `filter-spacer`, `cf`, `toggle`, `track`, `thumb`,
 `edit-input`, `form-grid`, `field-edit-grid`, `field-actions`, `clear`.
+
+Column picker: `col-picker`, `cp-head`, `cp-grid`, `cp-item`, `cp-item.dim`,
+`cp-item.locked`, `tag`, plus the `.drawer-report-columns` overrides that collapse the grid to
+one column.
+
+> `.cp-item.locked` is the grid's first column — checked, `disabled` and badged "Always
+> shown" (`view-designer.md` §11). It must stay visually distinct from `.cp-item.dim`, which
+> means *off*: locked is the opposite of dim, and a row that is both would read as a
+> contradictory state.
 
 Buttons: `primary-button`, `secondary-button`, `icon-button`, `link-name`.
 

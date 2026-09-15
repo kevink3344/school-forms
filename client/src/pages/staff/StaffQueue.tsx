@@ -1,14 +1,31 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Download, Table, LayoutGrid } from "lucide-react";
+import { Columns3, Download } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import type { Form, SubmissionRow } from "../../types";
-import { PageHead, StatusBadge } from "../../components/layout";
+import { PageHead } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
+import ColumnsDrawer from "../../components/ColumnsDrawer";
+import SubmissionsGrid from "../../components/SubmissionsGrid";
+import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 
-type ViewMode = "table" | "cards";
-
+// ---------------------------------------------------------------------------
+// The staff and School Contact queue.
+//
+// This uses the same SubmissionsGrid as the admin dashboard, on purpose: staff
+// are the people who fill in the staff-only fields, and that grid is where those
+// fields are editable in place. The hand-rolled table this replaced could not do
+// that at all, and would have drifted from the admin grid over time.
+//
+// The table/cards toggle went with it. The grid already stacks into cards on
+// mobile (each cell carries a data-label), and a cards view cannot host inline
+// editing — so it would have been a second-class view that hid the new feature.
+//
+// What stays staff-specific is the headline (a School Contact is tied to one
+// school; staff cover the whole organization) and the status chips, which are a
+// faster way into the common filters than the admin's dropdowns.
+// ---------------------------------------------------------------------------
 export default function StaffQueue() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -20,26 +37,49 @@ export default function StaffQueue() {
   // "" means "all reports". A school normally has exactly one form, in which
   // case we select it outright rather than offering a choice that isn't one.
   const [formFilter, setFormFilter] = useState("");
-  // Default to card view on small screens; tablet/desktop defaults to table.
-  const [viewMode, setViewMode] = useState<ViewMode>(
-    typeof window !== "undefined" && window.innerWidth < 768 ? "cards" : "table"
-  );
 
-  const load = (status: string, formId: string) => {
+  const formId = formFilter ? Number(formFilter) : 0;
+
+  // Column choice, the picker selection and inline editing — identical to the
+  // admin dashboard because it is literally the same code. School Contacts and
+  // staff each keep their own selection: the store is keyed on the user, so one
+  // reviewer ticking boxes never changes anyone else's grid.
+  const {
+    visibleColumns,
+    pickerColumns,
+    hiddenBase,
+    valuesByPublicId,
+    fieldMeta,
+    extrasLoading,
+    pickerOpen,
+    openPicker,
+    closePicker,
+    checked,
+    toggleColumn,
+    toggleAll,
+    edit,
+  } = useSubmissionGrid({ formId, status: statusFilter || undefined });
+
+  useEffect(() => {
+    let cancelled = false;
     setLoading(true);
     api
       .listSubmissions({
-        ...(status ? { status } : {}),
-        ...(formId ? { form_id: Number(formId) } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(formFilter ? { form_id: Number(formFilter) } : {}),
       })
-      .then((s) => setRows(s))
-      .catch(() => setRows([]))
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load(statusFilter, formFilter);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+      .then((s) => {
+        if (!cancelled) setRows(s);
+      })
+      .catch(() => {
+        if (!cancelled) setRows([]);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [statusFilter, formFilter]);
 
   // Load forms so the queue can be scoped to one report and the Export drawer
@@ -73,6 +113,10 @@ export default function StaffQueue() {
   // organization, so their headline is the organization, not a school.
   const schoolScoped = user?.role === "cdm_contact";
 
+  // `extrasLoading` covers the frame where the report changed but its columns
+  // have not arrived yet, so the grid does not flash the previous report's.
+  const busy = loading || extrasLoading;
+
   return (
     <div>
       <PageHead
@@ -84,28 +128,31 @@ export default function StaffQueue() {
         }
         actions={
           <>
+            {/* Column choice is per form, so with "All reports" selected there is
+                nothing to choose from. Say so beside the button — a disabled
+                button on its own explains nothing, and its title only appears on
+                hover. On a single-report school the form is auto-selected, so the
+                button is enabled from the first render. */}
+            {!formId && (
+              <span className="head-hint">Select a single report to choose columns</span>
+            )}
+            <button
+              className="secondary-button"
+              disabled={!formId}
+              title={
+                formId
+                  ? "Choose which form fields appear as columns"
+                  : "Select a single report to choose columns"
+              }
+              onClick={openPicker}
+            >
+              <Columns3 size={14} />
+              Columns
+            </button>
             <button className="primary-button" onClick={() => setExportOpen(true)}>
               <Download size={14} />
               Export
             </button>
-            <div className="view-toggle">
-              <button
-                className={viewMode === "table" ? "active" : ""}
-                onClick={() => setViewMode("table")}
-                title="Table view"
-              >
-                <Table size={14} />
-                Table
-              </button>
-              <button
-                className={viewMode === "cards" ? "active" : ""}
-                onClick={() => setViewMode("cards")}
-                title="Card view"
-              >
-                <LayoutGrid size={14} />
-                Cards
-              </button>
-            </div>
           </>
         }
       />
@@ -159,100 +206,39 @@ export default function StaffQueue() {
         ))}
       </div>
 
-      <div className="card">
-        <div className="card-head">
-          <h3>Submissions</h3>
-          <span className="sub" style={{ marginLeft: "auto" }}>
-            {rows.length} result{rows.length !== 1 ? "s" : ""}
-          </span>
+      {busy ? (
+        <div className="loading-state">
+          <div className="spinner" /> Loading submissions...
         </div>
-
-        {loading ? (
-          <div className="loading-state">
-            <div className="spinner" /> Loading...
-          </div>
-        ) : rows.length === 0 ? (
-          <div className="empty-state">
-            {formFilter
+      ) : (
+        <SubmissionsGrid
+          rows={rows}
+          columns={visibleColumns}
+          hiddenBase={hiddenBase}
+          valuesByPublicId={valuesByPublicId}
+          fieldMeta={fieldMeta}
+          onOpen={openSubmission}
+          submissionPath={(publicId) => `/staff/${publicId}`}
+          edit={edit}
+          emptyMessage={
+            formFilter
               ? "No submissions for this report yet."
               : schoolScoped
                 ? "No submissions for your school yet."
-                : "No submissions yet."}
-          </div>
-        ) : viewMode === "cards" ? (
-          <div className="queue-list" style={{ padding: 16 }}>
-            {rows.map((s) => (
-              <div className="queue-item" key={s.public_id} onClick={() => openSubmission(s.public_id)}>
-                <div className="qi-main">
-                  <div className="qi-top">
-                    <StatusBadge status={s.status} />
-                    <span className="badge badge-slate">{s.school_name ?? "—"}</span>
-                  </div>
-                  <div className="qi-title">
-                    <a
-                      href={`/staff/${s.public_id}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        e.stopPropagation();
-                        openSubmission(s.public_id);
-                      }}
-                    >
-                      {s.student_name || "Unnamed submission"}
-                    </a>
-                  </div>
-                  <div className="qi-meta">{s.school_name ?? "No school"}</div>
-                </div>
-                <div className="qi-right">
-                  <span className="qi-time">{formatDate(s.submitted_at)}</span>
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <table className="grid" style={{ width: "100%", borderCollapse: "collapse" }}>
-            <thead>
-              <tr>
-                <th>Student / School</th>
-                <th>Submission ID</th>
-                <th>Status</th>
-                <th>Submitted</th>
-                <th style={{ width: 120 }}>Actions</th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((s) => (
-                <tr key={s.public_id}>
-                  <td className="cell-strong" data-label="Student / School">
-                    <a
-                      className="link-name"
-                      href={`/staff/${s.public_id}`}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        openSubmission(s.public_id);
-                      }}
-                    >
-                      {s.student_name || "Unnamed submission"}
-                    </a>
-                    <span className="cell-mono" style={{ marginLeft: 8 }}>
-                      {s.school_name ?? "—"}
-                    </span>
-                  </td>
-                  <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
-                  <td data-label="Status">
-                    <StatusBadge status={s.status} />
-                  </td>
-                  <td className="cell-mono" data-label="Submitted">{formatDate(s.submitted_at)}</td>
-                  <td>
-                    <button className="badge-button" onClick={() => openSubmission(s.public_id)}>
-                      Review
-                    </button>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+                : "No submissions yet."
+          }
+        />
+      )}
+
+      <ColumnsDrawer
+        open={pickerOpen}
+        columns={pickerColumns}
+        checked={checked}
+        onToggle={toggleColumn}
+        onToggleAll={toggleAll}
+        onClose={closePicker}
+        scopeLabel="this report"
+      />
 
       <ExportModal
         open={exportOpen}
@@ -263,22 +249,4 @@ export default function StaffQueue() {
       />
     </div>
   );
-}
-
-function shortId(id: string): string {
-  if (id.length <= 10) return id;
-  return `${id.slice(0, 8)}…`;
-}
-
-function formatDate(v: string): string {
-  if (!v) return "—";
-  const d = new Date(v);
-  if (Number.isNaN(d.getTime())) return v;
-  return d.toLocaleString("en-US", {
-    month: "short",
-    day: "numeric",
-    year: "numeric",
-    hour: "numeric",
-    minute: "2-digit",
-  });
 }

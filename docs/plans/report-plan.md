@@ -22,7 +22,7 @@ adds the pieces the idea calls for that aren't there yet:
 
 | Idea requirement | Status today | This plan |
 | --- | --- | --- |
-| View made of **all** submitted columns, user picks which to show | Partially — per-form `view_columns` drives the Admin grid, but it isn't per-user and isn't a report | ✅ per-view column selection |
+| View made of **all** submitted columns, user picks which to show | Partially — the grid's `view_columns` preference drives the Submissions grid, but it isn't a report | ✅ per-view column selection |
 | Staff-only columns "if they have the proper Role" | ✅ `fieldAccessRoles` / `filterColumnsForRole` exist | ✅ reuse as-is |
 | **Filter rows** textbox | ❌ only structured filters (school/form/status/date) | ✅ new `q` filter |
 | Export **CSV** | ✅ `/api/export/csv` | ✅ reuse |
@@ -50,6 +50,8 @@ adds the pieces the idea calls for that aren't there yet:
 - No cross-form / "all forms" report (columns are inherently per-form — see §18 Q5).
 - No charts, pivots, or aggregation — this is a row-level report.
 - No sharing of Views between users (personal views only; server model leaves room).
+  *(The grid's column preference became per-user for the same reason on 2026-09-16 — see
+  [`view-designer.md`](./view-designer.md) §9.)*
 - No "export only selected rows" — the report exports the whole filtered set.
 - No behavior change to `AdminDashboard`, `StaffQueue`, or the existing
   `ExportModal` (beyond an optional shared-component refactor, §12.3).
@@ -65,13 +67,20 @@ adds the pieces the idea calls for that aren't there yet:
   - Helpers local to that file: `filterColumnsForRole`, `buildExportRows`,
     `csvEscape`, `formatSubmittedAt`.
   - `getExportColumns(formId)` (`db/queries.ts` :1372) → ordered
-    `ExportColumn[] = { key: "field_N", label, staff_only, roles }`.
+    `ExportColumn[] = { key: "field_N", label, staff_only, roles, type, options }`.
+    `type` and `options` were added 2026-09-16 so a grid can render and edit a value
+    without calling the admin-only `GET /api/forms/:id`.
   - `listSubmissions({...})` (`db/queries.ts` :892) → `SubmissionRow[]`.
-- **Existing per-form view config**
-  - `dbo.forms.view_columns` + `getViewColumnsConfig` / `setViewColumns`
+- **Existing grid view config**
+  - `user_form_view_columns(user_id, form_id, view_columns)` +
+    `getViewColumnsConfig(formId, userId)` / `setViewColumns(formId, userId, viewKeys)`
     (`db/queries.ts`), exposed at `GET|PUT /api/forms/:id/columns`
-    (`routes/forms.ts` :295). This drives the **Admin Submissions grid only** and
-    is *not* per-user. Reports is a different concern and will not reuse it (§18 Q8).
+    (`routes/forms.ts` :295). This drives the **Submissions grid on both `/admin` and
+    `/staff`**, and since 2026-09-16 it is **per user**: each caller's selection is
+    theirs alone. Reports is still a different concern and does not reuse it (§18 Q8) —
+    a Report view is `{ form, columns, filters, format }`, i.e. more than a column list.
+    The `forms.view_columns` column this used to read is now only the one-off backfill
+    source; see [`view-designer.md`](./view-designer.md) §9.
 - **Client**
   - `client/src/components/ExportModal.tsx` — CSV-only drawer with a reusable
     `.col-picker` column UI, `preview` table, and `include staff-only` toggle.
@@ -101,7 +110,7 @@ adds the pieces the idea calls for that aren't there yet:
 | D4 | Excel | `exceljs` (MIT, pure JS) generated **server-side** | Real `.xlsx` with typed header + frozen row. Alt: SheetJS `xlsx`; or "Excel-compatible CSV" (no dep, but not a real workbook). |
 | D5 | PDF | `pdfkit` (MIT, pure JS) generated **server-side**, landscape table with a repeating header | No Chromium needed on Azure App Service; scales with dataset. Alt: browser `window.print()` + print stylesheet (no dep, but no file, unreliable for big tables — §18 Q2). |
 | D6 | Saved Views storage | New table `dbo.report_views`, one row per (user, view) | Personal, ordered, queryable, easy to extend to shared/org views later. Alt: JSON blob in `app_settings` keyed by user (not queryable). |
-| D7 | Column config for Reports | Independent of `forms.view_columns`; stored **inside each saved View** (and in page state when unsaved) | `view_columns` is a per-form grid preference; a Report view is `{ form, columns, filters, format }` and belongs to a user. |
+| D7 | Column config for Reports | Independent of the grid's column store (`user_form_view_columns`); stored **inside each saved View** (and in page state when unsaved) | The grid store is a *column-preference* for one page (per user, per form, order fixed by the server); a Report view is `{ form, columns, filters, format }` — a superset with its own ordering, row filter and export format. Sharing the two would mean one of them dictating the other's shape. |
 | D8 | Selecting columns sent to export | Send the chosen `columns` on the export request; server validates and applies them | Guarantees the file matches the preview. |
 
 ---
@@ -135,7 +144,8 @@ columns are per-form) and one split (`School` becomes a separate admin-only filt
   `viewKeys`; cell values read `row[key]` exactly like `ExportModal` does.
 - **Empty/edge states:** no form selected → prompt; no columns selected → the
   picker footer warns and preview falls back to all role-visible columns
-  (mirrors the `view_columns` "empty = all" safety rule).
+  (*its own* rule — the grid's store deliberately does **not** work this way any more;
+  see [`view-designer.md`](./view-designer.md) D8 and §11).
 - Reuse existing classes/tokens: `.filter-bar`, `.grid`, `.col-picker`,
   `.drawer`, `.badge`, `.primary-button`, `.secondary-button`.
 

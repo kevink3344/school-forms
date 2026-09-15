@@ -697,6 +697,51 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `UPDATE dbo.report_views
       SET filters = REPLACE(filters, N'"status":"resolved"', N'"status":"completed"')
     WHERE filters LIKE N'%"status":"resolved"%';`,
+
+  // ---------------------------------------------------------------------
+  // Per-user Submissions grid column selection
+  // (dbo.user_form_view_columns).
+  //
+  // Supersedes dbo.forms.view_columns, which held ONE value per form and was
+  // therefore shared by every user who opened that form. That was fine while
+  // only admins saw the grid; once staff and School Contacts got the column
+  // chooser too, any one of them saving would silently rewrite what the org
+  // admin saw. Same per-user shape as dbo.report_views.
+  //
+  // Created last because it references both dbo.users and dbo.forms. Two
+  // cascading paths into one table is exactly what dbo.report_views already
+  // does, so this adds no new multiple-cascade-path (error 1785) risk.
+  //
+  // `columns` is a JSON array of field ids, e.g. [11,9]. NULL means "never
+  // chosen" and reads back as "not configured", which is deliberately distinct
+  // from '[]' ("the user chose nothing") — see getViewColumnsConfig.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.user_form_view_columns', 'U') IS NULL
+   CREATE TABLE dbo.user_form_view_columns (
+     id         INT IDENTITY(1,1) PRIMARY KEY,
+     user_id    INT NOT NULL,
+     form_id    INT NOT NULL,
+     columns    NVARCHAR(MAX) NULL,
+     created_at DATETIME2 NOT NULL CONSTRAINT DF_ufvc_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at DATETIME2 NOT NULL CONSTRAINT DF_ufvc_updated_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_ufvc_user FOREIGN KEY (user_id) REFERENCES dbo.users(id) ON DELETE CASCADE,
+     CONSTRAINT FK_ufvc_form FOREIGN KEY (form_id) REFERENCES dbo.forms(id) ON DELETE CASCADE
+   );
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_ufvc_user_form')
+     CREATE UNIQUE INDEX UX_ufvc_user_form ON dbo.user_form_view_columns(user_id, form_id);`,
+
+  // Carry the one legacy dbo.forms.view_columns value over to the form's
+  // designer, who is the person most likely to have set it. Without this an
+  // existing selection would silently vanish on upgrade. Idempotent, and
+  // deliberately best-effort: a form with no designer_id has no recoverable
+  // owner, so it simply starts unconfigured.
+  `INSERT INTO dbo.user_form_view_columns (user_id, form_id, columns)
+     SELECT f.designer_id, f.id, f.view_columns
+       FROM dbo.forms f
+      WHERE f.view_columns IS NOT NULL
+        AND f.designer_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM dbo.user_form_view_columns u
+                         WHERE u.user_id = f.designer_id AND u.form_id = f.id);`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

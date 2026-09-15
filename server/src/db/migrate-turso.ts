@@ -57,6 +57,7 @@ const TABLES: { name: string; label: string }[] = [
   { name: "documents", label: "generated documents" },
   { name: "app_settings", label: "app settings" },
   { name: "report_views", label: "report views" },
+  { name: "user_form_view_columns", label: "per-user grid columns" },
 ];
 
 /** Reverse order — children before parents, for the wipe. */

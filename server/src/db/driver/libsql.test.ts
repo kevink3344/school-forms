@@ -312,6 +312,7 @@ describe("shared SQL is safe to token-rewrite", () => {
       sqlserverDialect.selectSchoolsPage({ where: "", orderBy: "name" }),
       sqlserverDialect.upsertSetting(),
       sqlserverDialect.upsertSchoolFromSource(),
+      sqlserverDialect.upsertUserFormViewColumns(),
     ];
     for (const sql of samples) {
       const translated = toLibsql(sql);
@@ -358,16 +359,31 @@ describe("shared SQL is safe to token-rewrite", () => {
   // FETCH` to `LIMIT … OFFSET`), so no token rewrite can express them. They
   // belong to db/dialect/.
   //
+  // `IF EXISTS (…) UPDATE … ELSE INSERT …` is the same story for *control flow*:
+  // libSQL has no `IF` statement at all, so it rejects the batch with
+  // `SQL_PARSE_ERROR: near IF` at (1,3). It shipped in updateSubmissionValues and
+  // 500'd every staff-only save on Turso — again only under DB_MODE=turso. There
+  // is no portable single-statement upsert (no UNIQUE index on
+  // submission_values(submission_id, field_id) on either dialect, so `ON CONFLICT`
+  // is unavailable), so that path uses `INSERT … SELECT … WHERE NOT EXISTS`
+  // instead, which both dialects parse identically.
+  //
   // Deliberately NOT listed: `dbo.`, `SYSUTCDATETIME()`, `N'…'` and
   // `NVARCHAR(MAX)` — those ARE straight token substitutions and the driver
   // rewriter owns them, so they are expected to appear in shared SQL. The
   // translation tests above prove they never survive.
+  //
+  // `IF NOT EXISTS` must not be caught by the last pattern: it is legal SQLite
+  // DDL (`CREATE TABLE IF NOT EXISTS …`) and is used throughout
+  // db/dialect/turso.ts, which this scan includes. `IF\s+EXISTS` cannot match it
+  // because of the intervening `NOT`.
   // ---------------------------------------------------------------------------
   const TSQL_ONLY: [string, RegExp][] = [
     ["SELECT TOP n", /\bTOP\s*(?:\(\s*@?\w+\s*\)|\d+)/i],
     ["OUTPUT INSERTED/DELETED", /\bOUTPUT\s+(?:INSERTED|DELETED)\b/i],
     ["MERGE", /\bMERGE\s+(?:dbo\.)?\w+/i],
     ["OFFSET n ROWS FETCH NEXT", /\bOFFSET\s+@?\w+\s+ROWS\b/i],
+    ["IF EXISTS (…) conditional batch", /\bIF\s+EXISTS\s*\(/i],
   ];
 
   it("keeps SQL Server-only constructs out of the shared data layer", () => {

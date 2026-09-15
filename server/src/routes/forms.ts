@@ -289,10 +289,15 @@ formsRouter.delete("/:id", requireAuth, requireRoles("admin"), async (req, res, 
   }
 });
 
-// Admin: get a form's view-columns config (which columns the Submissions grid
-// shows). This is separate from Export — Export columns are always all fields.
-// Returns the full column list plus the subset of keys currently displayed.
-formsRouter.get("/:id/columns", requireAuth, requireRoles("admin"), async (req, res, next) => {
+// Any signed-in user: get their own view-columns config for a form (which
+// columns the Submissions grid shows them). This is separate from Export —
+// Export columns are always all fields. Returns the full column list plus the
+// subset of keys this user currently displays.
+//
+// Available to staff and School Contacts too, not just admins: they share the
+// same Submissions grid. The config is per user, so reading it can never expose
+// another user's choice.
+formsRouter.get("/:id/columns", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const existing = await getFormWithFields(id, req.user!.organization_id);
@@ -300,15 +305,19 @@ formsRouter.get("/:id/columns", requireAuth, requireRoles("admin"), async (req, 
       res.status(404).json({ error: "Form not found" });
       return;
     }
-    res.json(await getViewColumnsConfig(id));
+    res.json(await getViewColumnsConfig(id, req.user!.id));
   } catch (err) {
     next(err);
   }
 });
 
-// Admin: save a form's view-columns config. body.view_keys must be an array of
-// `field_N` strings. We only persist the config — Export is left untouched.
-formsRouter.put("/:id/columns", requireAuth, requireRoles("admin"), async (req, res, next) => {
+// Any signed-in user: save their own view-columns config for a form.
+// body.view_keys must be an array of `field_N` strings, and body.hidden_base an
+// optional array of `base_*` keys for the standard columns the user turned off.
+// The two are separate because they are stored with opposite polarity: a field
+// key means "show", a base key here means "hide". We only persist the caller's
+// own row — Export is left untouched.
+formsRouter.put("/:id/columns", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const existing = await getFormWithFields(id, req.user!.organization_id);
@@ -321,8 +330,19 @@ formsRouter.put("/:id/columns", requireAuth, requireRoles("admin"), async (req, 
       res.status(400).json({ error: "view_keys must be an array of field_N strings" });
       return;
     }
-    await setViewColumns(id, viewKeys);
-    res.json(await getViewColumnsConfig(id));
+    // The set of standard columns lives in the grid, not here (see
+    // BASE_COLUMN_KEY in db/queries.ts), so this checks the shape and not the
+    // membership: an unrecognised base key is stored and then ignored client-side.
+    const hiddenBase = req.body?.hidden_base ?? [];
+    if (
+      !Array.isArray(hiddenBase) ||
+      hiddenBase.some((k) => typeof k !== "string" || !/^base_[a-z0-9_]+$/.test(k))
+    ) {
+      res.status(400).json({ error: "hidden_base must be an array of base_* strings" });
+      return;
+    }
+    await setViewColumns(id, req.user!.id, viewKeys, hiddenBase);
+    res.json(await getViewColumnsConfig(id, req.user!.id));
   } catch (err) {
     next(err);
   }

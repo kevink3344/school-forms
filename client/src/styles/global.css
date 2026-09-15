@@ -206,6 +206,10 @@ p { margin: 0; }
 .page-head .title-block h1 { margin: 0; font-size: 22px; font-weight: 700; }
 .page-head .title-block p { margin: 2px 0 0; color: var(--text-muted); font-size: 13px; }
 .page-head .head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
+/* Explains a disabled action in place, since a disabled button cannot say why
+   and its `title` only shows on hover (the Submissions "Columns" button under
+   "All forms"). Sits to the left of the button it belongs to. */
+.page-head .head-hint { font-size: 12px; color: var(--text-muted); }
 
 /* Buttons */
 .primary-button {
@@ -223,6 +227,13 @@ p { margin: 0; }
   transition: background-color .13s ease, color .13s ease;
 }
 .secondary-button:hover { background: var(--tint); color: var(--accent-strong); }
+/* A disabled secondary button keeps its outline but goes flat grey, so it still
+   reads as a button that exists and is merely unavailable (the Submissions
+   "Columns" button with no single form selected) rather than as body text. */
+.secondary-button:disabled {
+  border-color: var(--border); color: var(--text-muted); background: var(--panel-bg); cursor: not-allowed;
+}
+.secondary-button:disabled:hover { background: var(--panel-bg); color: var(--text-muted); }
 .badge-button {
   border: 1px solid var(--border); background: var(--card-bg); color: var(--text); white-space: nowrap;
   border-radius: var(--radius); display: inline-flex; align-items: center; gap: 6px; padding: 4px 10px;
@@ -457,6 +468,147 @@ table.grid tbody tr.grid-group-row > td {
 .cell-strong { font-weight: 600; color: var(--text); }
 .cell-mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
+/* ===== Submissions grid: horizontal scroll, top mirror, frozen first column ===== */
+
+/* The grid's horizontal scrollbar, mirrored directly above it.
+   A grid wider than its container has its only horizontal scrollbar at the
+   *bottom* of the table, so reaching it costs a scroll past every row first. This
+   is a second scroll container of the same width holding a single spacer that
+   useGridScrollMirror sizes to the grid's scroll width — equal ranges, so either
+   bar drives the other. It is a sibling of .grid-scroll, not a parent, so the
+   sticky first column resolves against the grid as before.
+   `height` is set from the grid's own scrollbar thickness by JS, so on platforms
+   with overlay scrollbars the strip collapses to nothing; the -active class is
+   toggled off whenever the grid does not actually overflow, so a narrow grid
+   never gains a dead strip. */
+.grid-scroll-top { display: none; overflow-x: auto; overflow-y: hidden; height: 0; }
+.grid-scroll-top.grid-scroll-top-active { display: block; }
+/* 1px, NOT 0. A zero-area box is measured as a degenerate descendant and is not
+   counted as scrollable overflow, so the container reports scrollWidth ===
+   clientWidth, reserves a strip, and cannot be scrolled at all — the bar looks
+   present and does nothing. A 1px box restores the overflow without being
+   visible. */
+.grid-scroll-top-inner { height: 1px; }
+
+/* Deliberately NOT .grid-wrap. The dashboard grid already sits inside a .card,
+   and .grid-wrap paints its own border/radius/background, which would double up
+   on the card. This class adds only the scrolling behaviour the frozen column
+   needs — and it is the scroll container that `position: sticky` resolves
+   against, so it must be the element that actually overflows. */
+.grid-scroll { overflow-x: auto; }
+
+/* Freeze "Student / School" (column 1) so it stays readable while the field
+   columns scroll past it.
+   Desktop only: below the breakpoint the grid becomes a stack of cards (see the
+   max-width block further down) and there is nothing to scroll, so sticky would
+   have no meaning.
+   `position: sticky` needs an explicit z-index on every layer. The thead cells
+   already stick to `top` from the base rule and have `z-index: auto`, which
+   makes them painted at the body cells' level — so a body cell with any z-index
+   at all would scroll *over* the header instead of under it. The ladder below
+   fixes the order: body frozen cell (1) < header (2) < frozen header corner (3).
+   An opaque background is also mandatory: `table.grid tbody td` has no
+   background of its own (row tint comes from the `tr`), so a transparent sticky
+   cell would let the scrolled columns show through it. It therefore has to
+   repeat each row state the `tr` rules set. */
+@media (min-width: 769px) {
+  /* ONLY column 1 is pinned horizontally — hence `th:first-child`, not `th`.
+     Every header cell is already `position: sticky; top: 0` from the base rule,
+     and the base rule's `top: 0` is what pins the header row vertically. Adding
+     `left: 0` to a bare `th` would ALSO pin all of them to the left edge, so
+     scrolling right would stack the entire header row on top of the frozen
+     column. The two axes need two different selectors. */
+  .grid-scroll table.grid > thead > tr > th:first-child,
+  .grid-scroll table.grid > tbody > tr > td:first-child {
+    position: sticky; left: 0;
+  }
+  .grid-scroll table.grid > thead > tr > th { z-index: 2; }
+  /* The frozen header corner needs an opaque background of its own: the base
+     `table.grid thead th` rule is `background: transparent`, so the columns
+     scrolling underneath would otherwise read through its text. `--card-bg`
+     matches the frozen body cells below it, so the seam stays invisible. */
+  .grid-scroll table.grid > thead > tr > th:first-child { z-index: 3; background: var(--card-bg); }
+  .grid-scroll table.grid > tbody > tr > td:first-child { z-index: 1; }
+  .grid-scroll table.grid > tbody > tr > td:first-child { background: var(--card-bg); }
+  .grid-scroll table.grid > tbody > tr:hover > td:first-child { background: var(--panel-bg); }
+  .grid-scroll table.grid > tbody > tr.selected > td:first-child { background: var(--tint); }
+  /* Hairline seam so the boundary reads as "pinned" rather than as a rendering
+     artefact once content slides under it. */
+  .grid-scroll table.grid > thead > tr > th:first-child,
+  .grid-scroll table.grid > tbody > tr > td:first-child { box-shadow: 1px 0 0 var(--line-soft); }
+}
+
+/* The frozen cell must not grow to fit a long school name, or it would eat the
+   viewport and defeat the point of scrolling. The student name keeps priority;
+   the school name truncates.
+   The width is pinned on the HEADER cell, not via max-width on the td: in an
+   auto-layout table a cell's max-width is only advisory and the browser will
+   happily grow it to fit the content. A definite width on the first column makes
+   the body cells definite too, which is what lets `text-overflow: ellipsis`
+   inside them actually engage. */
+.grid-scroll table.grid > thead > tr > th:first-child { width: 260px; min-width: 260px; }
+.grid-cell-pinned .cell-mono {
+  display: block;
+  /* !important is required to beat the inline `marginLeft: 8` used for the
+     single-line layout; the school name is on its own line here. */
+  margin-left: 0 !important;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.grid-cell-pinned .link-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* A staff-only value that is editable in place. The pencil is the affordance and
+   only appears on hover so a dense grid does not read as a wall of icons. */
+.grid-editable { cursor: pointer; position: relative; }
+.grid-editable:hover { background: var(--tint); }
+.grid-editable .cell-edit-hint {
+  margin-left: 6px; color: var(--text-muted); opacity: 0; transition: opacity .15s; vertical-align: -2px;
+}
+.grid-editable:hover .cell-edit-hint { opacity: 1; }
+/* Keyboard focus must be as visible as hover, since the cell is a button. */
+.grid-editable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.grid-cell-value { display: inline-flex; align-items: center; min-width: 0; }
+
+/* Saving / saved / failed states for an in-place edit. No optimistic write, so
+   the "saved" tint is confirmation of something the server already accepted.
+   It lands on the value span rather than the cell so a wide cell does not flash
+   a full-width bar, and so it needs no z-index fight with the pinned column. */
+.grid-cell-saving { color: var(--text-muted); }
+.grid-cell-value.grid-cell-saved { background: var(--filled-bg); border-radius: 3px; }
+.grid-cell-error {
+  color: var(--wcpss-orange-strong); font-size: 11px; margin-top: 2px; display: block;
+}
+
+/* The in-place editor: a control sized to the cell rather than to the form, so
+   turning a cell into an input does not reflow the whole row. The shared
+   .edit-input/.edit-select/.edit-textarea rules already give it the right look;
+   these only tighten the box and drop the full-width behaviour those rules set
+   for a stacked form. */
+.grid-editor { min-width: 120px; }
+.grid-editor .edit-input,
+.grid-editor .edit-select,
+.grid-editor .edit-textarea { width: auto; min-width: 120px; padding: 5px 7px; font-size: 13px; }
+.grid-editor .edit-textarea { width: 100%; min-height: 54px; resize: vertical; }
+.grid-editor .toggle { display: inline-flex; align-items: center; }
+
+/* Option menu for the multi-option field types (checkbox with several options,
+   radio). Rendered into <body> with `position: fixed`, NOT inside the cell: the
+   grid's scroll container (.grid-scroll) sets overflow-x: auto, which computes
+   overflow-y to auto as well and so clips any absolutely-positioned child at the
+   scroll edge. Coordinates come from the cell's bounding rect. */
+.grid-menu {
+  position: fixed; z-index: 60; background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-2); padding: 8px 10px;
+  max-height: 260px; overflow-y: auto; max-width: calc(100vw - 24px); min-width: 180px; font-size: 13px;
+}
+/* Closes the menu on an outside click. Sits under the menu but over the grid. */
+.grid-menu-backdrop { position: fixed; inset: 0; z-index: 59; }
+.grid-menu label { display: flex; align-items: center; gap: 8px; padding: 5px 4px; cursor: pointer; white-space: nowrap; }
+.grid-menu label:hover { background: var(--panel-bg); }
+.grid-menu .grid-menu-foot {
+  display: flex; gap: 8px; justify-content: flex-end; border-top: 1px solid var(--border);
+  margin-top: 6px; padding-top: 8px;
+}
+
 /* Empty / loading states */
 .empty-state {
   text-align: center; padding: 48px 20px; color: var(--text-muted); font-size: 14px;
@@ -560,6 +712,11 @@ table.grid tbody tr.grid-group-row > td {
 .cp-item input[type="checkbox"] { width: 15px; height: 15px; accent-color: var(--accent); }
 .cp-item.dim { color: var(--text-muted); }
 .cp-item .tag { margin-left: auto; }
+/* A column that cannot be removed (the grid's first column). It reads as settled
+   rather than as a broken control: the tick stays visible and the row simply
+   stops inviting a click. */
+.cp-item.locked { cursor: default; background: var(--panel-bg); }
+.cp-item.locked input[type="checkbox"] { cursor: default; opacity: 0.85; }
 
 /* Column picker inside the Reports slide-out panel. The drawer is narrow and
    full-height, so the 2-up grid collapses to one column and each row drops the
@@ -778,6 +935,11 @@ table.grid tbody tr.grid-group-row > td {
     flex: 1 1 auto;
     justify-content: center;
   }
+  /* The hint takes its own line rather than stretching across a button slot. */
+  .page-head .head-actions .head-hint {
+    flex: 1 1 100%;
+    text-align: left;
+  }
   .page-head .title-block h1 {
     font-size: 20px;
   }
@@ -797,6 +959,22 @@ table.grid tbody tr.grid-group-row > td {
   .grid-wrap {
     overflow-x: visible;
   }
+  /* The Submissions grid's own scroll container. Nothing overflows once the rows
+     become cards, so the sticky first column is switched off too (it is only
+     declared inside the min-width block above). The header column width that
+     existed purely to bound the pinned cell goes with it. */
+  .grid-scroll {
+    overflow-x: visible;
+  }
+  /* A bar mirroring a scrollbar that no longer exists. JS hides it too (the
+     grid stops reporting an overflow), but the mobile layout is a hard off so it
+     can never surface as a stray strip. */
+  .grid-scroll-top {
+    display: none !important;
+  }
+  .grid-scroll table.grid > thead > tr > th:first-child { width: auto; min-width: 0; }
+  .grid-cell-pinned .cell-mono,
+  .grid-cell-pinned .link-name { display: inline; }
   table.grid {
     display: block;
     width: 100% !important;

@@ -1323,6 +1323,26 @@ export async function updateSubmissionStatus(id: number, status: string): Promis
 // Upsert the supplied answers against the submission. Existing rows (matched by
 // submission_id + field_id) are updated; new fields are inserted; fields present
 // in the DB but absent from the incoming payload are left untouched.
+//
+// ⚠ The upsert is spelled as UPDATE-then-INSERT-if-absent rather than any single
+// "upsert" statement, because there is no one spelling that both dialects accept:
+//
+//   - T-SQL `IF EXISTS (…) UPDATE … ELSE INSERT …` is unparseable by libSQL
+//     (SQL_PARSE_ERROR: near IF). It shipped that way and every staff-only save
+//     returned 500 on Turso.
+//   - `INSERT … ON CONFLICT (submission_id, field_id) DO UPDATE …` needs a UNIQUE
+//     constraint on that pair, and `submission_values` has only two *non-unique*
+//     indexes on both dialects (schema.ts / dialect/turso.ts). Adding one is a
+//     schema migration against a live SQL Server database that this code cannot
+//     verify, so it is deliberately avoided.
+//   - A dialect builder (like `upsertSetting`) would need that same index.
+//
+// `INSERT … SELECT <params> WHERE NOT EXISTS (…)` is valid, identical SQL on both
+// dialects and needs no schema change, so it is the one shape that is safe here.
+// The UPDATE runs first so an existing row is written exactly once and the INSERT
+// then finds it present; on a fresh field the UPDATE touches nothing and the
+// INSERT creates the row. Two statements, not one, but this is a per-edit path
+// with a single-answer payload, so the extra round trip is immaterial.
 export async function updateSubmissionValues(
   submissionId: number,
   answers: { field_id: number; value: string | number | boolean | string[] | null }[],
@@ -1336,14 +1356,21 @@ export async function updateSubmissionValues(
       typeof a.value === "boolean" ? (a.value ? "1" : "0") :
       JSON.stringify(a.value);
 
+    const params = { submissionId, fieldId: a.field_id, value: serialized };
+
     await execute(
-      `IF EXISTS (SELECT 1 FROM dbo.submission_values WHERE submission_id = @submissionId AND field_id = @fieldId)
-         UPDATE dbo.submission_values SET value = @value
-         WHERE submission_id = @submissionId AND field_id = @fieldId
-       ELSE
-         INSERT INTO dbo.submission_values (submission_id, field_id, value)
-         VALUES (@submissionId, @fieldId, @value);`,
-      { submissionId, fieldId: a.field_id, value: serialized }
+      `UPDATE dbo.submission_values SET value = @value
+       WHERE submission_id = @submissionId AND field_id = @fieldId`,
+      params
+    );
+    await execute(
+      `INSERT INTO dbo.submission_values (submission_id, field_id, value)
+       SELECT @submissionId, @fieldId, @value
+        WHERE NOT EXISTS (
+          SELECT 1 FROM dbo.submission_values
+           WHERE submission_id = @submissionId AND field_id = @fieldId
+        )`,
+      params
     );
   }
 
@@ -1514,11 +1541,27 @@ export interface ExportColumn {
   staff_only: boolean;
   // Roles that may access this column when it is staff-only. NULL for public.
   roles: string[] | null;
+  // The field's control type and option list, carried on the column so a client
+  // can render a value and pick the right editor from `/api/export/preview`
+  // alone. The Submissions grid used to read these from GET /api/forms/:id,
+  // which is admin-only — staff and School Contacts need the same grid now, so
+  // the metadata travels with the columns instead. The CSV/XLSX/PDF writers
+  // read key/label and ignore these.
+  type: string;
+  options: string[] | null;
 }
 
 export async function getExportColumns(formId: number): Promise<ExportColumn[]> {
-  const rows = await execute<{ id: number; label: string; staff_only: boolean; roles: string | null }>(
-    `SELECT id, label, staff_only, roles FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
+  const rows = await execute<{
+    id: number;
+    label: string;
+    type: string;
+    options: string | null;
+    staff_only: boolean;
+    roles: string | null;
+  }>(
+    `SELECT id, label, type, options, staff_only, roles
+       FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
   const columns = rows.map((r) => ({
@@ -1526,6 +1569,8 @@ export async function getExportColumns(formId: number): Promise<ExportColumn[]> 
     label: r.label,
     staff_only: Boolean(r.staff_only),
     roles: parseFormFieldRoles(r.roles),
+    type: r.type,
+    options: parseFormFieldOptions(r.options),
   }));
 
   // Group the staff-only columns at the bottom, each group keeping the form's own
@@ -1539,42 +1584,111 @@ export async function getExportColumns(formId: number): Promise<ExportColumn[]> 
 }
 
 // -----------------------------------------------------------------------------
-// View Columns config (admin Submissions grid display, per-form).
+// View Columns config (Submissions grid display, per-user per-form).
 // Deliberately separate from getExportColumns — the Export feature must stay
 // unchanged. This config only controls which columns the on-screen grid shows.
+//
+// Stored per (user, form) in dbo.user_form_view_columns, not on dbo.forms. The
+// grid is shown to admins, staff AND School Contacts, so a single per-form
+// value would mean whichever of them saved last silently rewrote everyone
+// else's columns. Per-user also matches what people expect a column picker to
+// do. dbo.forms.view_columns survives only as the source of the one-time
+// backfill in the migration ladder.
 // -----------------------------------------------------------------------------
+// Base grid columns are a client-side rendering concern: they come from
+// /api/submissions, not from the export preview, so the server never enumerates
+// them and has no list to validate against. It only needs to tell a standard
+// column's key apart from a field's, which the `base_` prefix does. An unknown
+// `base_*` key is stored and then ignored by the client — harmless, and far
+// better than a duplicated allow-list here that could drift from the grid.
+// (Contrast `field_N`, which the server does own and validates against the
+// form's real fields.)
+const BASE_COLUMN_KEY = /^base_[a-z0-9_]+$/;
+
 export interface ViewColumnsConfig {
   columns: ExportColumn[];
   viewKeys: string[];
+  // The standard grid columns this user has turned OFF, by key. Stored as the
+  // *hidden* set rather than the shown set deliberately: absence then means
+  // "shown", which is what makes every config written before the base columns
+  // were hideable still read correctly (nothing was hidden), and what makes a
+  // base column added later default to on rather than silently missing.
+  hiddenBase: string[];
+  // Whether this form has an explicitly saved selection. `false` means nobody
+  // has ever chosen (view_columns is NULL/unreadable), which is what lets a
+  // caller apply its own default — e.g. the Submissions grid defaulting to the
+  // staff-only columns rather than to every column.
+  configured: boolean;
 }
 
-// Read the form's field columns + the stored view_columns preference. When
-// view_columns is unset (NULL) or empty, returns all columns so the grid falls
-// back to showing everything. Configured keys that no longer match an existing
-// field (deleted fields) are dropped so the config never references ghosts.
-export async function getViewColumnsConfig(formId: number): Promise<ViewColumnsConfig> {
+// Read the form's field columns + the stored view_columns preference.
+//
+// Three distinct cases, which callers depend on being distinguishable:
+//   * view_columns is NULL / absent / unparseable -> not configured. Returns
+//     every column key so an unconfigured grid falls back to showing everything
+//     (the original safety rule).
+//   * view_columns is a stored empty array -> configured with an empty
+//     selection. Returns `viewKeys: []`. The caller decides what an empty
+//     selection means; it must NOT be silently widened to "all", or a user who
+//     unchecks every column would find them all back on the next visit.
+//   * view_columns is a non-empty array -> the normalized keys. Configured keys
+//     that no longer match an existing field (deleted fields) are dropped so the
+//     config never references ghosts; if every entry was a ghost the selection
+//     would silently become empty, so it falls back to all columns instead.
+//
+// There are also two readable *shapes*, told apart at parse time below:
+//   * a bare array of field ids — everything written before the standard columns
+//     became hideable, and the compact form field ids were always stored in.
+//     Nothing was hidden, so `hiddenBase` is empty and the grid shows them all.
+//   * an object { fields, hidden } — the current shape, carrying the hidden
+//     standard columns alongside the same field ids.
+// Both are accepted and neither is rewritten on read, so no migration is needed:
+// a row keeps whatever shape it was written as until its owner next saves.
+export async function getViewColumnsConfig(
+  formId: number,
+  userId: number
+): Promise<ViewColumnsConfig> {
   const columns = await getExportColumns(formId);
-  const rows = await execute<{ view_columns: string | null }>(
-    `SELECT view_columns FROM dbo.forms WHERE id = @formId`,
-    { formId }
+  const allKeys = columns.map((c) => c.key);
+  const rows = await execute<{ columns: string | null }>(
+    `SELECT columns FROM dbo.user_form_view_columns
+      WHERE form_id = @formId AND user_id = @userId`,
+    { formId, userId }
   );
-  const raw = rows[0]?.view_columns ?? null;
+  const raw = rows[0]?.columns ?? null;
   if (!raw) {
-    return { columns, viewKeys: columns.map((c) => c.key) };
+    return { columns, viewKeys: allKeys, hiddenBase: [], configured: false };
   }
-  let configured: unknown[] = [];
+  let stored: unknown[] = [];
+  let base: unknown[] = [];
+  let parsedOk = false;
   try {
     const parsed: unknown = JSON.parse(raw);
-    configured = Array.isArray(parsed) ? parsed : [];
+    if (Array.isArray(parsed)) {
+      stored = parsed;
+      parsedOk = true;
+    } else if (parsed && typeof parsed === "object") {
+      const obj = parsed as { fields?: unknown; hidden?: unknown };
+      stored = Array.isArray(obj.fields) ? obj.fields : [];
+      base = Array.isArray(obj.hidden) ? obj.hidden : [];
+      parsedOk = true;
+    }
   } catch {
-    configured = [];
+    parsedOk = false;
+  }
+  if (!parsedOk) {
+    return { columns, viewKeys: allKeys, hiddenBase: [], configured: false };
+  }
+  const hiddenBase = base.filter(
+    (k): k is string => typeof k === "string" && BASE_COLUMN_KEY.test(k)
+  );
+  if (stored.length === 0) {
+    return { columns, viewKeys: [], hiddenBase, configured: true };
   }
   // Normalize each stored entry to its `field_N` key. The stored array may
   // contain numeric ids (e.g. 10 -> field_10, as written by setViewColumns) or
   // already-normalized `field_N` strings. Unparseable/ghost entries are skipped.
-  // If every configured entry was a ghost, fall back to all columns so the grid
-  // never renders empty.
-  const existing = new Set(columns.map((c) => c.key));
+  const existing = new Set(allKeys);
   const toKey = (k: unknown): string | null => {
     if (typeof k === "number" && Number.isInteger(k) && k >= 1) return `field_${k}`;
     if (typeof k === "string") {
@@ -1584,28 +1698,54 @@ export async function getViewColumnsConfig(formId: number): Promise<ViewColumnsC
     }
     return null;
   };
-  const viewKeys = configured
+  const viewKeys = stored
     .map(toKey)
     .filter((k): k is string => k !== null && existing.has(k));
   if (viewKeys.length === 0) {
-    return { columns, viewKeys: columns.map((c) => c.key) };
+    return { columns, viewKeys: allKeys, hiddenBase, configured: true };
   }
-  return { columns, viewKeys };
+  return { columns, viewKeys, hiddenBase, configured: true };
 }
 
-// Persist the admin's column selection. viewKeys are `field_N` strings; stored
-// as a JSON array of the numeric ids (e.g. [1,3,4]). An empty array collapses
-// to NULL so the grid falls back to showing all columns.
-export async function setViewColumns(formId: number, viewKeys: string[]): Promise<void> {
+// Persist one user's column selection for one form. viewKeys are `field_N`
+// strings; stored as the JSON object { fields: [1,3,4], hidden: ["base_status"] }
+// — the field ids as numbers, exactly as the array-only shape stored them, which
+// is why an older row and a newer one normalize identically.
+//
+// `hiddenBase` holds the standard grid columns the user turned off. An empty
+// array rather than an absent key, so "nothing hidden" is explicit and the
+// reader never has to distinguish the two.
+//
+// An empty selection is stored as `{ fields: [] }`, NOT NULL. NULL means "never
+// configured" and reads back as "show everything", so collapsing an empty
+// selection to NULL would resurrect every column the user just turned off. The
+// JSON string is truthy, so it survives the `if (!raw)` check above.
+//
+// Scoped by (user_id, form_id), so this can only ever write the caller's own
+// row — it is not possible for one user's save to overwrite another's.
+//
+// Note this no longer touches dbo.forms.updated_at. It used to, because the
+// selection was a column on the form; that also had the side effect of moving
+// the form to the top of the admin Forms list every time someone opened and
+// closed the column picker.
+export async function setViewColumns(
+  formId: number,
+  userId: number,
+  viewKeys: string[],
+  hiddenBase: string[] = []
+): Promise<void> {
   const ids = viewKeys
     .map((k) => k.match(/^field_(\d+)$/))
     .filter((m): m is RegExpMatchArray => Boolean(m))
     .map((m) => Number(m[1]));
-  const value = ids.length ? JSON.stringify(ids) : null;
-  await execute(
-    `UPDATE dbo.forms SET view_columns = @value, updated_at = SYSUTCDATETIME() WHERE id = @formId`,
-    { value, formId }
-  );
+  await execute(dialect().upsertUserFormViewColumns(), {
+    userId,
+    formId,
+    value: JSON.stringify({
+      fields: ids,
+      hidden: hiddenBase.filter((k) => BASE_COLUMN_KEY.test(k)),
+    }),
+  });
 }
 
 // -----------------------------------------------------------------------------

@@ -1,4 +1,4 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from "react";
+import { useEffect, useState, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
@@ -6,6 +6,10 @@ import type { SubmissionDetail, SubmissionStatus, SubmissionValueRow } from "../
 import { useAuth } from "../../context/AuthContext";
 import { useDocumentsEnabled } from "../../lib/useDocumentsEnabled";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
+// The label/value renderer and all of the value helpers are shared with the
+// admin Submissions grid (which renders the same staff-only fields inline), so
+// there is exactly one type -> control mapping in the app.
+import { FieldValue, valuesToDraft } from "../../components/FieldValue";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "completed"];
 
@@ -302,16 +306,12 @@ export default function StaffSubmissionDetail() {
                     const existing = valuesByField.get(f.id);
                     const value = editing ? (draft[f.id] ?? existing?.value ?? null) : (existing?.value ?? null);
                     return (
-                      <Field
+                      <FieldValue
                         key={f.id}
                         v={{
-                          id: existing?.id ?? f.id,
-                          submission_id: detail.id,
                           field_id: f.id,
-                          value,
                           field_label: f.label,
                           field_type: f.type,
-                          staff_only: false,
                           options: f.options,
                         }}
                         editing={editing}
@@ -346,16 +346,12 @@ export default function StaffSubmissionDetail() {
                 {detail.staffOnlyFields.map((f) => {
                   const existing = detail.values.find((v) => v.field_id === f.id);
                   return (
-                    <Field
+                    <FieldValue
                       key={f.id}
                       v={{
-                        id: existing?.id ?? f.id,
-                        submission_id: detail.id,
                         field_id: f.id,
-                        value: staffDraft[f.id] ?? existing?.value ?? null,
                         field_label: f.label,
                         field_type: f.type,
-                        staff_only: true,
                         options: f.options,
                       }}
                       editing={true}
@@ -456,209 +452,12 @@ export default function StaffSubmissionDetail() {
   );
 }
 
-// ---------------------------------------------------------------------------
-// Editable field renderer
-// ---------------------------------------------------------------------------
-function Field({
-  v,
-  editing,
-  value,
-  onChange,
-}: {
-  v: SubmissionValueRow;
-  editing: boolean;
-  value: string | number | boolean | string[] | null;
-  onChange: (val: string | number | boolean | string[] | null) => void;
-}) {
-  const { field_type: type, field_label: label, options } = v;
-
-  if (!editing) {
-    return (
-      <div className="field">
-        <span className="f-label">{label}</span>
-        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value, type)}</span>
-      </div>
-    );
-  }
-
-  return (
-    <div className="field">
-      <span className="f-label">{label}</span>
-      {renderEditor(type, options, value, onChange, `radio-${v.field_id}`)}
-    </div>
-  );
-}
-
-function renderEditor(
-  type: string,
-  options: string[] | null,
-  value: string | number | boolean | string[] | null,
-  onChange: (val: string | number | boolean | string[] | null) => void,
-  radioName: string
-): ReactNode {
-  switch (type) {
-    case "textarea":
-      return (
-        <textarea
-          className="edit-textarea"
-          value={toStr(value)}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-    case "number":
-      return (
-        <input
-          className="edit-input"
-          type="number"
-          value={toStr(value)}
-          onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        />
-      );
-    case "date":
-      return (
-        <input
-          className="edit-input"
-          type="date"
-          value={toStr(value)}
-          onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
-        />
-      );
-    case "email":
-      return (
-        <input
-          className="edit-input"
-          type="email"
-          value={toStr(value)}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-    case "select":
-      return (
-        <select className="edit-select" value={toStr(value)} onChange={(e) => onChange(e.target.value)}>
-          <option value="">— Select —</option>
-          {(options ?? []).map((o) => (
-            <option key={o} value={o}>
-              {o}
-            </option>
-          ))}
-        </select>
-      );
-    case "radio":
-      return (
-        <div className="f-value inline">
-          {(options ?? []).map((o) => (
-            <label key={o} style={{ display: "inline-flex", alignItems: "center", gap: 5, marginRight: 10 }}>
-              <input
-                type="radio"
-                name={radioName}
-                checked={toStr(value) === o}
-                onChange={() => onChange(o)}
-              />
-              {o}
-            </label>
-          ))}
-        </div>
-      );
-    case "checkbox": {
-      const opts = options ?? [];
-      // A single-option checkbox (e.g. the staff-only "Generate document" field)
-      // is semantically a boolean, so render it as a toggle switch to make it
-      // deliberate rather than an easy-to-mistake checkbox. Fields with multiple
-      // options keep the checkbox list.
-      if (opts.length === 1) {
-        const o = opts[0];
-        const arr = Array.isArray(value) ? value : [];
-        const checked = arr.includes(o);
-        return (
-          <label className="toggle" title="Toggle to set this option">
-            <input
-              type="checkbox"
-              checked={checked}
-              onChange={(e) => {
-                const next = e.target.checked ? [...arr, o] : arr.filter((x) => x !== o);
-                onChange(next);
-              }}
-            />
-            <span className="track">
-              <span className="thumb" />
-            </span>
-            <span style={{ marginLeft: 8, fontSize: 13 }}>{o}</span>
-          </label>
-        );
-      }
-      return (
-        <div className="f-value inline">
-          {opts.map((o) => {
-            const arr = Array.isArray(value) ? value : [];
-            const checked = arr.includes(o);
-            return (
-              <label key={o} style={{ display: "inline-flex", alignItems: "center", gap: 5, marginRight: 10 }}>
-                <input
-                  type="checkbox"
-                  checked={checked}
-                  onChange={(e) => {
-                    const next = e.target.checked ? [...arr, o] : arr.filter((x) => x !== o);
-                    onChange(next);
-                  }}
-                />
-                {o}
-              </label>
-            );
-          })}
-        </div>
-      );
-    }
-    default:
-      return (
-        <input
-          className="edit-input"
-          type="text"
-          value={toStr(value)}
-          onChange={(e) => onChange(e.target.value)}
-        />
-      );
-  }
-}
-
 const STATUS_LABEL: Record<SubmissionStatus, string> = {
   submitted: "Submitted",
   in_review: "In Review",
   flagged: "Flagged",
   completed: "Completed",
 };
-
-function valuesToDraft(values: SubmissionValueRow[]): Record<number, string | number | boolean | string[] | null> {
-  const d: Record<number, string | number | boolean | string[] | null> = {};
-  for (const v of values) d[v.field_id] = v.value;
-  return d;
-}
-
-function isEmpty(v: unknown): boolean {
-  return v === null || v === undefined || v === "";
-}
-
-function toStr(v: string | number | boolean | string[] | null): string {
-  if (v === null || v === undefined) return "";
-  if (Array.isArray(v)) return v.join(", ");
-  return String(v);
-}
-
-function formatValue(v: unknown, type?: string): string {
-  // Unanswered optional fields (e.g. "Course choice #3 (optional)") should render
-  // as blank rather than a placeholder, per the product requirement.
-  if (v === null || v === undefined || v === "") return "";
-  const str = Array.isArray(v) ? "" : String(v);
-  // Format date fields and date-like strings (e.g. "2026-08-28") as M/D/YYYY.
-  // Parse the YYYY-MM-DD string directly to avoid the timezone shift that
-  // `new Date("2026-08-28")` would introduce on negative-offset systems.
-  if (type === "date" || /^\d{4}-\d{2}-\d{2}$/.test(str)) {
-    const m = str.match(/^(\d{4})-(\d{2})-(\d{2})$/);
-    if (m) return `${Number(m[2])}/${Number(m[3])}/${m[1]}`;
-    return str;
-  }
-  if (Array.isArray(v)) return v.join(", ");
-  return str;
-}
 
 function docStatusBadge(status: string): { cls: string; label: string } {
   switch (status) {

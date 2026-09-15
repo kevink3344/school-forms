@@ -213,6 +213,33 @@ const TURSO_DDL: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_report_views_user_name ON report_views(user_id, name)`,
   `CREATE INDEX IF NOT EXISTS IX_report_views_user ON report_views(user_id)`,
 
+  // --- user_form_view_columns -----------------------------------------------
+  // The per-user Submissions grid column selection. Supersedes forms.view_columns,
+  // which held ONE value per form and so was shared by every user — once staff
+  // and School Contacts got the column chooser too, a save by any of them would
+  // have rewritten what the org admin saw. Same per-user shape as report_views.
+  `CREATE TABLE IF NOT EXISTS user_form_view_columns (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id    INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+     form_id    INTEGER NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
+     columns    TEXT,
+     created_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     updated_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS UX_ufvc_user_form ON user_form_view_columns(user_id, form_id)`,
+
+  // Carry the one legacy forms.view_columns value over to the form's designer,
+  // who is the person most likely to have set it. Idempotent, and deliberately
+  // best-effort: a form with no designer_id has no recoverable owner and simply
+  // starts unconfigured. Mirrors the SQL Server ladder.
+  `INSERT INTO user_form_view_columns (user_id, form_id, columns)
+     SELECT f.designer_id, f.id, f.view_columns
+       FROM forms f
+      WHERE f.view_columns IS NOT NULL
+        AND f.designer_id IS NOT NULL
+        AND NOT EXISTS (SELECT 1 FROM user_form_view_columns u
+                         WHERE u.user_id = f.designer_id AND u.form_id = f.id)`,
+
   // --- reference data --------------------------------------------------------
   // The two known organizations, seeded idempotently exactly as the SQL Server
   // ladder does.
@@ -300,6 +327,20 @@ export const tursoDialect: Dialect = {
       `       calendar = excluded.calendar,\n` +
       `       district = COALESCE(excluded.district, schools.district)\n` +
       `     RETURNING id, source_id, name, grade_level, calendar, district, created_at`
+    );
+  },
+
+  upsertUserFormViewColumns() {
+    // Replaces the SQL Server MERGE, keyed on the (user_id, form_id) unique
+    // index. `${NOW}` literally, not `SYSUTCDATETIME()` — the Turso dialect must
+    // not depend on the driver's token rewrite (see the header note above).
+    return (
+      `INSERT INTO user_form_view_columns (user_id, form_id, columns, updated_at)\n` +
+      `     VALUES (@userId, @formId, @value, ${NOW})\n` +
+      `     ON CONFLICT(user_id, form_id) DO UPDATE SET\n` +
+      `       columns = excluded.columns,\n` +
+      `       updated_at = ${NOW}\n` +
+      `     RETURNING id`
     );
   },
 
