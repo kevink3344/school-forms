@@ -19,13 +19,11 @@ export const FIELD_TYPES = [
   "radio",
   "email",
 ] as const;
-export const COMMENT_VISIBILITY = ["internal"] as const;
 
 export type Role = (typeof ROLES)[number];
 export type FormStatus = (typeof FORM_STATUS)[number];
 export type SubmissionStatus = (typeof SUBMISSION_STATUS)[number];
 export type FieldType = (typeof FIELD_TYPES)[number];
-export type CommentVisibility = (typeof COMMENT_VISIBILITY)[number];
 
 // -----------------------------------------------------------------------------
 // Typed row shapes (mirror the SQL Server tables below)
@@ -174,15 +172,6 @@ export interface SubmissionValue {
   value: string | number | boolean | string[] | null;
 }
 
-export interface Comment {
-  id: number;
-  submission_id: number;
-  staff_id: number;
-  body: string;
-  visibility: CommentVisibility;
-  created_at: Date;
-}
-
 // A staff-only field that has been added ad-hoc to a *specific* submission.
 // Deliberately lives in its own table so the published form definition
 // (dbo.form_fields) stays completely fixed — staff can extend a submission
@@ -233,9 +222,20 @@ export interface ListDocumentRow extends Document {
 }
 
 // -----------------------------------------------------------------------------
-// SQL Server DDL — executed once at startup (idempotent CREATE IF NOT EXISTS)
+// SQL Server DDL — a cumulative migration ladder, executed once at startup.
+//
+// Deliberately SQL Server only: it is consumed by `dialect/sqlserver.ts`. The
+// libSQL/Turso dialect (`dialect/turso.ts`) creates the FINAL schema directly
+// with plain `CREATE TABLE IF NOT EXISTS` statements and does not port any of
+// this — there is nothing to migrate from on a fresh database
+// (docs/plans/dual-db.md §5.3).
+//
+// Most statements are idempotent guards (COL_LENGTH / sys.indexes /
+// sys.foreign_keys). A few are one-time data backfills. Batches are split on
+// purpose: SQL Server compiles each batch before executing it, so a statement
+// referencing a column ADDed in the same batch fails with error 207.
 // -----------------------------------------------------------------------------
-export const DDL_STATEMENTS: string[] = [
+export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `IF OBJECT_ID('dbo.schools', 'U') IS NULL
    CREATE TABLE dbo.schools (
      id          INT IDENTITY(1,1) PRIMARY KEY,
@@ -566,21 +566,6 @@ export const DDL_STATEMENTS: string[] = [
      CREATE INDEX IX_submission_values_submission ON dbo.submission_values(submission_id);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submission_values_field')
      CREATE INDEX IX_submission_values_field ON dbo.submission_values(field_id);`,
-
-  `IF OBJECT_ID('dbo.comments', 'U') IS NULL
-   CREATE TABLE dbo.comments (
-     id            INT IDENTITY(1,1) PRIMARY KEY,
-     submission_id INT NOT NULL,
-     staff_id      INT NOT NULL,
-     body          NVARCHAR(MAX) NOT NULL,
-     visibility    NVARCHAR(20) NOT NULL CONSTRAINT DF_comments_visibility DEFAULT 'internal'
-                   CHECK (visibility IN ('internal')),
-     created_at    DATETIME2 NOT NULL CONSTRAINT DF_comments_created_at DEFAULT SYSUTCDATETIME(),
-     CONSTRAINT FK_comments_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
-     CONSTRAINT FK_comments_staff FOREIGN KEY (staff_id) REFERENCES dbo.users(id) ON DELETE CASCADE
-   );
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_comments_submission')
-     CREATE INDEX IX_comments_submission ON dbo.comments(submission_id);`,
 
   // Staff-only ad-hoc fields on a specific submission. Kept out of form_fields
   // so the published template stays fixed while staff extend individual records.

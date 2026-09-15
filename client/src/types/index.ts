@@ -174,16 +174,6 @@ export interface SubmissionValueRow extends SubmissionValue {
   options: string[] | null;
 }
 
-export interface Comment {
-  id: number;
-  submission_id: number;
-  staff_id: number;
-  body: string;
-  visibility: "internal";
-  created_at: string;
-  staff_name?: string;
-}
-
 export interface SubmissionRow extends Submission {
   form_name: string;
   school_name: string | null;
@@ -238,7 +228,6 @@ export interface SubmissionDetail extends Submission {
   form_name: string;
   student_name: string | null;
   values: SubmissionValueRow[];
-  comments: Comment[];
   adhocFields: AdhocField[];
   // Display name of the staff member who last saved the staff-only fields.
   staff_fields_updated_by_name: string | null;

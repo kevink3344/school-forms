@@ -1,0 +1,100 @@
+import { SQLSERVER_DDL_STATEMENTS } from "../schema.js";
+import { submissionValuePredicate } from "./shared.js";
+import type { Dialect } from "./types.js";
+
+// -----------------------------------------------------------------------------
+// SQL Server dialect.
+//
+// The 39-statement migration ladder lives in `schema.ts` (exported as
+// `SQLSERVER_DDL_STATEMENTS`) and is consumed here rather than transcribed — it
+// IS the SQL Server schema, and an accidental edit during a copy would be fatal
+// on the live database. The Turso dialect (./turso.ts) does NOT port it: a fresh
+// libSQL database gets the final shape directly (docs/plans/dual-db.md §5.3).
+//
+// Every builder below emits SQL that is semantically identical to the literals
+// that were inline in `queries.ts` before the dialect split, so the SQL Server
+// path stays byte-for-byte the same on the wire.
+// -----------------------------------------------------------------------------
+
+function outputList(returning: string[]): string {
+  return returning.map((column) => `INSERTED.${column}`).join(", ");
+}
+
+export const sqlserverDialect: Dialect = {
+  kind: "sqlserver",
+
+  ddl: SQLSERVER_DDL_STATEMENTS,
+
+  insertReturning({ table, columns, returning, values }) {
+    return (
+      `INSERT INTO dbo.${table} (${columns.join(", ")})\n` +
+      `     OUTPUT ${outputList(returning)}\n` +
+      `     VALUES (${values})`
+    );
+  },
+
+  updateReturning({ table, set, where, returning }) {
+    return (
+      `UPDATE dbo.${table}\n` +
+      `     SET ${set}\n` +
+      `     OUTPUT ${outputList(returning)}\n` +
+      `     WHERE ${where}`
+    );
+  },
+
+  deleteReturning({ table, where, returning }) {
+    return `DELETE FROM dbo.${table} OUTPUT DELETED.${returning.join(", DELETED.")} WHERE ${where}`;
+  },
+
+  selectSchoolsPage({ where, orderBy }) {
+    // SQL Server requires ORDER BY to use OFFSET/FETCH.
+    return (
+      `SELECT id, source_id, name, grade_level, calendar, district, created_at\n` +
+      `     FROM dbo.schools\n` +
+      `     ${where}\n` +
+      `     ORDER BY ${orderBy}\n` +
+      `     OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+  },
+
+  upsertSetting() {
+    return (
+      `MERGE dbo.app_settings AS target\n` +
+      `     USING (SELECT @key AS [key], @value AS [value]) AS source\n` +
+      `     ON target.[key] = source.[key]\n` +
+      `     WHEN MATCHED THEN UPDATE SET target.[value] = source.[value],\n` +
+      `                                  target.updated_at = SYSUTCDATETIME()\n` +
+      `     WHEN NOT MATCHED THEN INSERT ([key], [value], updated_at)\n` +
+      `       VALUES (source.[key], source.[value], SYSUTCDATETIME());`
+    );
+  },
+
+  upsertSchoolFromSource() {
+    return (
+      `MERGE dbo.schools AS tgt\n` +
+      `     USING (SELECT @sourceId AS source_id) AS src\n` +
+      `       ON tgt.source_id = src.source_id\n` +
+      `     WHEN MATCHED THEN\n` +
+      `       UPDATE SET tgt.name = @name, tgt.grade_level = @gradeLevel,\n` +
+      `                  tgt.calendar = @calendar,\n` +
+      `                  tgt.district = COALESCE(@district, tgt.district)\n` +
+      `     WHEN NOT MATCHED THEN\n` +
+      `       INSERT (source_id, name, grade_level, calendar, district)\n` +
+      `       VALUES (@sourceId, @name, @gradeLevel, @calendar, @district)\n` +
+      `     OUTPUT INSERTED.id, INSERTED.source_id, INSERTED.name, INSERTED.grade_level,\n` +
+      `            INSERTED.calendar, INSERTED.district, INSERTED.created_at;`
+    );
+  },
+
+  submissionValueSubquery(label) {
+    return (
+      `(SELECT TOP 1 sv.value\n` +
+      `       FROM dbo.submission_values sv\n` +
+      `       JOIN dbo.form_fields ff ON ff.id = sv.field_id\n` +
+      `      WHERE sv.submission_id = s.id\n` +
+      `        AND ${submissionValuePredicate(label)}\n` +
+      `        AND sv.value IS NOT NULL\n` +
+      `      ORDER BY ff.sort_order)`
+    );
+  },
+};

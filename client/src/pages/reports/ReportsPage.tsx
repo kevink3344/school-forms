@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useRef, useState } from "react";
-import { Download, Save, Star, Trash2, X } from "lucide-react";
+import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronRight, Download, Save, Star, Trash2, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
 import ColumnsPicker, { cellText } from "../../components/ColumnsPicker";
@@ -48,6 +48,27 @@ const FORMATS: { value: ReportFormat; label: string }[] = [
   { value: "pdf", label: "PDF" },
 ];
 
+// Heading for rows whose grouped column is blank.
+const NO_VALUE_GROUP = "(No value)";
+
+// Natural ordering, so "Grade 9" sorts before "Grade 10" instead of after it.
+const groupCollator = new Intl.Collator(undefined, { numeric: true, sensitivity: "base" });
+
+// The raw text of a grouped cell value. Deliberately not cellText(): that renders
+// an empty value as "-", which would merge a genuinely blank cell into the same
+// group as a cell holding a literal dash.
+function groupLabel(v: unknown): string {
+  if (v === null || v === undefined) return "";
+  if (Array.isArray(v)) return v.join(", ").trim();
+  if (typeof v === "object") return JSON.stringify(v);
+  return String(v).trim();
+}
+
+interface RowGroup {
+  label: string;
+  rows: Record<string, unknown>[];
+}
+
 // One builder, used by the preview request and the export request. The free-text
 // filter is passed in rather than read from `state` because the caller debounces
 // it separately. Nullish and empty values are dropped by reportQueryString, so
@@ -89,6 +110,12 @@ export default function ReportsPage() {
   const [preview, setPreview] = useState<ReportPreview | null>(null);
   const [checked, setChecked] = useState<Set<string>>(new Set());
   const [format, setFormat] = useState<ReportFormat>("csv");
+
+  // Preview-only grouping. `groupBy` is a column key from the preview response;
+  // `collapsedGroups` holds group labels, which only mean anything for the
+  // grouping that produced them.
+  const [groupBy, setGroupBy] = useState<string | null>(null);
+  const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
 
   const [showPicker, setShowPicker] = useState(false);
   const [views, setViews] = useState<ReportView[]>([]);
@@ -227,6 +254,42 @@ export default function ReportsPage() {
   const toggleAll = () =>
     setChecked((prev) => (prev.size === availableColumns.length ? new Set() : new Set(availableColumns.map((c) => c.key))));
 
+  // --- Grouping (preview only) ---------------------------------------------
+  // Rows arrive ordered by submitted_at DESC, so grouping is a stable partition:
+  // the server's ordering survives inside each group. Grouping never touches an
+  // export — it is a way to read the grid, not a change to the data.
+  const groups = useMemo<RowGroup[] | null>(() => {
+    if (!groupBy || !preview) return null;
+    const map = new Map<string, RowGroup>();
+    for (const r of preview.rows) {
+      const label = groupLabel(r[groupBy]) || NO_VALUE_GROUP;
+      const existing = map.get(label);
+      if (existing) existing.rows.push(r);
+      else map.set(label, { label, rows: [r] });
+    }
+    return [...map.values()].sort((a, b) => {
+      // Rows with nothing in the grouped column always sort last.
+      if (a.label === NO_VALUE_GROUP) return b.label === NO_VALUE_GROUP ? 0 : 1;
+      if (b.label === NO_VALUE_GROUP) return -1;
+      return groupCollator.compare(a.label, b.label);
+    });
+  }, [groupBy, preview]);
+
+  const toggleGroup = (label: string) =>
+    setCollapsedGroups((prev) => {
+      const next = new Set(prev);
+      if (next.has(label)) next.delete(label);
+      else next.add(label);
+      return next;
+    });
+
+  // Collapse state is keyed by group label, which only means something for the
+  // grouping that produced it — carrying it over would silently hide groups in a
+  // different column, and a stale key would survive a form switch entirely.
+  useEffect(() => {
+    setCollapsedGroups(new Set());
+  }, [groupBy, state.formId]);
+
   const canRun = state.formId != null && !loading;
 
   // --- Export ---------------------------------------------------------------
@@ -272,6 +335,8 @@ export default function ReportsPage() {
     });
     setFormat(view.format);
     setChecked(new Set(view.columns ?? []));
+    // A saved view carries no grouping, and the form may change underneath it.
+    setGroupBy(null);
     // Fire-and-forget: powers a "most recently used" ordering later.
     api.useReportView(view.id).catch(() => {});
   };
@@ -371,6 +436,17 @@ export default function ReportsPage() {
   const activeView = views.find((v) => v.id === activeViewId) ?? null;
   const selectedForm = forms.find((f) => f.id === state.formId) ?? null;
 
+  // A plain function rather than a component: it is called directly, so React
+  // keeps the same row elements across a regroup instead of remounting them.
+  const renderRow = (r: Record<string, unknown>, i: number) => (
+    <tr key={String(r.submission_public_id ?? i)}>
+      <td className="cell-mono">{cellText(r.submitted_at)}</td>
+      {gridColumns.map((c) => (
+        <td key={c.key}>{cellText(r[c.key])}</td>
+      ))}
+    </tr>
+  );
+
   return (
     <div>
       <PageHead
@@ -409,6 +485,9 @@ export default function ReportsPage() {
               const id = e.target.value ? Number(e.target.value) : null;
               patch({ formId: id });
               setActiveViewId(null);
+              // Column keys belong to the form, so a grouping chosen for the old
+              // form would silently collapse every row into "(No value)".
+              setGroupBy(null);
             }}
           >
             <option value="">Select a form…</option>
@@ -454,6 +533,27 @@ export default function ReportsPage() {
           >
             {`Select Columns (${selectedKeys.length})`}
           </button>
+        </div>
+
+        {/* Every role-visible column is offered, not just the ones ticked in the
+            picker: the preview returns a value for each visible column on every
+            row regardless of the selection, so grouping by a hidden column still
+            works and the section totals stay meaningful. */}
+        <div className="filter-group" style={{ minWidth: 0 }}>
+          <label htmlFor="rp-group">Group by</label>
+          <select
+            id="rp-group"
+            value={groupBy ?? ""}
+            onChange={(e) => setGroupBy(e.target.value || null)}
+            disabled={!availableColumns.length}
+          >
+            <option value="">None</option>
+            {availableColumns.map((c) => (
+              <option key={c.key} value={c.key}>
+                {c.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div className="filter-spacer" />
@@ -654,9 +754,6 @@ export default function ReportsPage() {
           <table className="grid">
             <thead>
               <tr>
-                <th style={{ width: 34 }}>
-                  <input type="checkbox" disabled title="Row selection is not available yet" />
-                </th>
                 <th>Submitted</th>
                 {gridColumns.map((c) => (
                   <th key={c.key}>
@@ -667,22 +764,35 @@ export default function ReportsPage() {
               </tr>
             </thead>
             <tbody>
-              {preview.rows.map((r, i) => (
-                <tr key={String(r.submission_public_id ?? i)}>
-                  <td>
-                    <input type="checkbox" disabled title="Row selection is not available yet" />
-                  </td>
-                  <td className="cell-mono">{cellText(r.submitted_at)}</td>
-                  {gridColumns.map((c) => (
-                    <td key={c.key}>{cellText(r[c.key])}</td>
-                  ))}
-                </tr>
-              ))}
+              {groups
+                ? groups.map((g) => (
+                    <Fragment key={g.label}>
+                      <tr className="grid-group-row">
+                        <td colSpan={1 + gridColumns.length}>
+                          <button
+                            type="button"
+                            className="grid-group-toggle"
+                            aria-expanded={!collapsedGroups.has(g.label)}
+                            onClick={() => toggleGroup(g.label)}
+                          >
+                            {collapsedGroups.has(g.label) ? <ChevronRight size={14} /> : <ChevronDown size={14} />}
+                            <span>{g.label}</span>
+                            <span className="grid-group-count">
+                              {g.rows.length} {g.rows.length === 1 ? "row" : "rows"}
+                            </span>
+                          </button>
+                        </td>
+                      </tr>
+                      {!collapsedGroups.has(g.label) && g.rows.map((r, i) => renderRow(r, i))}
+                    </Fragment>
+                  ))
+                : preview.rows.map((r, i) => renderRow(r, i))}
             </tbody>
           </table>
           <div className="grid-footer">
             <span>
               {preview.rows.length} of {preview.total} rows · {gridColumns.length} columns
+              {groups ? ` · ${groups.length} ${groups.length === 1 ? "group" : "groups"}` : ""}
             </span>
             <div className="filter-spacer" />
             <span>{selectedForm ? selectedForm.title : preview.form_title}</span>

@@ -14,7 +14,7 @@
  * Idempotent: guarded by `school_year IS NULL OR school_year = ''`, so it is
  * safe to re-run — it only touches rows that don't already carry a value.
  */
-import { getPool, initDb } from "./pool.js";
+import { getClient, initDb } from "./pool.js";
 import { schoolYearForDate } from "./schema.js";
 
 async function main(): Promise<void> {
@@ -25,8 +25,8 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  const db = await getPool();
-  const rows = await db.request().query(
+  const db = getClient();
+  const rows = await db.query<{ id: number; submitted_at: string | Date }>(
     `SELECT id, submitted_at
      FROM dbo.submissions
      WHERE school_year IS NULL OR school_year = ''
@@ -34,16 +34,16 @@ async function main(): Promise<void> {
   );
 
   let updated = 0;
-  for (const r of rows.recordset) {
+  for (const r of rows) {
+    // SQL Server returns a Date here, libSQL an ISO string; `new Date(...)`
+    // accepts both, so this stays dialect-neutral.
     const schoolYear = schoolYearForDate(new Date(r.submitted_at));
-    await db.request()
-      .input("id", r.id)
-      .input("schoolYear", schoolYear)
-      .query(
-        `UPDATE dbo.submissions
-         SET school_year = @schoolYear
-         WHERE id = @id`
-      );
+    await db.query(
+      `UPDATE dbo.submissions
+       SET school_year = @schoolYear
+       WHERE id = @id`,
+      { id: r.id, schoolYear }
+    );
     updated += 1;
   }
 

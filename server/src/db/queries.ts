@@ -1,5 +1,5 @@
-import { getPool } from "./pool.js";
-import sql, { type Transaction } from "mssql";
+import { getClient, getDbKind } from "./pool.js";
+import { getDialect } from "./dialect/index.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import type {
@@ -9,7 +9,6 @@ import type {
   FormField,
   Submission,
   SubmissionValue,
-  Comment,
   AdhocField,
   Role,
   Organization,
@@ -17,34 +16,27 @@ import type {
 } from "./schema.js";
 
 // -----------------------------------------------------------------------------
-// Generic query helper
+// Generic query helper — the single seam every query in the app flows through.
+//
+// It is dialect-neutral by design: named `@param` placeholders in, row array
+// out. driver/mssql.ts binds them through `mssql`; driver/libsql.ts binds them
+// through libSQL (which also translates `dbo.` / `SYSUTCDATETIME()` and
+// normalises SQLite's 0/1 back to booleans).
+//
+// The handful of statement shapes that genuinely differ between the two dialects
+// (OUTPUT / MERGE / OFFSET-FETCH) are produced by `dialect()` below rather than
+// being written inline here — see dialect/sqlserver.ts and dialect/turso.ts.
 // -----------------------------------------------------------------------------
 export async function execute<T = unknown>(
   query: string,
   params: Record<string, unknown> = {}
 ): Promise<T[]> {
-  const pool = await getPool();
-  const request = pool.request();
-  for (const [name, value] of Object.entries(params)) {
-    request.input(name, value as never);
-  }
-  const result = await request.query(query);
-  return (result.recordset ?? []) as T[];
+  return getClient().query<T>(query, params);
 }
 
-// Run a query within an explicit transaction. Used for the atomic per-form
-// counter increment that allocates incremental submission ids.
-async function executeInTransaction<T = unknown>(
-  transaction: Transaction,
-  query: string,
-  params: Record<string, unknown> = {}
-): Promise<T[]> {
-  const request = transaction.request();
-  for (const [name, value] of Object.entries(params)) {
-    request.input(name, value as never);
-  }
-  const result = await request.query(query);
-  return (result.recordset ?? []) as T[];
+/** The statement builders for the active dialect. */
+function dialect() {
+  return getDialect(getDbKind());
 }
 
 // -----------------------------------------------------------------------------
@@ -81,9 +73,12 @@ export async function createOrganization(
   active: boolean
 ): Promise<Organization> {
   const rows = await execute<Organization>(
-    `INSERT INTO dbo.organizations (slug, name, description, doc_folder_id, active)
-     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.description, INSERTED.doc_folder_id, INSERTED.active, INSERTED.created_at
-     VALUES (@slug, @name, @description, @docFolderId, @active)`,
+    dialect().insertReturning({
+      table: "organizations",
+      columns: ["slug", "name", "description", "doc_folder_id", "active"],
+      returning: ["id", "slug", "name", "description", "doc_folder_id", "active", "created_at"],
+      values: "@slug, @name, @description, @docFolderId, @active",
+    }),
     { slug, name, description, docFolderId, active }
   );
   return rows[0];
@@ -119,11 +114,14 @@ export async function updateOrganization(
   const active = data.active ?? existing.active;
 
   const rows = await execute<Organization>(
-    `UPDATE dbo.organizations
-     SET name = @name, slug = @slug, description = @description,
-         doc_folder_id = @docFolderId, active = @active
-     OUTPUT INSERTED.id, INSERTED.slug, INSERTED.name, INSERTED.description, INSERTED.doc_folder_id, INSERTED.active, INSERTED.created_at
-     WHERE id = @id`,
+    dialect().updateReturning({
+      table: "organizations",
+      set:
+        "name = @name, slug = @slug, description = @description,\n" +
+        "         doc_folder_id = @docFolderId, active = @active",
+      where: "id = @id",
+      returning: ["id", "slug", "name", "description", "doc_folder_id", "active", "created_at"],
+    }),
     { id, name, slug, description, docFolderId, active }
   );
   return rows[0] ?? null;
@@ -179,19 +177,11 @@ export async function getSetting(key: string): Promise<string | null> {
   return rows[0]?.value ?? null;
 }
 
-// Upsert a setting. SQL Server has no ON CONFLICT, so use MERGE. Returns the
+// Upsert a setting. SQL Server has no ON CONFLICT, so it uses MERGE; libSQL uses
+// INSERT ... ON CONFLICT. Both shapes come from the active dialect. Returns the
 // stored value (the string, normalized) so callers can echo it back.
 export async function setSetting(key: string, value: string): Promise<string> {
-  await execute(
-    `MERGE dbo.app_settings AS target
-     USING (SELECT @key AS [key], @value AS [value]) AS source
-     ON target.[key] = source.[key]
-     WHEN MATCHED THEN UPDATE SET target.[value] = source.[value],
-                                  target.updated_at = SYSUTCDATETIME()
-     WHEN NOT MATCHED THEN INSERT ([key], [value], updated_at)
-       VALUES (source.[key], source.[value], SYSUTCDATETIME());`,
-    { key, value }
-  );
+  await execute(dialect().upsertSetting(), { key, value });
   return value;
 }
 
@@ -242,10 +232,12 @@ export async function getSchool(id: number): Promise<School | null> {
 
 export async function createSchool(name: string, district: string | null): Promise<School> {
   const rows = await execute<School>(
-    `INSERT INTO dbo.schools (name, district)
-     OUTPUT INSERTED.id, INSERTED.source_id, INSERTED.name, INSERTED.grade_level,
-            INSERTED.calendar, INSERTED.district, INSERTED.created_at
-     VALUES (@name, @district)`,
+    dialect().insertReturning({
+      table: "schools",
+      columns: ["name", "district"],
+      returning: ["id", "source_id", "name", "grade_level", "calendar", "district", "created_at"],
+      values: "@name, @district",
+    }),
     { name, district }
   );
   return rows[0];
@@ -286,11 +278,7 @@ export async function listSchoolsPage(params: {
   );
   const total = countRows[0]?.total ?? 0;
   const rows = await execute<School>(
-    `SELECT id, source_id, name, grade_level, calendar, district, created_at
-     FROM dbo.schools
-     ${where}
-     ORDER BY name
-     OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`,
+    dialect().selectSchoolsPage({ where, orderBy: "name" }),
     { ...filterParams, offset, pageSize }
   );
   return { rows, total };
@@ -326,21 +314,13 @@ export async function upsertSchoolFromSource(s: {
   calendar: string | null;
   district: string | null;
 }): Promise<School> {
-  const rows = await execute<School>(
-    `MERGE dbo.schools AS tgt
-     USING (SELECT @sourceId AS source_id) AS src
-       ON tgt.source_id = src.source_id
-     WHEN MATCHED THEN
-       UPDATE SET tgt.name = @name, tgt.grade_level = @gradeLevel,
-                  tgt.calendar = @calendar,
-                  tgt.district = COALESCE(@district, tgt.district)
-     WHEN NOT MATCHED THEN
-       INSERT (source_id, name, grade_level, calendar, district)
-       VALUES (@sourceId, @name, @gradeLevel, @calendar, @district)
-     OUTPUT INSERTED.id, INSERTED.source_id, INSERTED.name, INSERTED.grade_level,
-            INSERTED.calendar, INSERTED.district, INSERTED.created_at;`,
-    { sourceId: s.sourceId, name: s.name, gradeLevel: s.gradeLevel, calendar: s.calendar, district: s.district }
-  );
+  const rows = await execute<School>(dialect().upsertSchoolFromSource(), {
+    sourceId: s.sourceId,
+    name: s.name,
+    gradeLevel: s.gradeLevel,
+    calendar: s.calendar,
+    district: s.district,
+  });
   return rows[0];
 }
 
@@ -405,11 +385,22 @@ export async function createUser(
   organizationId: number | null = null
 ): Promise<User> {
   const rows = await execute<User>(
-    `INSERT INTO dbo.users (email, password_hash, role, school_id, display_name, active, organization_id)
-     OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
-            INSERTED.school_id, INSERTED.organization_id, INSERTED.display_name,
-            INSERTED.active, INSERTED.created_at
-     VALUES (@email, @passwordHash, @role, @schoolId, @displayName, @active, @organizationId)`,
+    dialect().insertReturning({
+      table: "users",
+      columns: ["email", "password_hash", "role", "school_id", "display_name", "active", "organization_id"],
+      returning: [
+        "id",
+        "email",
+        "password_hash",
+        "role",
+        "school_id",
+        "organization_id",
+        "display_name",
+        "active",
+        "created_at",
+      ],
+      values: "@email, @passwordHash, @role, @schoolId, @displayName, @active, @organizationId",
+    }),
     { email, passwordHash, role, schoolId, displayName, active, organizationId }
   );
   return rows[0];
@@ -460,13 +451,24 @@ export async function updateUser(
   const organizationId = data.organization_id === undefined ? existing.organization_id : data.organization_id;
 
   const rows = await execute<User>(
-    `UPDATE dbo.users
-     SET display_name = @displayName, email = @email, active = @active,
-         school_id = @schoolId, role = @role, organization_id = @organizationId
-     OUTPUT INSERTED.id, INSERTED.email, INSERTED.password_hash, INSERTED.role,
-            INSERTED.school_id, INSERTED.organization_id, INSERTED.display_name,
-            INSERTED.active, INSERTED.created_at
-     WHERE id = @id`,
+    dialect().updateReturning({
+      table: "users",
+      set:
+        "display_name = @displayName, email = @email, active = @active,\n" +
+        "         school_id = @schoolId, role = @role, organization_id = @organizationId",
+      where: "id = @id",
+      returning: [
+        "id",
+        "email",
+        "password_hash",
+        "role",
+        "school_id",
+        "organization_id",
+        "display_name",
+        "active",
+        "created_at",
+      ],
+    }),
     { id, displayName, email, active, schoolId, role, organizationId }
   );
   return rows[0] ?? null;
@@ -478,11 +480,16 @@ export async function updateUser(
 // actually updated, so the caller can tell "no such user" from "changed".
 export async function updateUserPassword(id: number, passwordHash: string): Promise<boolean> {
   const rows = await execute<{ id: number }>(
-    `UPDATE dbo.users SET password_hash = @passwordHash
-     OUTPUT INSERTED.id
-     WHERE id = @id`,
+    dialect().updateReturning({
+      table: "users",
+      set: "password_hash = @passwordHash",
+      where: "id = @id",
+      returning: ["id"],
+    }),
     { id, passwordHash }
   );
+  // Note: `rows` rather than `rowsAffected` — libSQL reports 0 affected rows for
+  // an UPDATE that carries RETURNING.
   return rows.length > 0;
 }
 
@@ -539,7 +546,11 @@ export async function deleteForm(id: number, organizationId?: number | null): Pr
     params.organizationId = organizationId;
   }
   const deleted = await execute<{ id: number }>(
-    `DELETE FROM dbo.forms OUTPUT DELETED.id WHERE ${clauses.join(" AND ")}`,
+    dialect().deleteReturning({
+      table: "forms",
+      where: clauses.join(" AND "),
+      returning: ["id"],
+    }),
     params
   );
   return deleted.length > 0;
@@ -694,12 +705,38 @@ export async function createForm(
   const code = await generateFormCode(title);
   // Insert form
   const forms = await execute<Form>(
-    `INSERT INTO dbo.forms (title, description, school_id, designer_id, organization_id, status, code, submission_seq, doc_folder_id, google_form_url)
-     OUTPUT INSERTED.id, INSERTED.title, INSERTED.description, INSERTED.school_id,
-            INSERTED.designer_id, INSERTED.organization_id, INSERTED.status,
-            INSERTED.code, INSERTED.submission_seq, INSERTED.doc_folder_id, INSERTED.google_form_url,
-            INSERTED.created_at, INSERTED.updated_at
-     VALUES (@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl)`,
+    dialect().insertReturning({
+      table: "forms",
+      columns: [
+        "title",
+        "description",
+        "school_id",
+        "designer_id",
+        "organization_id",
+        "status",
+        "code",
+        "submission_seq",
+        "doc_folder_id",
+        "google_form_url",
+      ],
+      returning: [
+        "id",
+        "title",
+        "description",
+        "school_id",
+        "designer_id",
+        "organization_id",
+        "status",
+        "code",
+        "submission_seq",
+        "doc_folder_id",
+        "google_form_url",
+        "created_at",
+        "updated_at",
+      ],
+      values:
+        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl",
+    }),
     { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null }
   );
   const form = forms[0];
@@ -883,13 +920,8 @@ export interface SubmissionValueRow extends SubmissionValue {
   options: string[] | null;
 }
 
-export interface CommentRow extends Comment {
-  staff_name: string;
-}
-
 export interface SubmissionDetail extends SubmissionRow {
   values: SubmissionValueRow[];
-  comments: CommentRow[];
   // Staff-only fields added ad-hoc to this submission (not part of the fixed form).
   adhocFields: AdhocFieldRow[];
   // The form's own staff-only field definitions — these are always shown on the
@@ -966,11 +998,7 @@ export async function listSubmissions(params: {
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name,
             sch.name AS school_name,
-            (SELECT TOP 1 sv.value
-             FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND ff.staff_only = 0 AND sv.value IS NOT NULL
-             ORDER BY ff.sort_order) AS student_name
+            ${dialect().submissionValueSubquery()} AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id
@@ -998,11 +1026,7 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
-            (SELECT TOP 1 sv.value
-             FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND ff.staff_only = 0 AND sv.value IS NOT NULL
-             ORDER BY ff.sort_order) AS student_name
+            ${dialect().submissionValueSubquery()} AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
@@ -1102,18 +1126,6 @@ export async function listSubmissionValuesBatch(
   return out;
 }
 
-export async function listComments(submissionId: number): Promise<CommentRow[]> {
-  return execute<CommentRow>(
-    `SELECT c.id, c.submission_id, c.staff_id, c.body, c.visibility, c.created_at,
-            u.display_name AS staff_name
-     FROM dbo.comments c
-     JOIN dbo.users u ON u.id = c.staff_id
-     WHERE c.submission_id = @submissionId
-     ORDER BY c.created_at ASC`,
-    { submissionId }
-  );
-}
-
 export async function getSubmissionDetail(
   publicId: string,
   organizationId?: number | null,
@@ -1122,7 +1134,6 @@ export async function getSubmissionDetail(
   const submission = await getSubmissionByPublicId(publicId, organizationId);
   if (!submission) return null;
   const values = await listSubmissionValues(submission.id);
-  const comments = await listComments(submission.id);
   const adhocFields = await listAdhocFields(submission.id);
   // The form's field definitions, so the detail page can render every field
   // (including ones not yet answered) for one-by-one filling. Internal fields
@@ -1137,7 +1148,7 @@ export async function getSubmissionDetail(
   // member without access) never receives out-of-view answers.
   const visibleValues = values.filter((v) => visibleFieldIds.has(v.field_id));
   const documents = await listDocumentsBySubmission(submission.id);
-  return { ...submission, values: visibleValues, comments, adhocFields, staffOnlyFields, parentFields, documents };
+  return { ...submission, values: visibleValues, adhocFields, staffOnlyFields, parentFields, documents };
 }
 
 // Resolve which school a submission belongs to. District-wide forms (e.g. CDM)
@@ -1181,42 +1192,59 @@ export async function createSubmission(
   answers: { field_id: number; value: string | number | boolean | string[] | null }[]
 ): Promise<SubmissionDetail> {
   // Allocate the next incremental submission id for this form inside a transaction.
-  // `UPDATE ... OUTPUT` takes a row lock and returns the incremented value
-  // atomically, so concurrent submissions to the same form can never collide.
-  const pool = await getPool();
-  const transaction = new sql.Transaction(pool);
-  await transaction.begin();
-  let publicId: string;
-  let submissionSeq: number;
-  try {
-    const allocated = await executeInTransaction<{ submission_seq: number }>(
-      transaction,
-      `UPDATE dbo.forms
-       SET submission_seq = submission_seq + 1, updated_at = SYSUTCDATETIME()
-       OUTPUT INSERTED.submission_seq
-       WHERE id = @formId`,
+  // The single UPDATE ... RETURNING takes a row lock and returns the incremented
+  // value atomically, so concurrent submissions to the same form can never
+  // collide. The allocation is committed immediately — the rest of the write is
+  // deliberately outside the transaction, because holding a write lock across the
+  // value inserts would serialise unrelated submissions.
+  const allocation = await getClient().transaction(async (tx) => {
+    const allocated = await tx.query<{ submission_seq: number }>(
+      dialect().updateReturning({
+        table: "forms",
+        set: "submission_seq = submission_seq + 1, updated_at = SYSUTCDATETIME()",
+        where: "id = @formId",
+        returning: ["submission_seq"],
+      }),
       { formId: form.id }
     );
     const row = allocated[0];
     if (!row) {
       throw new Error(`Form ${form.id} not found while allocating submission id`);
     }
-    submissionSeq = row.submission_seq;
-    publicId = formatSubmissionPublicId(form.code, submissionSeq);
-    await transaction.commit();
-  } catch (err) {
-    await transaction.rollback();
-    throw err;
-  }
+    return row.submission_seq;
+  });
+  const submissionSeq: number = allocation;
+  const publicId = formatSubmissionPublicId(form.code, submissionSeq);
 
   const schoolId = await resolveSubmissionSchoolId(form, answers);
   const schoolYear = schoolYearForDate(new Date());
   const subs = await execute<Submission>(
-    `INSERT INTO dbo.submissions (public_id, form_id, school_id, organization_id, status, submission_seq, school_year)
-     OUTPUT INSERTED.id, INSERTED.public_id, INSERTED.form_id, INSERTED.school_id,
-            INSERTED.organization_id, INSERTED.status, INSERTED.submission_seq,
-            INSERTED.school_year, INSERTED.submitted_at, INSERTED.updated_at
-     VALUES (@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq, @schoolYear)`,
+    dialect().insertReturning({
+      table: "submissions",
+      columns: [
+        "public_id",
+        "form_id",
+        "school_id",
+        "organization_id",
+        "status",
+        "submission_seq",
+        "school_year",
+      ],
+      returning: [
+        "id",
+        "public_id",
+        "form_id",
+        "school_id",
+        "organization_id",
+        "status",
+        "submission_seq",
+        "school_year",
+        "submitted_at",
+        "updated_at",
+      ],
+      values:
+        "@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq, @schoolYear",
+    }),
     { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq, schoolYear }
   );
   const submission = subs[0];
@@ -1299,25 +1327,6 @@ export async function updateSubmissionValues(
 }
 
 // -----------------------------------------------------------------------------
-// Comments
-// -----------------------------------------------------------------------------
-export async function createComment(
-  submissionId: number,
-  staffId: number,
-  body: string,
-  visibility: "internal"
-): Promise<CommentRow> {
-  const rows = await execute<CommentRow>(
-    `INSERT INTO dbo.comments (submission_id, staff_id, body, visibility)
-     OUTPUT INSERTED.id, INSERTED.submission_id, INSERTED.staff_id, INSERTED.body,
-            INSERTED.visibility, INSERTED.created_at
-     VALUES (@submissionId, @staffId, @body, @visibility)`,
-    { submissionId, staffId, body, visibility }
-  );
-  return rows[0];
-}
-
-// -----------------------------------------------------------------------------
 // Submission ad-hoc staff-only fields
 // -----------------------------------------------------------------------------
 export interface AdhocFieldRow {
@@ -1393,11 +1402,24 @@ export async function createAdhocField(input: {
   sortOrder: number;
   createdBy: number | null;
 }): Promise<AdhocFieldRow> {
-  const rows = await execute<RawAdhocRow>(`
-    INSERT INTO dbo.submission_adhoc_fields (submission_id, label, type, options, value, sort_order, created_by)
-    OUTPUT INSERTED.id, INSERTED.submission_id, INSERTED.label, INSERTED.type, INSERTED.options,
-           INSERTED.value, INSERTED.sort_order, INSERTED.created_by, INSERTED.created_at, INSERTED.updated_at
-    VALUES (@submissionId, @label, @type, @options, @value, @sortOrder, @createdBy)`,
+  const rows = await execute<RawAdhocRow>(
+    dialect().insertReturning({
+      table: "submission_adhoc_fields",
+      columns: ["submission_id", "label", "type", "options", "value", "sort_order", "created_by"],
+      returning: [
+        "id",
+        "submission_id",
+        "label",
+        "type",
+        "options",
+        "value",
+        "sort_order",
+        "created_by",
+        "created_at",
+        "updated_at",
+      ],
+      values: "@submissionId, @label, @type, @options, @value, @sortOrder, @createdBy",
+    }),
     {
       submissionId: input.submissionId,
       label: input.label,
@@ -1675,10 +1697,21 @@ export async function createReportView(input: {
 }): Promise<ReportViewRow> {
   if (input.isDefault) await clearDefaultReportView(input.userId);
   const rows = await execute<{ id: number }>(
-    `INSERT INTO dbo.report_views
-       (user_id, organization_id, name, form_id, filters, columns, format, is_default)
-     OUTPUT INSERTED.id
-     VALUES (@userId, @organizationId, @name, @formId, @filters, @columns, @format, @isDefault)`,
+    dialect().insertReturning({
+      table: "report_views",
+      columns: [
+        "user_id",
+        "organization_id",
+        "name",
+        "form_id",
+        "filters",
+        "columns",
+        "format",
+        "is_default",
+      ],
+      returning: ["id"],
+      values: "@userId, @organizationId, @name, @formId, @filters, @columns, @format, @isDefault",
+    }),
     {
       userId: input.userId,
       organizationId: input.organizationId,
@@ -1737,9 +1770,12 @@ export async function updateReportView(
   }
 
   const updated = await execute<{ id: number }>(
-    `UPDATE dbo.report_views SET ${sets.join(", ")}
-     OUTPUT INSERTED.id
-     WHERE id = @id AND user_id = @userId`,
+    dialect().updateReturning({
+      table: "report_views",
+      set: sets.join(", "),
+      where: "id = @id AND user_id = @userId",
+      returning: ["id"],
+    }),
     p
   );
   if (!updated[0]) return null;
@@ -1748,7 +1784,11 @@ export async function updateReportView(
 
 export async function deleteReportView(id: number, userId: number): Promise<boolean> {
   const rows = await execute<{ id: number }>(
-    `DELETE FROM dbo.report_views OUTPUT DELETED.id WHERE id = @id AND user_id = @userId`,
+    dialect().deleteReturning({
+      table: "report_views",
+      where: "id = @id AND user_id = @userId",
+      returning: ["id"],
+    }),
     { id, userId }
   );
   return rows.length > 0;

@@ -199,14 +199,6 @@ export const updateAdhocFieldSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
-// Comments (Staff-only)
-// -----------------------------------------------------------------------------
-export const createCommentSchema = z.object({
-  body: z.string().min(1).max(5000),
-  visibility: z.enum(["internal"]).default("internal"),
-});
-
-// -----------------------------------------------------------------------------
 // Export / query filters
 // -----------------------------------------------------------------------------
 export const exportQuerySchema = z.object({
@@ -221,7 +213,6 @@ export type RegisterInput = z.infer<typeof registerSchema>;
 export type LoginInput = z.infer<typeof loginSchema>;
 export type CreateFormInput = z.infer<typeof createFormSchema>;
 export type CreateSubmissionInput = z.infer<typeof createSubmissionSchema>;
-export type CreateCommentInput = z.infer<typeof createCommentSchema>;
 
 // -----------------------------------------------------------------------------
 // Reports

@@ -58,7 +58,6 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/submissions/{publicId}", auth: "staff", tags: "Submissions" },
   { method: "patch", path: "/api/submissions/{publicId}/status", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/values", auth: "staff", tags: "Submissions" },
-  { method: "post", path: "/api/submissions/{publicId}/comments", auth: "staff", tags: "Submissions" },
   { method: "get", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "post", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },

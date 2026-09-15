@@ -1,5 +1,12 @@
 import { execute } from "./queries.js";
+import { getDbKind } from "./pool.js";
+import { getDialect } from "./dialect/index.js";
 import type { Document, ListDocumentRow } from "./schema.js";
+
+/** Statement builders for the active dialect (see db/dialect/). */
+function dialect() {
+  return getDialect(getDbKind());
+}
 
 // -----------------------------------------------------------------------------
 // Generated Google Documents data layer.
@@ -7,6 +14,15 @@ import type { Document, ListDocumentRow } from "./schema.js";
 // save; the Google service then updates it to Completed (with document_id) or
 // Failed (with error). This module is pure DB persistence — no Google calls.
 // -----------------------------------------------------------------------------
+
+/**
+ * Form-designer field labels the document list and detail views project as
+ * columns. Stored as constants because the same three labels appear in two
+ * projections, and the dialect builder matches them case-insensitively.
+ */
+const STUDENT_NAME_LABEL = "student name";
+const COURSE_TITLE_LABEL = "next course in sequence";
+const PHASE1_RESULT_LABEL = "did student meet criteria?";
 
 /**
  * Look up the single documents row for a submission, if any. Used for the
@@ -35,11 +51,21 @@ export async function createDocument(
   createdBy: number
 ): Promise<Document> {
   const rows = await execute<Document>(
-    `INSERT INTO dbo.documents (submission_id, status, created_by)
-     OUTPUT INSERTED.id, INSERTED.submission_id, INSERTED.document_id,
-            INSERTED.status, INSERTED.created_by, INSERTED.created_at,
-            INSERTED.updated_at, INSERTED.error
-     VALUES (@submissionId, 'Pending', @createdBy)`,
+    dialect().insertReturning({
+      table: "documents",
+      columns: ["submission_id", "status", "created_by"],
+      returning: [
+        "id",
+        "submission_id",
+        "document_id",
+        "status",
+        "created_by",
+        "created_at",
+        "updated_at",
+        "error",
+      ],
+      values: "@submissionId, 'Pending', @createdBy",
+    }),
     { submissionId, createdBy }
   );
   return rows[0];
@@ -124,18 +150,9 @@ export async function listDocuments(params: {
             d.created_at, d.updated_at, d.error,
             s.public_id, s.school_id,
             sc.name AS school_name,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'student name'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS student_name,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'next course in sequence'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS course_title,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'did student meet criteria?'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS phase1_result
+            ${dialect().submissionValueSubquery(STUDENT_NAME_LABEL)} AS student_name,
+            ${dialect().submissionValueSubquery(COURSE_TITLE_LABEL)} AS course_title,
+            ${dialect().submissionValueSubquery(PHASE1_RESULT_LABEL)} AS phase1_result
      FROM dbo.documents d
      JOIN dbo.submissions s ON s.id = d.submission_id
      LEFT JOIN dbo.schools sc ON sc.id = s.school_id
@@ -168,18 +185,9 @@ export async function getDocumentById(
             d.created_at, d.updated_at, d.error,
             s.public_id, s.school_id, s.form_id,
             sc.name AS school_name,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'student name'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS student_name,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'next course in sequence'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS course_title,
-            (SELECT TOP 1 sv.value FROM dbo.submission_values sv
-             JOIN dbo.form_fields ff ON ff.id = sv.field_id
-             WHERE sv.submission_id = s.id AND LOWER(ff.label) = 'did student meet criteria?'
-               AND sv.value IS NOT NULL ORDER BY ff.sort_order) AS phase1_result
+            ${dialect().submissionValueSubquery(STUDENT_NAME_LABEL)} AS student_name,
+            ${dialect().submissionValueSubquery(COURSE_TITLE_LABEL)} AS course_title,
+            ${dialect().submissionValueSubquery(PHASE1_RESULT_LABEL)} AS phase1_result
      FROM dbo.documents d
      JOIN dbo.submissions s ON s.id = d.submission_id
      LEFT JOIN dbo.schools sc ON sc.id = s.school_id

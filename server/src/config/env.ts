@@ -23,11 +23,41 @@ function int(name: string, fallback: number): number {
   return Number.isNaN(parsed) ? fallback : parsed;
 }
 
+// -----------------------------------------------------------------------------
+// Database mode (docs/plans/dual-db.md §11)
+//
+// `sqlserver` is the default so that an unset or blank DB_MODE keeps the live
+// Azure SQL behaviour exactly as it was before dual-database support existed.
+// An unrecognised value is a hard error rather than a silent fallback — a typo
+// must not quietly serve a different database.
+// -----------------------------------------------------------------------------
+const DB_MODES = ["sqlserver", "turso"] as const;
+export type DbMode = (typeof DB_MODES)[number];
+
+const dbMode: DbMode = (() => {
+  const raw = (process.env.DB_MODE ?? "").trim().toLowerCase();
+  if (!raw) return "sqlserver";
+  if ((DB_MODES as readonly string[]).includes(raw)) return raw as DbMode;
+  throw new Error(`Invalid DB_MODE "${raw}" — expected one of: ${DB_MODES.join(", ")}`);
+})();
+
+// The SQL Server connection details are only mandatory in sqlserver mode, so a
+// Turso-only deployment needs no DB_SERVER / DB_USER / DB_PASSWORD at all.
+// `driver/mssql.ts` builds its config object eagerly at import time, so these
+// must not throw when the SQL Server path is not in use.
+function requiredForSqlServer(name: string, fallback: string): string {
+  if (dbMode !== "sqlserver") return process.env[name] ?? fallback;
+  return required(name, fallback);
+}
+
 export const env = {
   nodeEnv: process.env.NODE_ENV ?? "development",
   isProd: process.env.NODE_ENV === "production",
 
   port: int("PORT", 4000),
+
+  // Which database backend the app talks to. See driver/index.ts.
+  dbMode,
 
   // Path to the built client (single-origin serve in production).
   // Resolved relative to the repo root, NOT process.cwd(), so it works no matter
@@ -40,17 +70,32 @@ export const env = {
   clientUrl: process.env.CLIENT_URL ?? "http://localhost:5173",
 
   db: {
-    server: required("DB_SERVER", "localhost"),
+    server: requiredForSqlServer("DB_SERVER", "localhost"),
     port: int("DB_PORT", 1433),
-    database: required("DB_DATABASE", "school-form-data"),
-    user: required("DB_USER", "sa"),
-    password: required("DB_PASSWORD", ""),
+    database: requiredForSqlServer("DB_DATABASE", "school-form-data"),
+    user: requiredForSqlServer("DB_USER", "sa"),
+    password: requiredForSqlServer("DB_PASSWORD", ""),
     poolMax: int("DB_POOL_MAX", 10),
     poolMin: int("DB_POOL_MIN", 0),
     poolIdleTimeoutMs: int("DB_POOL_IDLE_TIMEOUT_MS", 30000),
     connectionTimeoutMs: int("DB_CONNECTION_TIMEOUT_MS", 60000),
     requestTimeoutMs: int("DB_REQUEST_TIMEOUT_MS", 15000),
   },
+
+  // Turso / libSQL. TURSO_DB_URL / TURSO_DB_APIKEY are the names actually used
+  // in this repo's `.env`; TURSO_DATABASE_URL / TURSO_AUTH_TOKEN (the names in
+  // docs/plans/dual-db.md §11) are accepted as aliases so either convention
+  // works. The auth token is optional for a local `file:` database.
+  turso: (() => {
+    const url = process.env.TURSO_DB_URL ?? process.env.TURSO_DATABASE_URL ?? "";
+    const authToken = process.env.TURSO_DB_APIKEY ?? process.env.TURSO_AUTH_TOKEN ?? "";
+    if (dbMode === "turso" && !url) {
+      throw new Error(
+        "DB_MODE=turso requires TURSO_DB_URL (or TURSO_DATABASE_URL) to be set."
+      );
+    }
+    return { url, authToken };
+  })(),
 
   auth: {
     accessSecret: required("JWT_ACCESS_SECRET", "dev-access-secret"),

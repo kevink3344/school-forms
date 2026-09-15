@@ -2,7 +2,7 @@ import { useEffect, useState, type FormEvent, type ReactNode } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { Lock } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
-import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow } from "../../types";
+import type { SubmissionDetail, SubmissionStatus, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
 import { useDocumentsEnabled } from "../../lib/useDocumentsEnabled";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
@@ -27,8 +27,6 @@ export default function StaffSubmissionDetail() {
   const [detail, setDetail] = useState<SubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
-  const [commentText, setCommentText] = useState("");
-  const [posting, setPosting] = useState(false);
   const [savingStatus, setSavingStatus] = useState(false);
 
   // Edit state
@@ -91,22 +89,6 @@ export default function StaffSubmissionDetail() {
       setError(err instanceof ApiError ? err.message : "Could not update status");
     } finally {
       setSavingStatus(false);
-    }
-  };
-
-  const handleComment = async (e: FormEvent) => {
-    e.preventDefault();
-    if (!publicId || !commentText.trim()) return;
-    setPosting(true);
-    setError("");
-    try {
-      await api.addComment(publicId, commentText.trim());
-      setCommentText("");
-      load();
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Could not add comment");
-    } finally {
-      setPosting(false);
     }
   };
 
@@ -457,65 +439,6 @@ export default function StaffSubmissionDetail() {
                 ))}
               </div>
             )}
-          </div>
-        </div>
-      </div>
-
-      {/* Comment thread (full width at the bottom) */}
-      <div style={{ marginTop: 18 }}>
-        <div className="card">
-          <div className="card-head">
-            <h3>Staff comments</h3>
-            <span className="lock-tag" style={{ marginLeft: "auto" }}>
-              <Lock size={12} />
-              Staff only
-            </span>
-          </div>
-          <div className="card-body">
-            <div className="comment-thread">
-              {detail.comments.length === 0 ? (
-                <div className="muted-note">No staff comments yet.</div>
-              ) : (
-                detail.comments.map((c: Comment) => (
-                  <div
-                    className={`comment ${c.staff_name === user?.display_name ? "comment-mine" : ""}`}
-                    key={c.id}
-                  >
-                    <div className="c-head">
-                      <span className="lock-tag">Internal</span>
-                      <span className="c-name">{c.staff_name || "Staff"}</span>
-                      <span className="c-time">
-                        {new Date(c.created_at).toLocaleString([], {
-                          month: "short",
-                          day: "numeric",
-                          hour: "numeric",
-                          minute: "2-digit",
-                        })}
-                      </span>
-                    </div>
-                    <div className="c-body">{c.body}</div>
-                  </div>
-                ))
-              )}
-            </div>
-
-            <form className="new-comment" onSubmit={handleComment} style={{ marginTop: 12 }}>
-              <textarea
-                placeholder="Add a staff-only comment..."
-                value={commentText}
-                onChange={(e) => setCommentText(e.target.value)}
-              />
-              <div className="row">
-                <span className="lock-tag">
-                  <Lock size={12} />
-                  Only staff can see this
-                </span>
-                <div className="spacer" />
-                <button type="submit" className="primary-button" disabled={posting || !commentText.trim()}>
-                  {posting ? "Posting..." : "Post comment"}
-                </button>
-              </div>
-            </form>
           </div>
         </div>
       </div>

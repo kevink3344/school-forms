@@ -73,7 +73,7 @@ export default function StaffQueue() {
     <div>
       <PageHead
         title={user?.school_name || "My School's Submissions"}
-        subtitle="Submissions from your school, ready for you to review and comment."
+        subtitle="Submissions from your school, ready for you to review."
         actions={
           <>
             <button className="primary-button" onClick={() => setExportOpen(true)}>

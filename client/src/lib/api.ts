@@ -3,7 +3,6 @@ import type {
   AdhocField,
   AdminUser,
   AppSettingKey,
-  Comment,
   DocumentRow,
   ExportPreview,
   Form,
@@ -538,14 +537,6 @@ export const api = {
       method: "PATCH",
       auth: true,
       body: { status },
-    });
-  },
-
-  async addComment(publicId: string, body: string): Promise<Comment> {
-    return request<Comment>(`/api/submissions/${publicId}/comments`, {
-      method: "POST",
-      auth: true,
-      body: { body, visibility: "internal" },
     });
   },
 

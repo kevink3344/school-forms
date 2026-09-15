@@ -1,5 +1,6 @@
 import { Router } from "express";
 import type { Request, Response } from "express";
+import { env } from "../config/env.js";
 import { isDbReady } from "../db/pool.js";
 import { getDefaultOrganization, getLoginStats, getOrganizationBySlug } from "../db/queries.js";
 
@@ -9,6 +10,10 @@ healthRouter.get("/", (_req, res) => {
   res.json({
     ok: true,
     dbReady: isDbReady(),
+    // Which backend this process is actually talking to. Surfaced so a
+    // mis-set DB_MODE is visible from the health check rather than only from
+    // the data (docs/plans/dual-db.md §11).
+    dbMode: env.dbMode,
     uptime: process.uptime(),
   });
 });

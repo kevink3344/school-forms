@@ -4,10 +4,8 @@ import {
   getSubmissionDetail,
   listSubmissions,
   listSubmissionValues,
-  listComments,
   updateSubmissionStatus,
   updateSubmissionValues,
-  createComment,
   createAdhocField,
   updateAdhocField,
   deleteAdhocField,
@@ -22,7 +20,6 @@ import {
   createSubmissionSchema,
   updateSubmissionStatusSchema,
   updateSubmissionValuesSchema,
-  createCommentSchema,
   createAdhocFieldSchema,
   updateAdhocFieldSchema,
 } from "../schemas.js";
@@ -135,7 +132,7 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "ad
 });
 
 // -----------------------------------------------------------------------------
-// STAFF: GET /api/submissions/:publicId — full detail with answers + comments
+// STAFF: GET /api/submissions/:publicId — full detail with answers + fields
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
@@ -152,9 +149,7 @@ submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_cont
         return;
       }
     }
-    // Ensure comments are loaded
-    const comments = await listComments(submission.id);
-    res.json({ ...submission, comments });
+    res.json(submission);
   } catch (err) {
     next(err);
   }
@@ -249,41 +244,6 @@ submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff",
     }
     const documents = submission.documents;
     res.json(documents);
-  } catch (err) {
-    next(err);
-  }
-});
-
-// -----------------------------------------------------------------------------
-// STAFF: POST /api/submissions/:publicId/comments — add staff-only comment
-// -----------------------------------------------------------------------------
-submissionsRouter.post("/:publicId/comments", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
-  try {
-    const parsed = createCommentSchema.safeParse(req.body);
-    if (!parsed.success) {
-      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
-      return;
-    }
-    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
-    if (!submission) {
-      res.status(404).json({ error: "Submission not found" });
-      return;
-    }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
-    }
-    const comment = await createComment(
-      submission.id,
-      req.user!.id,
-      parsed.data.body,
-      parsed.data.visibility
-    );
-    const comments = await listComments(submission.id);
-    res.status(201).json({ comment, comments });
   } catch (err) {
     next(err);
   }

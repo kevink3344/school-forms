@@ -258,7 +258,7 @@ formsRouter.patch("/:id/status", requireAuth, requireRoles("admin"), async (req,
 // Admin: delete an UNUSED form (zero submissions). Refuses with 409 when the
 // form has any submission history: submissions.form_id is ON DELETE CASCADE, so
 // a naive delete would silently destroy every submission (and its values,
-// comments, ad-hoc fields and documents). The count is enforced here, on the
+// ad-hoc fields and documents). The count is enforced here, on the
 // server, and never trusted to the client. Published forms are deletable as long
 // as they are unused.
 formsRouter.delete("/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {

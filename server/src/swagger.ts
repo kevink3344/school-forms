@@ -22,7 +22,7 @@ export function buildSwaggerSpec(req?: Request) {
     info: {
       title: "School Forms API",
       version: "1.0.0",
-      description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, view only their school's submissions, and add staff-only comments.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
+      description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, and view only their school's submissions.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
       contact: { name: "School Forms Team" },
     },
     servers,
@@ -142,7 +142,6 @@ export function buildSwaggerSpec(req?: Request) {
             staff_fields_updated_at: { type: "string", format: "date-time", nullable: true },
             staff_fields_updated_by_name: { type: "string", nullable: true },
             values: { type: "array", items: { $ref: "#/components/schemas/SubmissionValue" } },
-            comments: { type: "array", items: { $ref: "#/components/schemas/Comment" } },
             adhocFields: { type: "array", items: { $ref: "#/components/schemas/AdhocField" }, description: "Staff-only fields added ad-hoc to this submission." },
             staffOnlyFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's own staff-only field definitions." },
             parentFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's non-staff-only field definitions." },
@@ -156,19 +155,6 @@ export function buildSwaggerSpec(req?: Request) {
             field_type: { type: "string" },
             staff_only: { type: "boolean" },
             value: { type: "object", nullable: true },
-          },
-        },
-        Comment: {
-          type: "object",
-          required: ["id", "body"],
-          properties: {
-            id: { type: "integer" },
-            submission_id: { type: "integer" },
-            staff_id: { type: "integer" },
-            staff_name: { type: "string" },
-            body: { type: "string" },
-            visibility: { type: "string", enum: ["internal"] },
-            created_at: { type: "string", format: "date-time" },
           },
         },
         SubmitSubmissionResponse: {
@@ -363,6 +349,12 @@ export function buildSwaggerSpec(req?: Request) {
                     properties: {
                       ok: { type: "boolean" },
                       dbReady: { type: "boolean" },
+                      dbMode: {
+                        type: "string",
+                        enum: ["sqlserver", "turso"],
+                        description:
+                          "Which database engine this process is configured to use (DB_MODE).",
+                      },
                       uptime: { type: "number" },
                     },
                   },
@@ -1484,7 +1476,7 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/submissions/{publicId}": {
         get: {
           tags: ["Submissions"],
-          summary: "Get a submission with values, comments, and ad-hoc fields",
+          summary: "Get a submission with values and ad-hoc fields",
           security: [{ [bearerScheme]: [] }],
           parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
           responses: {
@@ -1549,31 +1541,6 @@ export function buildSwaggerSpec(req?: Request) {
           },
           responses: {
             "200": { description: "OK — updated submission" },
-            "400": { description: "Validation error" },
-            "404": { description: "Submission not found" },
-          },
-        },
-      },
-      "/api/submissions/{publicId}/comments": {
-        post: {
-          tags: ["Submissions"],
-          summary: "Add a staff-only comment (staff/admin)",
-          security: [{ [bearerScheme]: [] }],
-          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
-          requestBody: {
-            required: true,
-            content: {
-              "application/json": {
-                schema: {
-                  type: "object",
-                  required: ["body"],
-                  properties: { body: { type: "string" }, visibility: { type: "string", enum: ["internal"] } },
-                },
-              },
-            },
-          },
-          responses: {
-            "201": { description: "Comment created" },
             "400": { description: "Validation error" },
             "404": { description: "Submission not found" },
           },
