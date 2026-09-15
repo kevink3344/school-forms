@@ -12,6 +12,7 @@ import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
 import ReportsPage from "./pages/reports/ReportsPage";
+import ChangePasswordPage from "./pages/account/ChangePasswordPage";
 import ParentSubmit from "./pages/parent/ParentSubmit";
 import ParentConfirmation from "./pages/parent/ParentConfirmation";
 import HomeRedirect from "./pages/HomeRedirect";
@@ -154,6 +155,20 @@ export default function App() {
           <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <ReportsPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Account — every authenticated role. No `roles` prop on purpose: an
+          admin, staff member and School Contact all change their own password
+          on the same page. */}
+      <Route
+        path="/account/password"
+        element={
+          <ProtectedRoute>
+            <AppShell>
+              <ChangePasswordPage />
             </AppShell>
           </ProtectedRoute>
         }

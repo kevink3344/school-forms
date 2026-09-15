@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Download, Save, Star, Trash2, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
@@ -150,8 +150,6 @@ export default function ReportsPage() {
       .catch(() => setViews([]));
   };
 
-  useEffect(loadViews, []);
-
   // --- Debounce the row filter ---------------------------------------------
 
   useEffect(() => {
@@ -276,6 +274,26 @@ export default function ReportsPage() {
     // Fire-and-forget: powers a "most recently used" ordering later.
     api.useReportView(view.id).catch(() => {});
   };
+
+  // Land on the user's default View the first time the page opens — falling
+  // back to their only View, since with a single saved report there is no
+  // choice to make. Without this, "Save View" + "Make Default" had no effect
+  // on the next visit. Runs once; the ref guard also absorbs StrictMode's
+  // double-invoke in dev.
+  const viewAutoApplied = useRef(false);
+  useEffect(() => {
+    if (viewAutoApplied.current) return;
+    viewAutoApplied.current = true;
+    api
+      .listReportViews()
+      .then((vs) => {
+        setViews(vs);
+        const landing = vs.find((v) => v.is_default) ?? (vs.length === 1 ? vs[0] : null);
+        if (landing) applyView(landing);
+      })
+      .catch(() => setViews([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleCreateView = async () => {
     const name = viewName.trim();
@@ -445,7 +463,7 @@ export default function ReportsPage() {
             {FORMATS.map((f) => (
               <button
                 key={f.value}
-                className="badge-button"
+                className="badge-button filter-chip"
                 style={format === f.value ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" } : {}}
                 onClick={() => setFormat(f.value)}
               >
@@ -478,9 +496,7 @@ export default function ReportsPage() {
         {!isAdmin && (
           <div className="filter-group">
             <label>School</label>
-            <div style={{ fontSize: 13, color: "var(--text-muted)", padding: "8px 0" }}>
-              {user?.school_name || "My school"}
-            </div>
+            <div className="static-value">{user?.school_name || "My school"}</div>
           </div>
         )}
 

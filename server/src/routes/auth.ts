@@ -1,9 +1,11 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import {
   getUserByEmail,
   getUserById,
   createUser,
+  updateUserPassword,
   listSchools as defaultListSchools,
   getDefaultOrganization,
   getOrganizationById,
@@ -21,10 +23,27 @@ import {
   requireRoles,
   optionalAuth,
 } from "../auth.js";
-import { loginSchema, registerSchema, selectLoginSchema, selectUsersQuerySchema } from "../schemas.js";
+import {
+  loginSchema,
+  registerSchema,
+  selectLoginSchema,
+  selectUsersQuerySchema,
+  changePasswordSchema,
+} from "../schemas.js";
 import type { Role } from "../db/schema.js";
 
 export const authRouter = Router();
+
+// Tighter limiter for the one endpoint that verifies a password. The global
+// limiter (300 req / 15 min) applies to this route too, but is far too loose for
+// something a caller could otherwise use as a password-guessing oracle.
+const changePasswordLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 10,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many password change attempts. Try again later." },
+});
 
 // Helper: build the client-facing user DTO, resolving the org slug so the
 // frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id)
@@ -161,6 +180,57 @@ authRouter.post("/login", async (req, res, next) => {
       token_type: "bearer",
       user: await toUserDto(user),
     });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// POST /api/auth/change-password — change your OWN password (any role).
+//
+// Requires the current password as re-authentication: the bearer token alone
+// must never be enough to set a new password, otherwise anyone holding a token
+// (it lives in localStorage) could seize the account permanently — there is no
+// "forgot password" flow and no admin reset to recover with.
+//
+// NOTE the 400 for a wrong current password, NOT 401. The client treats any 401
+// on an authenticated call as "access token expired": it clears the stored token,
+// tries /auth/refresh and replays. Returning 401 here would sign the user out
+// every time they mistyped their password.
+// -----------------------------------------------------------------------------
+authRouter.post("/change-password", requireAuth, changePasswordLimiter, async (req, res, next) => {
+  try {
+    const parsed = changePasswordSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const { current_password, new_password } = parsed.data;
+
+    const user = await getUserById(req.user!.id);
+    if (!user) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const ok = await bcrypt.compare(current_password, user.password_hash);
+    if (!ok) {
+      res.status(400).json({ error: "Current password is incorrect" });
+      return;
+    }
+
+    // `new === current` is already rejected by changePasswordSchema.
+    const passwordHash = await bcrypt.hash(new_password, 12);
+    const updated = await updateUserPassword(user.id, passwordHash);
+    if (!updated) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    // Deliberately NOT re-issuing tokens. JWTs are stateless and there is no
+    // token_version column, so the current session simply keeps working; other
+    // sessions keep working until their tokens expire (see docs/plans/change-password.md §8).
+    res.json({ message: "Password updated successfully." });
   } catch (err) {
     next(err);
   }

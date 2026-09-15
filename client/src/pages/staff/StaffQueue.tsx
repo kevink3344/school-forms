@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Download, Table, LayoutGrid } from "lucide-react";
 import { api } from "../../lib/api";
+import { useAuth } from "../../context/AuthContext";
 import type { Form, SubmissionRow } from "../../types";
 import { PageHead, StatusBadge } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
@@ -10,37 +11,48 @@ type ViewMode = "table" | "cards";
 
 export default function StaffQueue() {
   const navigate = useNavigate();
+  const { user } = useAuth();
   const [rows, setRows] = useState<SubmissionRow[]>([]);
   const [forms, setForms] = useState<Form[]>([]);
   const [exportOpen, setExportOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState("");
+  // "" means "all reports". A school normally has exactly one form, in which
+  // case we select it outright rather than offering a choice that isn't one.
+  const [formFilter, setFormFilter] = useState("");
   // Default to card view on small screens; tablet/desktop defaults to table.
   const [viewMode, setViewMode] = useState<ViewMode>(
     typeof window !== "undefined" && window.innerWidth < 768 ? "cards" : "table"
   );
 
-  const load = (status: string) => {
+  const load = (status: string, formId: string) => {
     setLoading(true);
     api
-      .listSubmissions(status ? { status } : {})
+      .listSubmissions({
+        ...(status ? { status } : {}),
+        ...(formId ? { form_id: Number(formId) } : {}),
+      })
       .then((s) => setRows(s))
       .catch(() => setRows([]))
       .finally(() => setLoading(false));
   };
 
   useEffect(() => {
-    load(statusFilter);
+    load(statusFilter, formFilter);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
+  }, [statusFilter, formFilter]);
 
-  // Load forms so the Export drawer can present a form selector (scoped to school).
+  // Load forms so the queue can be scoped to one report and the Export drawer
+  // can present a form selector (both scoped to this school).
   useEffect(() => {
     let cancelled = false;
     api
       .listForms()
       .then((f) => {
-        if (!cancelled) setForms(f);
+        if (cancelled) return;
+        setForms(f);
+        // One form is not a choice — land on it.
+        if (f.length === 1) setFormFilter(String(f[0].id));
       })
       .catch(() => {});
     return () => {
@@ -60,7 +72,7 @@ export default function StaffQueue() {
   return (
     <div>
       <PageHead
-        title="My School's Submissions"
+        title={user?.school_name || "My School's Submissions"}
         subtitle="Submissions from your school, ready for you to review and comment."
         actions={
           <>
@@ -90,7 +102,32 @@ export default function StaffQueue() {
         }
       />
 
-      <div style={{ display: "flex", gap: 10, marginBottom: 16, flexWrap: "wrap" }}>
+      <div
+        style={{
+          display: "flex",
+          gap: 10,
+          marginBottom: 16,
+          flexWrap: "wrap",
+          alignItems: "flex-end",
+        }}
+      >
+        {forms.length > 1 && (
+          <div className="filter-group">
+            <label htmlFor="sq-report">Report</label>
+            <select
+              id="sq-report"
+              value={formFilter}
+              onChange={(e) => setFormFilter(e.target.value)}
+            >
+              <option value="">All reports</option>
+              {forms.map((f) => (
+                <option key={f.id} value={f.id}>
+                  {f.title}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {[
           { value: "", label: "All" },
           { value: "submitted", label: "Submitted" },
@@ -100,7 +137,7 @@ export default function StaffQueue() {
         ].map((t) => (
           <button
             key={t.value}
-            className="badge-button"
+            className="badge-button filter-chip"
             style={
               statusFilter === t.value
                 ? { background: "var(--accent)", color: "#fff", borderColor: "var(--accent)" }
@@ -127,7 +164,9 @@ export default function StaffQueue() {
             <div className="spinner" /> Loading...
           </div>
         ) : rows.length === 0 ? (
-          <div className="empty-state">No submissions for your school yet.</div>
+          <div className="empty-state">
+            {formFilter ? "No submissions for this report yet." : "No submissions for your school yet."}
+          </div>
         ) : viewMode === "cards" ? (
           <div className="queue-list" style={{ padding: 16 }}>
             {rows.map((s) => (
@@ -206,7 +245,7 @@ export default function StaffQueue() {
       <ExportModal
         open={exportOpen}
         onClose={() => setExportOpen(false)}
-        formId={forms[0] ? String(forms[0].id) : ""}
+        formId={formFilter || (forms[0] ? String(forms[0].id) : "")}
         forms={forms}
         isStaff
       />

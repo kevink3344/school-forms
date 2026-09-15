@@ -40,6 +40,10 @@
   --shadow-card: 0 4px 14px rgba(22, 87, 136, 0.14);
   --shadow-2: 0 10px 24px rgba(16, 64, 95, 0.18);
 
+  /* Single height for every action button and form control, so a toolbar, a page
+     header and a form all read at one size across screens. */
+  --control-h: 36px;
+
   /* Layout. Single source of truth for the banner height so the off-canvas
      sidebar and its backdrop can start below it and leave the hamburger
      clickable while the drawer is open. Overridden at the mobile breakpoint. */
@@ -96,17 +100,51 @@ p { margin: 0; }
 }
 .banner .logo .logo-text { display: flex; flex-direction: column; line-height: 1.15; }
 .banner .actions { margin-left: auto; display: flex; align-items: center; gap: 6px; }
+.banner .user-menu-wrap { position: relative; margin-right: 6px; }
 .banner .user-chip {
   display: flex; align-items: center; gap: 10px; background: transparent;
-  border: none; border-radius: var(--radius); padding: 0; margin-right: 6px;
+  border: none; border-radius: var(--radius); padding: 4px 8px; cursor: pointer;
+  transition: background 0.15s ease;
 }
+/* Hover and open share one treatment, so the trigger stays visibly "active"
+   while the menu is showing. */
+.banner .user-chip:hover,
+.banner .user-chip[aria-expanded="true"] { background: var(--tint); }
 .banner .avatar {
   width: 34px; height: 34px; border-radius: 50%; background: var(--tint); display: flex;
   align-items: center; justify-content: center; font-size: 12px; font-weight: 700; color: var(--accent);
 }
+.banner .user-chip:hover .avatar,
+.banner .user-chip[aria-expanded="true"] .avatar { background: var(--card-bg); }
 .banner .user-chip .u-name { font-size: 13px; font-weight: 700; line-height: 1.2; color: var(--text); }
 .banner .user-chip .u-meta { display: flex; flex-direction: column; line-height: 1.25; text-align: right; }
 .banner .user-chip .u-school { font-size: 11px; color: var(--text-muted); }
+.banner .user-chip .u-caret { color: var(--text-muted); flex-shrink: 0; }
+
+/* Account dropdown, anchored to the user chip. z-index clears the banner (201)
+   and the open drawer (200) so it always floats above both. */
+.banner .user-menu {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 210;
+  min-width: 250px; padding: 6px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-card);
+  display: flex; flex-direction: column; gap: 2px;
+}
+.banner .user-menu-head {
+  padding: 8px 10px 10px; margin-bottom: 4px;
+  border-bottom: 1px solid var(--border);
+}
+.banner .user-menu-head .um-name { font-size: 13px; font-weight: 700; color: var(--text); }
+.banner .user-menu-head .um-email {
+  font-size: 12px; color: var(--text-muted); word-break: break-all;
+}
+.banner .user-menu-item {
+  display: flex; align-items: center; gap: 10px; width: 100%; text-align: left;
+  background: none; border: none; border-radius: var(--radius-sm);
+  padding: 9px 10px; font-size: 13px; font-weight: 600; color: var(--text);
+}
+.banner .user-menu-item:hover { background: var(--tint); color: var(--accent); }
+.banner .user-menu-item:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 
 /* Body layout */
 .body-flex { display: flex; flex: 1; min-height: 0; }
@@ -172,15 +210,17 @@ p { margin: 0; }
 /* Buttons */
 .primary-button {
   background: var(--button-bg); color: var(--button-text); text-transform: uppercase; letter-spacing: 0.08em;
-  padding: 10px 14px; font-size: 13px; font-weight: 700; border: 1px solid var(--button-bg); border-radius: var(--radius);
-  display: inline-flex; align-items: center; gap: 8px; transition: background-color .13s ease, border-color .13s ease;
+  padding: 8px 12px; font-size: 13px; font-weight: 700; border: 1px solid var(--button-bg); border-radius: var(--radius);
+  display: inline-flex; align-items: center; justify-content: center; gap: 8px; min-height: var(--control-h);
+  transition: background-color .13s ease, border-color .13s ease;
 }
 .primary-button:hover { background: var(--accent-strong); border-color: var(--accent-strong); }
 .primary-button:disabled { background: #a9c1d4; border-color: #a9c1d4; cursor: not-allowed; }
 .secondary-button {
   border: 1px solid var(--accent); background: var(--card-bg); color: var(--accent); text-transform: uppercase;
-  letter-spacing: 0.08em; display: inline-flex; align-items: center; gap: 8px; padding: 10px 14px;
-  font-size: 13px; font-weight: 700; border-radius: var(--radius); transition: background-color .13s ease, color .13s ease;
+  letter-spacing: 0.08em; display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 8px 12px;
+  font-size: 13px; font-weight: 700; border-radius: var(--radius); min-height: var(--control-h);
+  transition: background-color .13s ease, color .13s ease;
 }
 .secondary-button:hover { background: var(--tint); color: var(--accent-strong); }
 .badge-button {
@@ -195,6 +235,54 @@ p { margin: 0; }
   transition: background-color .13s ease, color .13s ease;
 }
 .icon-button:hover { background: var(--panel-bg); color: var(--text); }
+
+/* ===== Control sizing =====
+   Every action button, select and text input shares one height. These families
+   were each sized from their own padding, and a <button> and a <select> compute
+   their content box from different UA metrics (18px vs 19.7px at 13px), so
+   matching padding alone can never make them agree. Pin them to --control-h and
+   a toolbar row or page header is uniform on every screen with no overrides.
+   `height`, not `min-height`: min-height can only raise a box, and a select's
+   intrinsic content box is already taller than the target.
+   Checkboxes/radios are excluded (a height would inflate the box). */
+.primary-button,
+.secondary-button,
+.filter-group select,
+.filter-group input:not([type="checkbox"]):not([type="radio"]),
+.edit-select,
+input.edit-input {
+  height: var(--control-h);
+}
+/* The table/card toggle is a bordered wrapper around its buttons, so its buttons
+   run 2px short and the whole control lands on --control-h. */
+.view-toggle button {
+  height: calc(var(--control-h) - 2px);
+}
+/* .badge-button is one class doing two very different jobs, so it is split by
+   context instead of being resized wholesale. Add `filter-chip` where the chip is
+   a real toolbar control sharing a row with selects and buttons — the Submissions
+   status filters and the Reports CSV/Excel/PDF format picker — so it takes the
+   shared height and the 13px control type.
+   Leave it OFF inside table rows, cards and empty states: those Review / Edit /
+   Publish / Back chips must stay compact or every table row grows ~9px taller.
+   Two classes (not one) so it wins on specificity wherever this block sits. */
+.badge-button.filter-chip {
+  height: var(--control-h);
+  padding: 0 12px;
+  font-size: 13px;
+}
+/* A read-only value shown in a control row (the Reports "School" for a School
+   Contact). Same height as the controls beside it so the row's labels share one
+   baseline — .filter-bar is align-items:flex-end, so a shorter cell drops its
+   label out of line. Deliberately not input-styled: nothing to type in. */
+.filter-group .static-value {
+  height: var(--control-h);
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
 
 /* Card / surface */
 .surface { border: 1px solid var(--border); background: var(--card-bg); border-radius: var(--radius); }
@@ -303,6 +391,7 @@ p { margin: 0; }
 }
 .filter-group input:hover, .filter-group select:hover { border-color: var(--accent); }
 .filter-group input:focus, .filter-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(22,87,136,.14); }
+
 .filter-spacer { flex: 1; }
 .filter-bar .clear { font-size: 12px; color: var(--accent); background: none; border: none; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; padding: 4px; }
 
@@ -593,11 +682,18 @@ table.grid tbody tr.grid-row:hover { background: var(--panel-bg); }
   .banner .user-chip .u-name {
     display: none;
   }
+  /* No room for a caret next to a bare avatar. */
+  .banner .user-chip .u-caret {
+    display: none;
+  }
   .banner .user-chip {
     background: transparent;
     border: none;
     padding: 0;
   }
+  /* The chip is only the avatar here, so the header would otherwise widen the
+     menu past the right edge of the banner. */
+  .banner .user-menu { min-width: 210px; }
   .banner .user-chip .avatar {
     width: 34px;
     height: 34px;

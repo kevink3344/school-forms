@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { ChevronLeft, ChevronRight } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { School, SchoolFacets, SchoolPage } from "../../types";
 import { PageHead } from "../../components/layout";
@@ -230,7 +231,8 @@ export default function AdminSchools() {
             disabled={loading || currentPage <= 1}
             onClick={() => load(currentPage - 1)}
           >
-            ‹ Prev
+            <ChevronLeft size={16} />
+            <span>Prev</span>
           </button>
           <span style={{ fontSize: 13 }}>
             Page {currentPage} of {totalPages}
@@ -240,7 +242,8 @@ export default function AdminSchools() {
             disabled={loading || currentPage >= totalPages}
             onClick={() => load(currentPage + 1)}
           >
-            Next ›
+            <span>Next</span>
+            <ChevronRight size={16} />
           </button>
           <span style={{ fontSize: 13, marginLeft: "auto" }}>{total} total</span>
         </div>

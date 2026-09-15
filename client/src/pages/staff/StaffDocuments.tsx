@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { RefreshCw, X } from "lucide-react";
+import { ExternalLink, RefreshCw, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { DocumentRow } from "../../types";
 import { PageHead } from "../../components/layout";
@@ -228,8 +228,12 @@ export default function StaffDocuments() {
                       href={`https://docs.google.com/document/d/${selected.document_id}/edit`}
                       target="_blank"
                       rel="noopener noreferrer"
+                      // .link-name is a plain inline link used in a dozen places, so
+                      // the icon alignment lives here rather than in the shared rule.
+                      style={{ display: "inline-flex", alignItems: "center", gap: 6 }}
                     >
-                      Open in Google Docs ↗
+                      <ExternalLink size={15} />
+                      <span>Open in Google Docs</span>
                     </a>
                   </div>
                 ) : null}

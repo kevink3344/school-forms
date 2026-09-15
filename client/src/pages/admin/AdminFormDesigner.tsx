@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { CheckCircle2, Plus, X } from "lucide-react";
+import { ArrowDown, ArrowUp, Check, CheckCircle2, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { FormField, FieldType, FormWithFields } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
@@ -590,10 +590,10 @@ function FieldRow({
         </span>
         <div style={{ display: "flex", gap: 4 }}>
           <button className="icon-button" title="Move up" disabled={index === 0} onClick={() => onMove(-1)}>
-            ↑
+            <ArrowUp size={16} />
           </button>
           <button className="icon-button" title="Move down" disabled={index === count - 1} onClick={() => onMove(1)}>
-            ↓
+            <ArrowDown size={16} />
           </button>
         </div>
         {showStaffOnlyToggle && (
@@ -705,13 +705,19 @@ function FieldRow({
                     fontWeight: 700,
                     padding: "7px 14px",
                     borderRadius: "var(--radius)",
+                    // inline-flex + gap so the lucide check/plus sits on the text
+                    // baseline instead of relying on a glyph's side bearing.
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
                     transition: "background-color .13s ease, border-color .13s ease, color .13s ease",
                     background: has ? "var(--accent)" : "var(--card-bg)",
                     color: has ? "#fff" : "var(--accent)",
                     border: `1px solid ${has ? "var(--accent)" : "var(--accent)"}`,
                   }}
                 >
-                  {has ? "✓" : "+"} {roleLabel(role)}
+                  {has ? <Check size={14} /> : <Plus size={14} />}
+                  <span>{roleLabel(role)}</span>
                 </button>
               );
             })}

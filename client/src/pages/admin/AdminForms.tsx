@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Plus } from "lucide-react";
+import { Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { Form } from "../../types";
 import { PageHead, FormStatusBadge } from "../../components/layout";
@@ -228,7 +228,7 @@ export default function AdminForms() {
                 disabled={deleting}
                 aria-label="Close"
               >
-                ✕
+                <X size={16} />
               </button>
             </div>
             <div className="modal-body">

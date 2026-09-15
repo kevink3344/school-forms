@@ -1,4 +1,4 @@
-import { useState, useEffect, type ReactNode } from "react";
+import { useState, useEffect, useRef, type ReactNode } from "react";
 import { NavLink, Navigate, useNavigate, useLocation } from "react-router-dom";
 import {
   Menu,
@@ -10,17 +10,18 @@ import {
   School,
   BarChart3,
   Settings,
-  MessageSquare,
+  Download,
+  KeyRound,
+  ChevronDown,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { api } from "../lib/api";
 import {
-  parseDocumentRoles,
   parseMenuItems,
   defaultMenuItems,
-  ROLES,
   type MenuItemKey,
 } from "../lib/settings";
+import { useDocumentsEnabled } from "../lib/useDocumentsEnabled";
 import type { Role } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -111,12 +112,13 @@ export function AppShell({ children }: { children: ReactNode }) {
   // The left menu is an off-canvas drawer at every width and starts closed;
   // the hamburger in the banner opens it.
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // The account dropdown on the user's name in the banner.
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
+  const userMenuRef = useRef<HTMLDivElement>(null);
 
-  // Which roles currently see the Documents link. Reads the public
-  // `documents_link` setting (JSON role array). Defaults to all roles while it
-  // loads, so the link never flashes away behind a slow request; the stored
-  // value resolves on the next render.
-  const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
+  // Which roles currently see the Documents link, from the public
+  // `documents_link` setting (see lib/useDocumentsEnabled).
+  const showDocuments = useDocumentsEnabled(user?.role);
 
   // Menu visibility per item, from the `menu_items` setting. Defaults to
   // "visible to all roles" while loading so items don't flash away.
@@ -124,14 +126,6 @@ export function AppShell({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let cancelled = false;
-    api
-      .getPublicSetting("documents_link")
-      .then((s) => {
-        if (!cancelled) setDocRoles(parseDocumentRoles(s.value));
-      })
-      .catch(() => {
-        // keep the default (all roles) if the read fails
-      });
     api
       .getPublicSetting("menu_items")
       .then((s) => {
@@ -145,17 +139,28 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // True if the current user's role is enabled for Documents.
-  const showDocuments = user ? docRoles.includes(user.role) : false;
-
   // Whether a given menu item is visible to the current user's role.
   const menuVisible = (item: MenuItemKey): boolean =>
     user ? menuItems[item].includes(user.role) : false;
 
-  // Close the drawer whenever the route changes.
+  // Close the drawer and the account menu whenever the route changes.
   useEffect(() => {
     setSidebarOpen(false);
+    setUserMenuOpen(false);
   }, [location.pathname]);
+
+  // Close the account menu on an outside click. `mousedown` (not `click`) so the
+  // menu is gone before the click resolves on whatever was underneath it.
+  useEffect(() => {
+    if (!userMenuOpen) return;
+    const onDown = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setUserMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDown);
+    return () => document.removeEventListener("mousedown", onDown);
+  }, [userMenuOpen]);
 
   // Lock body scroll while the drawer is open.
   useEffect(() => {
@@ -165,15 +170,18 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, [sidebarOpen]);
 
-  // Esc closes the drawer.
+  // Esc closes the drawer or the account menu.
   useEffect(() => {
-    if (!sidebarOpen) return;
+    if (!sidebarOpen && !userMenuOpen) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") setSidebarOpen(false);
+      if (e.key === "Escape") {
+        setSidebarOpen(false);
+        setUserMenuOpen(false);
+      }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [sidebarOpen]);
+  }, [sidebarOpen, userMenuOpen]);
 
   const handleLogout = async () => {
     setSidebarOpen(false);
@@ -203,12 +211,43 @@ export function AppShell({ children }: { children: ReactNode }) {
         </div>
         <div className="actions">
           {user && (
-            <div className="user-chip">
-              <div className="avatar">{initials(user.display_name || user.email)}</div>
-              <div className="u-meta">
-                <div className="u-name">{user.display_name || user.email}</div>
-                {user.school_name && <div className="u-school">{user.school_name}</div>}
-              </div>
+            <div className="user-menu-wrap" ref={userMenuRef}>
+              <button
+                type="button"
+                className="user-chip"
+                title="Account"
+                aria-haspopup="menu"
+                aria-expanded={userMenuOpen}
+                onClick={() => setUserMenuOpen((o) => !o)}
+              >
+                <div className="avatar">{initials(user.display_name || user.email)}</div>
+                <div className="u-meta">
+                  <div className="u-name">{user.display_name || user.email}</div>
+                  {user.school_name && <div className="u-school">{user.school_name}</div>}
+                </div>
+                <ChevronDown size={15} className="u-caret" aria-hidden="true" />
+              </button>
+
+              {userMenuOpen && (
+                <div className="user-menu" role="menu">
+                  <div className="user-menu-head">
+                    <div className="um-name">{user.display_name || user.email}</div>
+                    <div className="um-email">{user.email}</div>
+                  </div>
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className="user-menu-item"
+                    onClick={() => {
+                      setUserMenuOpen(false);
+                      navigate("/account/password");
+                    }}
+                  >
+                    <KeyRound size={16} />
+                    Change password
+                  </button>
+                </div>
+              )}
             </div>
           )}
           <button className="icon-button" title="Log out" onClick={handleLogout}>
@@ -266,7 +305,7 @@ export function AppShell({ children }: { children: ReactNode }) {
           {(user?.role === "staff" || user?.role === "cdm_contact") && (
             <>
               <NavLink to="/staff" className="sidebar-link" end onClick={() => setSidebarOpen(false)}>
-                <MessageSquare size={18} />
+                <Download size={18} />
                 <span className="s-label">Submissions</span>
               </NavLink>
               {showDocuments && menuVisible("documents") && (

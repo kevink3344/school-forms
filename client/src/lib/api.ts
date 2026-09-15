@@ -207,6 +207,24 @@ export const api = {
     }
   },
 
+  // Change the signed-in user's own password. Requires BOTH the current password
+  // (server-side re-authentication) and the new one; the confirmation field is
+  // matched on the page and never sent.
+  //
+  // A wrong current password comes back as 400, not 401 — see the note in
+  // server/src/routes/auth.ts. `request()` treats 401 as "session expired" and
+  // would clear the token and bounce the user to /login over a typo.
+  async changePassword(
+    current_password: string,
+    new_password: string
+  ): Promise<{ message: string }> {
+    return request<{ message: string }>("/api/auth/change-password", {
+      method: "POST",
+      auth: true,
+      body: { current_password, new_password },
+    });
+  },
+
   async listSchools(): Promise<School[]> {
     // Sends the token when present so a logged-in non-admin is scoped to their
     // own school; anonymous registration callers get the full public list.

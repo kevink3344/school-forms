@@ -31,6 +31,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "post", path: "/api/auth/refresh", auth: "cookie", tags: "Auth" },
   { method: "post", path: "/api/auth/logout", auth: "cookie", tags: "Auth" },
   { method: "get", path: "/api/auth/me", auth: "staff", tags: "Auth" },
+  { method: "post", path: "/api/auth/change-password", auth: "staff", tags: "Auth" },
   { method: "get", path: "/api/auth/schools", auth: "none", tags: "Auth" },
   { method: "post", path: "/api/auth/seed-admin", auth: "none", tags: "Auth" },
   { method: "post", path: "/api/auth/seed-staff", auth: "admin", tags: "Auth" },

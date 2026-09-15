@@ -75,6 +75,19 @@ export function buildSwaggerSpec(req?: Request) {
             user: { $ref: "#/components/schemas/User" },
           },
         },
+        ChangePasswordRequest: {
+          type: "object",
+          required: ["current_password", "new_password"],
+          properties: {
+            current_password: { type: "string", minLength: 1, maxLength: 100 },
+            new_password: {
+              type: "string",
+              minLength: 8,
+              maxLength: 100,
+              description: "Must differ from current_password. 'confirm' is client-side only and not sent.",
+            },
+          },
+        },
         FormField: {
           type: "object",
           required: ["id", "label", "type", "sort_order"],
@@ -584,6 +597,40 @@ export function buildSwaggerSpec(req?: Request) {
               },
             },
             "401": { description: "Unauthorized" },
+          },
+        },
+      },
+      "/api/auth/change-password": {
+        post: {
+          tags: ["Auth"],
+          summary: "Change your own password (any role)",
+          description:
+            "Requires the current password as re-authentication — the bearer token alone is not sufficient. " +
+            "A wrong current password returns **400**, not 401, so the client does not treat it as an expired session.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/ChangePasswordRequest" },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Password updated",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: { message: { type: "string", example: "Password updated successfully." } },
+                  },
+                },
+              },
+            },
+            "400": { description: "Validation failed, or current password is incorrect" },
+            "401": { description: "Missing or invalid bearer token" },
+            "429": { description: "Too many attempts" },
           },
         },
       },

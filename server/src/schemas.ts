@@ -18,6 +18,21 @@ export const loginSchema = z.object({
   password: z.string().min(1),
 });
 
+// Self-service password change (any authenticated role). The current password is
+// required as re-authentication: the bearer token alone must never be enough to
+// set a new password, or a borrowed session could permanently seize an account.
+// Same 8-char floor as registration. `confirm` is intentionally absent — matching
+// the two new-password fields is a client-side concern only.
+export const changePasswordSchema = z
+  .object({
+    current_password: z.string().min(1).max(100),
+    new_password: z.string().min(8).max(100),
+  })
+  .refine((v) => v.current_password !== v.new_password, {
+    message: "New password must be different from the current password",
+    path: ["new_password"],
+  });
+
 // Select-mode login (test/demo): pick a user by id, optionally constrained to an
 // org, with no password. Used by the "Select User (Test)" login form.
 export const selectLoginSchema = z.object({

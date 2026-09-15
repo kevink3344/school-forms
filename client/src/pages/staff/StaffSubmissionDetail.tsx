@@ -4,6 +4,7 @@ import { Lock } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { SubmissionDetail, SubmissionStatus, Comment, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
+import { useDocumentsEnabled } from "../../lib/useDocumentsEnabled";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "resolved"];
@@ -16,6 +17,12 @@ export default function StaffSubmissionDetail() {
   // Admins land here via /admin/submissions/:publicId; back should return there.
   // Staff use /staff/:publicId; back returns to the staff queue.
   const isAdmin = user?.role === "admin";
+  // The generated-document line below (document link, status badge, View PDF) is
+  // part of the Documents feature, so it follows the `documents_link` setting
+  // rather than a hardcoded role — a role with Documents turned off (e.g. the
+  // School Contact) doesn't see it, and an admin who enables Documents for a
+  // role gets it back without a code change.
+  const showDocuments = useDocumentsEnabled(user?.role);
 
   const [detail, setDetail] = useState<SubmissionDetail | null>(null);
   const [loading, setLoading] = useState(true);
@@ -247,7 +254,8 @@ export default function StaffSubmissionDetail() {
             disabled={savingStatus}
             onChange={(e) => handleStatus(e.target.value as SubmissionStatus)}
             style={{
-              height: 40,
+              // No height here: .edit-select already pins it to --control-h, so
+              // this pill lines up with the Edit / Back buttons beside it.
               padding: "0 12px",
               width: "auto",
               minWidth: 160,
@@ -409,7 +417,7 @@ export default function StaffSubmissionDetail() {
               </div>
             )}
 
-            {detail.documents && detail.documents.length > 0 && (
+            {showDocuments && detail.documents && detail.documents.length > 0 && (
               <div style={{ marginTop: 12 }}>
                 {detail.documents.map((doc) => (
                   <div className="muted-note" key={doc.id} style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>

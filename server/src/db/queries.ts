@@ -472,6 +472,20 @@ export async function updateUser(
   return rows[0] ?? null;
 }
 
+// Set a new password hash for a user (self-service password change). Kept
+// deliberately separate from `updateUser` so the generic admin user-edit path
+// can never write `password_hash` as a side effect. Returns true when a row was
+// actually updated, so the caller can tell "no such user" from "changed".
+export async function updateUserPassword(id: number, passwordHash: string): Promise<boolean> {
+  const rows = await execute<{ id: number }>(
+    `UPDATE dbo.users SET password_hash = @passwordHash
+     OUTPUT INSERTED.id
+     WHERE id = @id`,
+    { id, passwordHash }
+  );
+  return rows.length > 0;
+}
+
 // -----------------------------------------------------------------------------
 // Forms
 // -----------------------------------------------------------------------------
@@ -1443,12 +1457,21 @@ export async function getExportColumns(formId: number): Promise<ExportColumn[]> 
     `SELECT id, label, staff_only, roles FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
-  return rows.map((r) => ({
+  const columns = rows.map((r) => ({
     key: `field_${r.id}`,
     label: r.label,
     staff_only: Boolean(r.staff_only),
     roles: parseFormFieldRoles(r.roles),
   }));
+
+  // Group the staff-only columns at the bottom, each group keeping the form's own
+  // `sort_order` (a stable partition — filter, not sort, so equal keys can't
+  // shuffle). Every column list in the app is read from here: the Reports column
+  // picker and preview grid, the Submissions export drawer, the CSV/XLSX/PDF
+  // writers, and the form's default view-columns. Ordering here is therefore what
+  // keeps the picker, the grid, and the exported file in the same order instead of
+  // staff-only columns being interleaved with the public ones.
+  return [...columns.filter((c) => !c.staff_only), ...columns.filter((c) => c.staff_only)];
 }
 
 // -----------------------------------------------------------------------------
