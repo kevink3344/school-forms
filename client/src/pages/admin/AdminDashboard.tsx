@@ -75,6 +75,24 @@ export default function AdminDashboard() {
         if (cancelled) return;
         setForms(f);
         setSchools(s);
+        // One form is not a choice, so default to it rather than making the user
+        // pick from a one-item list. It also means the grid opens on that form's
+        // own columns — and the Columns button is enabled — without a click.
+        //
+        // Keyed off the selectable list, never the raw response: the picker below
+        // offers published forms only, so a draft or an archived form sitting
+        // beside a single published one is not a second option anyone could have
+        // chosen. Counting the raw list there would leave the dashboard on "All
+        // forms" with exactly one thing to pick.
+        //
+        // The `prev.form_id ?` guard keeps this from overwriting a choice; the
+        // effect runs once, so it is belt-and-braces rather than load-bearing.
+        const sole = selectableForms(f);
+        if (sole.length === 1) {
+          setFilters((prev) =>
+            prev.form_id ? prev : { ...prev, form_id: String(sole[0].id) },
+          );
+        }
       })
       .catch(() => {
         // ignore
@@ -117,8 +135,6 @@ export default function AdminDashboard() {
   // to mean "Clear" could not get you back to the full list.
   const clearFilters = () =>
     setFilters({ school_id: "", form_id: "", status: "", from: "", to: "" });
-
-  // Load forms + schools once
 
   const busy = loading || extrasLoading;
 
