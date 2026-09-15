@@ -478,6 +478,22 @@ table.grid tbody tr.grid-group-row > td {
 .cell-strong { font-weight: 600; color: var(--text); }
 .cell-mono { font-family: var(--font-mono); font-size: 12px; color: var(--text-muted); font-variant-numeric: tabular-nums; }
 
+/* The form ID chip shown in front of a form title (see FormIdBadge).
+   Monospace with tabular figures so a column of them lines up and no digit can be
+   misread — this is the number an Apps Script is configured with, so it is copied
+   character by character. Brand tint rather than one of the muted badge-* colours:
+   it is reference data, not a status, and it should catch the eye in a list.
+   `vertical-align: middle` keeps it centred against a taller title next to it. */
+.form-id-badge {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+  vertical-align: middle;
+  margin-right: 8px;
+  color: var(--accent);
+  background: var(--tint);
+  border-color: var(--tint-line);
+}
+
 /* ===== Submissions grid: horizontal scroll, top mirror, frozen first column ===== */
 
 /* The grid's horizontal scrollbar, mirrored directly above it.

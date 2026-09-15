@@ -4,7 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
 import ColumnsPicker, { cellText } from "../../components/ColumnsPicker";
 import { useAuth } from "../../context/AuthContext";
-import { selectableForms } from "../../lib/forms";
+import { formLabel, selectableForms } from "../../lib/forms";
 import type {
   ExportColumn,
   Form,
@@ -514,7 +514,7 @@ export default function ReportsPage() {
             <option value="">Select a form…</option>
             {forms.map((f) => (
               <option key={f.id} value={f.id}>
-                {f.title}
+                {formLabel(f)}
               </option>
             ))}
           </select>
@@ -826,7 +826,7 @@ export default function ReportsPage() {
               {groups ? ` · ${groups.length} ${groups.length === 1 ? "group" : "groups"}` : ""}
             </span>
             <div className="filter-spacer" />
-            <span>{selectedForm ? selectedForm.title : preview.form_title}</span>
+            <span>{selectedForm ? formLabel(selectedForm) : preview.form_title}</span>
             {loading && <span className="spinner spinner-sm" />}
           </div>
         </div>

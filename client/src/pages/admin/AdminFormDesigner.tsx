@@ -269,11 +269,21 @@ export default function AdminFormDesigner() {
     return <div className="empty-state">{error}</div>;
   }
 
+  // Subtitle parts, joined only when present. The previous template always emitted
+  // the ID and its trailing separator, so a form that had not loaded yet rendered
+  // as "ID 2 ·  · academics" with a hole where the status belonged.
+  const headerMeta = [form && formStatusBadge(form.status).label, user?.organization_slug]
+    .filter((part): part is string => Boolean(part))
+    .join(" · ");
+
   return (
     <div>
+      {/* The ID leads the title instead of trailing in the muted subtitle. It has to
+          match the number the Google Apps Script is configured with, so it is the one
+          part of this header that gets read digit by digit and copied out. */}
       <PageHead
-        title={title || "Form Designer"}
-        subtitle={`ID ${formId} · ${form ? formStatusBadge(form.status).label : ""}${user?.organization_slug ? ` · ${user.organization_slug}` : ""}`}
+        title={`#${formId} ${title || "Form Designer"}`}
+        subtitle={headerMeta}
         actions={
           <>
             <button className="secondary-button" onClick={() => navigate("/admin/forms")}>

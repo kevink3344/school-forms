@@ -3,7 +3,8 @@ import { useNavigate } from "react-router-dom";
 import { Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { Form } from "../../types";
-import { PageHead, FormStatusBadge, formStatusBadge } from "../../components/layout";
+import { PageHead, FormStatusBadge, FormIdBadge, formStatusBadge } from "../../components/layout";
+import { formLabel } from "../../lib/forms";
 import { useAuth } from "../../context/AuthContext";
 
 // Delete / archive / restore share one modal: same shape, different copy and a
@@ -231,7 +232,10 @@ export default function AdminForms() {
             <tbody>
               {visibleForms.map((f) => (
                 <tr key={f.id} style={{ opacity: f.status === "archived" ? 0.6 : undefined }}>
-                  <td className="cell-strong" data-label="Title">{f.title}</td>
+                  <td className="cell-strong" data-label="Title">
+                    <FormIdBadge id={f.id} />
+                    {f.title}
+                  </td>
                   <td data-label="Status">
                     <FormStatusBadge status={f.status} />
                   </td>
@@ -310,7 +314,7 @@ export default function AdminForms() {
               {pending.kind === "delete" && (
                 <>
                   <p style={BODY_TEXT}>
-                    Delete <strong>{pending.form.title}</strong>? This cannot be undone.
+                    Delete <strong>{formLabel(pending.form)}</strong>? This cannot be undone.
                   </p>
                   <p style={BODY_HINT}>
                     This form has no submissions, so nothing else will be affected.
@@ -321,7 +325,7 @@ export default function AdminForms() {
               {pending.kind === "archive" && (
                 <>
                   <p style={BODY_TEXT}>
-                    Archive <strong>{pending.form.title}</strong>?
+                    Archive <strong>{formLabel(pending.form)}</strong>?
                   </p>
                   <p style={BODY_HINT}>
                     It stops accepting submissions and disappears from the dashboard, staff queue and reports
@@ -336,7 +340,7 @@ export default function AdminForms() {
               {pending.kind === "restore" && (
                 <>
                   <p style={BODY_TEXT}>
-                    Restore <strong>{pending.form.title}</strong>?
+                    Restore <strong>{formLabel(pending.form)}</strong>?
                   </p>
                   <p style={BODY_HINT}>
                     It returns to <strong>{formStatusBadge(pendingArchivedStatus).label}</strong>, the status it

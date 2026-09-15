@@ -9,7 +9,7 @@ import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
-import { selectableForms } from "../../lib/forms";
+import { formLabel, selectableForms } from "../../lib/forms";
 
 // ---------------------------------------------------------------------------
 // The staff and School Contact queue.
@@ -187,7 +187,7 @@ export default function StaffQueue() {
               <option value="">All forms</option>
               {selectable.map((f) => (
                 <option key={f.id} value={f.id}>
-                  {f.title}
+                  {formLabel(f)}
                 </option>
               ))}
             </select>

@@ -101,6 +101,21 @@ export function FormStatusBadge({ status }: { status: string }) {
   return <span className={`badge ${b.cls}`}>{b.label}</span>;
 }
 
+// The numeric form ID, as a chip to sit in front of a form title.
+//
+// This number has to match the one an Apps Script is configured with, so it is
+// rendered as its own element wherever a form is named rather than folded into
+// the title text. Monospace and brand-tinted (see .form-id-badge) because it is
+// read digit by digit, next to titles that differ by a single trailing word.
+// Not a status, so it does not use one of the badge-* status colours.
+export function FormIdBadge({ id }: { id: number }) {
+  return (
+    <span className="badge form-id-badge" title={`Form ID ${id}`}>
+      #{id}
+    </span>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // App shell (banner + sidebar + main)
 // ---------------------------------------------------------------------------

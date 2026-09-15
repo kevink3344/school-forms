@@ -2,7 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { X } from "lucide-react";
 import { api, getToken, ApiError } from "../lib/api";
 import ColumnsPicker, { cellText } from "./ColumnsPicker";
-import { selectableForms } from "../lib/forms";
+import { formLabel, selectableForms } from "../lib/forms";
 import type { ExportColumn, ExportPreview, Form } from "../types";
 
 interface Props {
@@ -161,7 +161,7 @@ export default function ExportModal({
               <select value={effectiveFormId} onChange={(e) => setSelectedFormId(e.target.value)}>
                 {selectable.map((f) => (
                   <option key={f.id} value={f.id}>
-                    {f.title}
+                    {formLabel(f)}
                   </option>
                 ))}
               </select>

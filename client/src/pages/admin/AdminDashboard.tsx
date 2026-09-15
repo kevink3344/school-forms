@@ -8,7 +8,7 @@ import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
-import { selectableForms } from "../../lib/forms";
+import { formLabel, selectableForms } from "../../lib/forms";
 import { useAuth } from "../../context/AuthContext";
 
 interface Filters {
@@ -211,7 +211,7 @@ export default function AdminDashboard() {
             <option value="">All forms</option>
             {selectableForms(forms).map((f) => (
               <option key={f.id} value={f.id}>
-                {f.title}
+                {formLabel(f)}
               </option>
             ))}
           </select>
