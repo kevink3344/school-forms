@@ -80,6 +80,7 @@ const TURSO_DDL: string[] = [
      display_name         TEXT NOT NULL,
      active               BOOLEAN NOT NULL DEFAULT 1,
      show_on_test_screen  BOOLEAN NOT NULL DEFAULT 0,
+     must_change_password BOOLEAN NOT NULL DEFAULT 0,
      created_at           TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_users_email ON users(email)`,
@@ -305,6 +306,15 @@ export const tursoDialect: Dialect = {
     {
       table: "users",
       column: "show_on_test_screen",
+      definition: "BOOLEAN NOT NULL DEFAULT 0",
+    },
+    {
+      // Admin password reset. Marked by POST /api/users/{id}/reset-password and
+      // cleared by the user's own change-password call, so a temporary password
+      // handed over by an administrator is not a permanent one. DEFAULT 0 keeps
+      // every pre-existing account working exactly as before.
+      table: "users",
+      column: "must_change_password",
       definition: "BOOLEAN NOT NULL DEFAULT 0",
     },
     {

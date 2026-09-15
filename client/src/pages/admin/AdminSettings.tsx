@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import { ChevronDown, Webhook, X } from "lucide-react";
+import { ChevronDown, Check, Copy, KeyRound, Webhook, X } from "lucide-react";
 import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, type MenuItemKey } from "../../lib/settings";
-import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School, WebhookEventSummary } from "../../types";
+import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, School, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
@@ -189,6 +189,20 @@ export default function AdminSettings() {
   const [saving, setSaving] = useState(false);
   const [saveError, setSaveError] = useState("");
 
+  // Admin password reset, rendered INSIDE the user drawer rather than as a second
+  // overlay — the drawer already owns the account, and stacking two modals makes
+  // "which Cancel am I clicking?" ambiguous.
+  //   "idle"    → the normal create/edit form
+  //   "confirm" → the "this signs them out" warning
+  //   "done"    → the temporary password, shown exactly once
+  // The result lives in state only: the server stores a bcrypt hash, so there is
+  // no endpoint that could hand this value back a second time.
+  const [resetStep, setResetStep] = useState<"idle" | "confirm" | "done">("idle");
+  const [resetResult, setResetResult] = useState<ResetPasswordResult | null>(null);
+  const [resetBusy, setResetBusy] = useState(false);
+  const [resetError, setResetError] = useState("");
+  const [copied, setCopied] = useState<"no" | "yes" | "failed">("no");
+
   // Organization drawer state.
   const [orgOpen, setOrgOpen] = useState<boolean>(false);
   const [orgForm, setOrgForm] = useState<OrgFormState>(EMPTY_ORG);
@@ -253,6 +267,11 @@ export default function AdminSettings() {
 
   const openCreate = () => {
     setForm(EMPTY);
+    // Always enter the drawer in its normal state, so a half-finished reset in a
+    // previous session can never reappear over another account.
+    setResetStep("idle");
+    setResetResult(null);
+    setResetError("");
     setModalOpen(true);
     setSaveError("");
   };
@@ -269,15 +288,57 @@ export default function AdminSettings() {
       active: u.active,
       show_on_test_screen: u.show_on_test_screen,
     });
+    setResetStep("idle");
+    setResetResult(null);
+    setResetError("");
     setModalOpen(true);
     setSaveError("");
   };
 
   const closeModal = () => {
-    if (saving) return;
+    if (saving || resetBusy) return;
     setModalOpen(false);
     setSaveError("");
     setForm(EMPTY);
+    setResetStep("idle");
+    setResetResult(null);
+    setResetError("");
+  };
+
+  // Issue a temporary password for the user currently open in the drawer.
+  // Deliberately NOT optimistic and deliberately not "undo"-able: the old password
+  // stops working immediately, so the confirm step (resetStep === "confirm") is
+  // what stands between an admin and locking a colleague out by mis-click.
+  const handleReset = async () => {
+    if (form.id === null) return;
+    setResetBusy(true);
+    setResetError("");
+    try {
+      const res = await api.resetUserPassword(form.id);
+      setResetResult(res);
+      setCopied("no");
+      setResetStep("done");
+      // Refresh so the grid shows the "Must change" badge the reset just set.
+      await load();
+    } catch (err) {
+      setResetError(err instanceof ApiError ? err.message : "Could not reset the password");
+    } finally {
+      setResetBusy(false);
+    }
+  };
+
+  const copyTemporaryPassword = async () => {
+    const value = resetResult?.temporary_password;
+    if (!value) return;
+    try {
+      // Only available in a secure context (https or localhost). If it is missing
+      // the admin still has to be able to read the password off the screen, so a
+      // failure is a message rather than an error.
+      await navigator.clipboard.writeText(value);
+      setCopied("yes");
+    } catch {
+      setCopied("failed");
+    }
   };
 
   const handleSave = async () => {
@@ -547,6 +608,18 @@ export default function AdminSettings() {
                         <span className={`badge ${u.active ? "badge-green" : "badge-gray"}`}>
                           {u.active ? "Active" : "Inactive"}
                         </span>
+                        {/* Surfaced here rather than in a new column: an admin who
+                            reset a password needs to see that the user has not
+                            replaced it yet, and the row is where they look. */}
+                        {u.must_change_password && (
+                          <span
+                            className="badge badge-amber"
+                            style={{ marginLeft: 6 }}
+                            title="A temporary password was issued; the user must choose a new one at next sign-in"
+                          >
+                            Must change
+                          </span>
+                        )}
                       </td>
                       <td data-label="Test screen">
                         <span
@@ -1022,22 +1095,109 @@ export default function AdminSettings() {
         </div>
       </div>
 
-      {/* Create / edit user — right slide-out drawer */}
+      {/* Create / edit user — right slide-out drawer. Also hosts the password\n          reset flow (see resetStep), which takes over the body and footer. */}
       <div className={`drawer-overlay ${modalOpen ? "open" : ""}`} onClick={closeModal}>
         <div className="drawer" onClick={(e) => e.stopPropagation()}>
           <div className="drawer-head">
-            <h2>{form.id === null ? "Add User" : "Edit User"}</h2>
+            <h2>
+              {resetStep === "idle"
+                ? form.id === null
+                  ? "Add User"
+                  : "Edit User"
+                : resetStep === "confirm"
+                  ? "Reset Password"
+                  : "Temporary Password"}
+            </h2>
             <button className="icon-button close" onClick={closeModal} title="Close">
               <X size={18} />
             </button>
           </div>
           <div className="drawer-body">
-            {saveError && (
+            {(resetStep === "idle" ? saveError : resetError) && (
               <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
-                {saveError}
+                {resetStep === "idle" ? saveError : resetError}
               </div>
             )}
-            <div className="form-grid">
+
+            {resetStep === "confirm" ? (
+              <div>
+                <p style={{ marginTop: 0 }}>
+                  Issue a temporary password for <strong>{form.display_name}</strong> (
+                  {form.email})?
+                </p>
+                <div className="alert-error" role="alert">
+                  <ul style={{ margin: 0, paddingLeft: 18 }}>
+                    <li>Their current password stops working immediately.</li>
+                    <li>
+                      A session that is already open keeps working until the page is reloaded —
+                      access tokens are not revoked server-side.
+                    </li>
+                    <li>
+                      The next time they open the app they must choose a new password, and they
+                      cannot do anything else until they do.
+                    </li>
+                    <li>The temporary password is shown once and cannot be retrieved later.</li>
+                  </ul>
+                </div>
+                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  Pass it to {form.display_name} over a channel you trust — a phone call or
+                  in person, not the same email that carries the account.
+                </p>
+              </div>
+            ) : resetStep === "done" && resetResult ? (
+              <div>
+                <p style={{ marginTop: 0 }}>
+                  A temporary password has been issued for <strong>{resetResult.display_name}</strong>.
+                </p>
+
+                <div
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 8,
+                    margin: "0 0 12px",
+                    padding: "12px 14px",
+                    background: "var(--panel-bg, #f6f7f9)",
+                    border: "1px solid var(--border, #d8dce2)",
+                    borderRadius: "var(--radius)",
+                  }}
+                >
+                  <code
+                    style={{
+                      flex: 1,
+                      fontSize: 15,
+                      letterSpacing: "0.06em",
+                      wordBreak: "break-all",
+                      userSelect: "all",
+                    }}
+                  >
+                    {resetResult.temporary_password}
+                  </code>
+                  <button
+                    type="button"
+                    className="secondary-button"
+                    onClick={() => void copyTemporaryPassword()}
+                  >
+                    {copied === "yes" ? <Check size={16} /> : <Copy size={16} />}
+                    {copied === "yes" ? "Copied" : "Copy"}
+                  </button>
+                </div>
+
+                {copied === "failed" && (
+                  <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                    Could not copy automatically — select the password above and copy it
+                    manually.
+                  </div>
+                )}
+
+                <div className="alert-error" role="alert">
+                  This is the only time it will be shown. There is no way to display it again;
+                  if it is lost, reset the password once more to get a new one.
+                </div>
+              </div>
+            ) : (
+              <>
+                <div className="form-grid">
               <Field label="Display name">
                 <input
                   className="edit-input"
@@ -1140,20 +1300,69 @@ export default function AdminSettings() {
                 </div>
               </Field>
             </div>
+              </>
+            )}
           </div>
-          <div className="drawer-foot">
-            <span className="muted-note">{form.id === null ? "New account" : "Editing account"}</span>
-            <button className="secondary-button" onClick={closeModal} disabled={saving}>
-              Cancel
-            </button>
-            <button
-              className="primary-button"
-              onClick={() => void handleSave()}
-              disabled={saving || !form.display_name || !form.email || (form.id === null && form.password.length < 8)}
-            >
-              {saving ? "Saving…" : "Save"}
-            </button>
-          </div>
+          {resetStep === "confirm" ? (
+            <div className="drawer-foot">
+              <span className="muted-note">This affects {form.display_name}&apos;s sign-in</span>
+              <button
+                className="secondary-button"
+                onClick={() => setResetStep("idle")}
+                disabled={resetBusy}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void handleReset()}
+                disabled={resetBusy}
+              >
+                {resetBusy ? "Resetting…" : "Reset password"}
+              </button>
+            </div>
+          ) : resetStep === "done" ? (
+            <div className="drawer-foot">
+              <span className="muted-note">
+                Signing in as {resetResult?.display_name} now requires this password
+              </span>
+              <button className="primary-button" onClick={closeModal}>
+                Done
+              </button>
+            </div>
+          ) : (
+            <div className="drawer-foot">
+              <span className="muted-note">{form.id === null ? "New account" : "Editing account"}</span>
+              {/* Only for an existing account — a create has no password to replace.
+                  Hidden (not merely disabled) for the signed-in admin's own row:
+                  the API refuses self-reset with a 400 pointing at Change Password,
+                  so offering it here would look like a broken button. Disabled
+                  Toggle above follows the same "you" convention. */}
+              {form.id !== null && form.id !== user?.id && (
+                <button
+                  className="secondary-button"
+                  onClick={() => {
+                    setResetError("");
+                    setResetStep("confirm");
+                  }}
+                  disabled={saving}
+                  title="Issue a temporary password this user must change at next sign-in"
+                >
+                  <KeyRound size={16} /> Reset password
+                </button>
+              )}
+              <button className="secondary-button" onClick={closeModal} disabled={saving}>
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={() => void handleSave()}
+                disabled={saving || !form.display_name || !form.email || (form.id === null && form.password.length < 8)}
+              >
+                {saving ? "Saving…" : "Save"}
+              </button>
+            </div>
+          )}
         </div>
       </div>
     </div>

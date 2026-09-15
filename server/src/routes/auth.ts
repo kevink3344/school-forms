@@ -48,7 +48,7 @@ const changePasswordLimiter = rateLimit({
 // Helper: build the client-facing user DTO, resolving the org slug so the
 // frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id)
 // and the school's display name so the sidebar can show it under the user.
-async function toUserDto(user: { id: number; email: string; role: Role; school_id: number | null; organization_id: number; display_name: string }) {
+async function toUserDto(user: { id: number; email: string; role: Role; school_id: number | null; organization_id: number; display_name: string; must_change_password: boolean }) {
   const [org, school] = await Promise.all([
     getOrganizationById(user.organization_id),
     user.school_id ? getSchool(user.school_id) : Promise.resolve(null),
@@ -62,6 +62,11 @@ async function toUserDto(user: { id: number; email: string; role: Role; school_i
     organization_id: user.organization_id,
     organization_slug: org?.slug ?? null,
     display_name: user.display_name,
+    // Set by POST /api/users/{id}/reset-password and cleared by change-password.
+    // The client gates on this to decide between rendering the app and forcing
+    // the change-password screen, which is the only thing stopping a temporary
+    // password handed over by an administrator from being a permanent one.
+    must_change_password: user.must_change_password,
   };
 }
 
@@ -187,8 +192,12 @@ authRouter.post("/login", async (req, res, next) => {
 //
 // Requires the current password as re-authentication: the bearer token alone
 // must never be enough to set a new password, otherwise anyone holding a token
-// (it lives in localStorage) could seize the account permanently — there is no
-// "forgot password" flow and no admin reset to recover with.
+// (it lives in localStorage) could seize the account permanently. This is also
+// why POST /api/users/{id}/reset-password refuses to reset the caller's OWN
+// account, and why that endpoint exists at all — an account whose password is
+// forgotten has no self-service way back in, so recovery is an administrator
+// issuing a temporary password (docs/plans/password-recovery.md). This endpoint
+// is the only thing that clears the resulting must_change_password flag.
 //
 // NOTE the 400 for a wrong current password, NOT 401. The client treats any 401
 // on an authenticated call as "access token expired": it clears the stored token,
@@ -218,7 +227,11 @@ authRouter.post("/change-password", requireAuth, changePasswordLimiter, async (r
 
     // `new === current` is already rejected by changePasswordSchema.
     const passwordHash = await bcrypt.hash(new_password, 12);
-    const updated = await updateUserPassword(user.id, passwordHash);
+    // `false` clears the must_change_password flag this same statement, which is
+    // what terminates the admin-reset flow: POST /api/users/{id}/reset-password
+    // sets the flag and the client will not render the app while it is set, so
+    // failing to clear it here would lock the user out permanently.
+    const updated = await updateUserPassword(user.id, passwordHash, false);
     if (!updated) {
       res.status(404).json({ error: "User not found" });
       return;
@@ -227,7 +240,15 @@ authRouter.post("/change-password", requireAuth, changePasswordLimiter, async (r
     // Deliberately NOT re-issuing tokens. JWTs are stateless and there is no
     // token_version column, so the current session simply keeps working; other
     // sessions keep working until their tokens expire (see docs/plans/change-password.md §8).
-    res.json({ message: "Password updated successfully." });
+    //
+    // The fresh DTO is returned so the client does not have to ASSUME the flag
+    // was cleared — it decides whether to render the app or the forced-change
+    // screen from this value, so guessing wrong here means either a stuck screen
+    // or an unenforced reset.
+    res.json({
+      message: "Password updated successfully.",
+      user: await toUserDto(updated),
+    });
   } catch (err) {
     next(err);
   }

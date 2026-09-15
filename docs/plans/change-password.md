@@ -167,6 +167,12 @@ This is a real gap, and closing it needs a schema change rather than a code chan
 auth middlewares. Flagged here so the decision is conscious rather than accidental. Happy to
 add it as a follow-up.
 
+> **This applies equally to the admin password reset** (`docs/plans/password-recovery.md`):
+> an already-rendered session is *not* killed by a reset. It keeps working until the page is
+> reloaded — at which point `must_change_password` forces the change — or until the access
+> token expires. The reset confirm dialog says so explicitly rather than implying an instant
+> sign-out.
+
 ---
 
 ## 9. Rate limiting
@@ -180,8 +186,9 @@ while never affecting normal traffic.
 
 ## 10. Out of scope
 
-- **Admin resetting another user's password** — different feature (admin Settings → Users).
-  Not requested.
+- **Admin resetting another user's password** — ~~different feature~~ **now implemented**, see
+  `docs/plans/password-recovery.md`. It reuses `POST /api/auth/change-password` to redeem the
+  temporary password and keeps every rule in §2 and §6 intact (self-reset returns `400`).
 - **"Forgot password" / email reset** — needs a mail round-trip and a signed single-use token.
 - **Password strength meter / complexity rules** beyond the existing 8-character floor.
 - **Session invalidation on change** — see §8.

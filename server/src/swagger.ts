@@ -65,6 +65,13 @@ export function buildSwaggerSpec(req?: Request) {
             school_id: { type: "integer", nullable: true },
             organization_id: { type: "integer", nullable: true },
             display_name: { type: "string" },
+            must_change_password: {
+              type: "boolean",
+              description:
+                "Set when an administrator has issued a temporary password via POST /api/users/{id}/reset-password. " +
+                "The client refuses to render the app while this is true; it is cleared by a successful " +
+                "POST /api/auth/change-password.",
+            },
           },
         },
         // The admin /api/users shape: the safe user fields plus the school/org
@@ -1877,6 +1884,45 @@ export function buildSwaggerSpec(req?: Request) {
             "400": { description: "Validation error / cannot deactivate self" },
             "404": { description: "User not found" },
             "409": { description: "Email already registered" },
+          },
+        },
+      },
+      "/api/users/{id}/reset-password": {
+        post: {
+          tags: ["Users"],
+          summary: "Reset a user's password (admin)",
+          description:
+            "Issues a one-time temporary password for a user in the caller's own organization and " +
+            "returns it in the response. The value is never stored in recoverable form, so it cannot " +
+            "be shown again. The account is flagged `must_change_password`, and the client will not " +
+            "render the app for that user until they replace it via POST /api/auth/change-password " +
+            "(which is also the only call that clears the flag).\n\n" +
+            "An administrator cannot reset their own password here — use POST /api/auth/change-password. " +
+            "The endpoint exists because there is no email/forgot-password flow, so without it an " +
+            "account whose password is forgotten is unreachable, including the sole admin's.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK — the temporary password, shown only once",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      id: { type: "integer" },
+                      email: { type: "string", format: "email" },
+                      display_name: { type: "string" },
+                      temporary_password: { type: "string" },
+                      must_change_password: { type: "boolean" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Invalid user id / cannot reset your own password" },
+            "403": { description: "User belongs to another organization" },
+            "404": { description: "User not found" },
           },
         },
       },

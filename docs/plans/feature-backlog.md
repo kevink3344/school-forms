@@ -169,7 +169,7 @@ Each of these is individually small and collectively removes a class of daily an
 | # | Item | Effort | Missing today |
 | --- | --- | --- | --- |
 | 6.1 | **Delete a form** | S | `DELETE /api/forms/{id}` does not exist. **See the warning below.** |
-| 6.2 | **Deactivate a user** | S | No UI. The `active` column **already exists** and `auth.ts` already 403s on it — this is likely client-only work. |
+| ~~6.2~~ | ~~**Deactivate a user**~~ | — | **CLOSED 2026-09-15.** The claim below was **stale**: Settings → Users → row → **Active** toggle has existed since the Organizations/Users work, and the grid renders an `Active` / `Inactive` badge. Same for **Show user on test screen** and, as of today, **Reset password** (`password-recovery.md`). |
 | 6.3 | **Edit / delete a school** | M | `/api/schools` has `GET`, `GET /columns`, `GET /page`, `POST`, `POST /import` only. No update, no delete. |
 | 6.4 | **Delete a submission** | S | No `DELETE /api/submissions/{publicId}`. Everyone eventually needs to remove a test row. |
 
@@ -270,13 +270,15 @@ are waiting on a decision. They are the cheapest items in this document.
 | 9.1 | `/api/export/csv` **ignores the column selection** | S | It never reads a `columns` param, so the Submissions export drawer's ticks change the preview but not the file. `/api/reports/export` *does* honour `columns`. Fixing this also removes the now-dead `api.exportCsv` in `client/src/lib/api.ts`. |
 | 9.2 | **Google Doc ID leaks** to roles with Documents disabled | S | `getSubmissionDetail` (`server/src/db/queries.ts`) returns `documents[]` unconditionally, and `GET /api/submissions/{publicId}/documents` is gated by role + school ownership but **not** `documentsEnabled`. The client hides it; the REST layer does not. |
 | 9.3 | PDF letterhead prints the **raw status value** | S | `buildSubtitle` (`server/src/routes/reports.ts:131`) → `Status: completed`. Needs a label map. |
-| 9.4 | **Changing a password does not sign out other sessions** | M | JWTs are stateless and `dbo.users` has no `token_version`. Deliberately deferred in `change-password.md` §8. Requires a schema column — do not "fix" without it. |
+| 9.4 | **Changing a password does not sign out other sessions** | M | JWTs are stateless and `dbo.users` has no `token_version`. Deliberately deferred in `change-password.md` §8, and deferred again for the admin reset in `password-recovery.md` §8. Requires a schema column — do not "fix" without it. Note the reset dialog now **says so explicitly** instead of claiming an instant sign-out. |
 | 9.5 | **`DOCUMENT_STATUS` vocabulary collision** | — | `"Completed"` already means *document generation finished*, while `SUBMISSION_STATUS` now also has `"completed"`. Two unrelated meanings, one word. Relevant to §5.1 and §9.3; worth settling the naming before building on top of either. |
 | 9.6 | **PDF preview does not render in the VS Code browser** | — | **Not a bug.** VS Code's integrated browser is Electron and does not bundle Chrome's PDF viewer. Verified correct in real Chrome. Fixing it for VS Code would require a JS renderer (pdf.js) — a real dependency. Decision needed: accept, or bundle pdf.js. |
 | 9.7 | `.env.example` has real-looking `DB_SERVER`/`DB_USER` | S | No password present. Hygiene only. |
 | ~~9.8~~ | ~~`docs/plans/view-designer.md` is an **empty file**~~ | — | **CLOSED 2026-09-15.** [view-designer.md](./view-designer.md) is now a full plan (644 lines) and its first phase has been **implemented**: the per-form column chooser on the Submissions dashboard, the frozen first column, staff-only columns pinned last, and inline editing of staff-only cells. See also §5.1 and the `configured` flag in `docs/features/swagger-ui.md` §4.4. **Extended 2026-09-16** to all roles — see the row below. |
 | ~~9.9~~ | ~~The column chooser worked only for admins~~ | — | **CLOSED 2026-09-16.** Reported as *"I do not see the COLUMNS for staff or school contacts. This feature should be for all."* Three causes: `/staff` was a separate page with its own table, both `/api/forms/{id}/columns` routes were `admin`-only, and the store was per-form shared. Fixed by opening the routes to `staff`/`cdm_contact`, moving the store to per-user `user_form_view_columns`, and rebuilding the staff queue on the shared `SubmissionsGrid` + `useSubmissionGrid` + `ColumnsDrawer`. Full write-up in [view-designer.md](./view-designer.md) §9. |
 | ~~9.10~~ | ~~Only the form's *fields* were removable; the standard columns were fixed~~ | — | **CLOSED 2026-09-16.** Reported as *"Except the first column, all columns should be removable. when you click on 'Columns'"*. Submission ID, Status, Submitted and Actions left the fixed set and joined `ColumnsPicker` as ordinary rows; only **Student / School** is locked (it names the row, links to the submission and is the frozen column). What the user turned off is stored as a `hidden` list beside the field ids — which is why nothing needed migrating and why a standard column added later defaults to visible. Full write-up in [view-designer.md](./view-designer.md) §11. |
+| 9.12 | **Self-registration lets the caller choose any `school_id`** | S | `registerSchema` accepts `school_id: z.number().int().positive()` and `POST /api/auth/register` passes it straight into `createUser` with **no check that the caller belongs to that school** — the caller is anonymous and the school list is published by `GET /api/auth/schools`. The org *is* pinned server-side (`DEFAULT_ORG_REGISTRATION`) and the role is forced to `staff`, so this is not a tenant escape — but a self-registered account can claim to be staff at **any school in the district**, and school ownership is what scopes staff visibility of submissions. Worth either closing registration, or requiring an admin to approve/assign the school. Found while reviewing the reset feature's tenant guard (which does check org). |
+| 9.13 | **The login page shows "No users available" when its fetch fails** | S | No retry, no error message, and the brand stats silently render `—`. A transient failure (e.g. the server restarting under `tsx watch`) is indistinguishable from an empty organization. Cost an hour of chasing a phantom bug on 2026-09-15 — the dropdown was fine on a fresh load. Low priority, but the failure mode is misleading. |
 | ~~9.11~~ | ~~Clicking "Delete" on a form does nothing, and unpublished forms still appear in the dashboard's form selector~~ | — | **CLOSED 2026-09-15.** Reported as *"Clicking "Delete" on the form does not delete it. Acutally, this should say "Archive" and not delete. Also, when a form is "Unpublished", it should not show up in the form selector on the dashboard."* Two causes. **(1)** `DELETE /api/forms/{id}` refuses any form with submissions **and** the button was pre-disabled from `submission_count` — so with both live forms in use (16 and 6 submissions) every Delete read as broken. That was [delete-form.md](./delete-form.md)'s own guard working as designed, which is exactly why it looked like a bug. Fixed by keeping Delete for unused forms and adding **Archive** beside it — `PATCH /api/forms/{id}/status` with `{"status":"archived"}` / `{"restore":true}`, backed by a new `forms.pre_archive_status` bookmark so Restore returns a form to the status it *held* rather than blindly to `draft`. **(2)** The published-only filter had been copy-pasted into **five** form selectors and drifted — two filtered, three did not, the dashboard among them. All five now call one `selectableForms()` helper (`client/src/lib/forms.ts`); `AdminForms.tsx` stays deliberately unfiltered so Restore remains reachable. Full write-up in [delete-form.md](./delete-form.md) §10 and [swagger-ui.md](../features/swagger-ui.md) §8.3. |
 
 ---
@@ -287,6 +289,7 @@ Plan docs that exist and are waiting:
 
 | Doc | Status | Note |
 | --- | --- | --- |
+| `docs/plans/password-recovery.md` | **Implemented** | **Written and built 2026-09-15.** Admin-issued temporary password + `must_change_password` forced change. Closes the "no password recovery path exists at all" gap that `change-password.md` §2 and §10 both recorded. Self-service **forgot password** (email + signed single-use token) is the deferred half — see §12.8. |
 | `docs/plans/delete-form.md` | **Implemented** | See §9.11. Shipped as planned, then **Archive** and **Restore** were added beside Delete and the five form selectors were unified on one helper. §4.5's "hard delete only" recommendation was **overruled**. The §6.1 cascade warning is still the point of the doc. |
 | `docs/plans/access-groups.md` | Draft for review | See §7.4. |
 | `docs/plans/organization-drive-folder.md` | Draft for review | Per-org `GOOGLE_DOC_FOLDER_ID`; today it is one global env value. Matters once there is more than one org. |
@@ -326,6 +329,14 @@ Reviewing this doc means answering these. Nothing proceeds until then.
 6. **§9.5 — settle the `Completed` vocabulary collision** before §5.1 and §9.3 build on it.
 7. **§6.1 / §6.3 — should schools be deletable at all**, or deactivate-only? Forms are
    constrained by the cascade; schools are referenced by users, submissions *and* documents.
+8. **Password recovery — is admin-issued enough?** Admin reset now exists
+   (`password-recovery.md`), so nothing is permanently unrecoverable. The remaining question is
+   whether a user should be able to recover **without** an admin: that is the "Forgot password?"
+   flow, and it is gated on §5.3 (an email vendor) — there is still no mail transport in the app,
+   so it cannot be built before that decision is made.
+9. **§9.12 — should self-registration stay open**, and if so should the caller still pick their own
+   `school_id`? This is the only place an anonymous request can choose data that scopes what a
+   role later sees.
 
 ---
 
@@ -334,3 +345,6 @@ Reviewing this doc means answering these. Nothing proceeds until then.
 | Date | Change |
 | --- | --- |
 | 2026-09-14 | Initial backlog. Written after the Reports Group by feature; supersedes the informal list previously held in conversation. |
+| 2026-09-15 | **Password recovery shipped** — admin-issued temporary password + forced change. Added to §10 as implemented; §9.4 extended to cover it; §12.8 added (is admin-issued recovery enough, and is it blocked on §5.3?). |
+| 2026-09-15 | **§6.2 closed** — "deactivate a user" claimed no UI existed; the Active toggle has been there for a while. |
+| 2026-09-15 | Added **§9.12** (self-registration lets the caller pick any `school_id`) and **§9.13** (the login page's silent empty Test User dropdown on a failed fetch), both found while building password recovery. |

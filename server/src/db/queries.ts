@@ -376,7 +376,7 @@ export function featureToSchool(
 // -----------------------------------------------------------------------------
 export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, must_change_password, created_at
      FROM dbo.users WHERE email = @email`,
     { email }
   );
@@ -385,7 +385,7 @@ export async function getUserByEmail(email: string): Promise<User | null> {
 
 export async function getUserById(id: number): Promise<User | null> {
   const rows = await execute<User>(
-    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, created_at
+    `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, must_change_password, created_at
      FROM dbo.users WHERE id = @id`,
     { id }
   );
@@ -427,6 +427,7 @@ export async function createUser(
         "display_name",
         "active",
         "show_on_test_screen",
+        "must_change_password",
         "created_at",
       ],
       values:
@@ -454,7 +455,8 @@ export async function listUsers(organizationId?: number | null): Promise<AdminUs
   if (where) params.organizationId = organizationId;
   return execute<AdminUserRow>(
     `SELECT u.id, u.email, u.password_hash, u.role, u.school_id, u.organization_id,
-            u.display_name, u.active, u.show_on_test_screen, u.created_at,
+            u.display_name, u.active, u.show_on_test_screen, u.must_change_password,
+            u.created_at,
             s.name AS school_name,
             o.name AS organization_name,
             o.slug AS organization_slug
@@ -508,6 +510,7 @@ export async function updateUser(
         "display_name",
         "active",
         "show_on_test_screen",
+        "must_change_password",
         "created_at",
       ],
     }),
@@ -516,23 +519,51 @@ export async function updateUser(
   return rows[0] ?? null;
 }
 
-// Set a new password hash for a user (self-service password change). Kept
-// deliberately separate from `updateUser` so the generic admin user-edit path
-// can never write `password_hash` as a side effect. Returns true when a row was
-// actually updated, so the caller can tell "no such user" from "changed".
-export async function updateUserPassword(id: number, passwordHash: string): Promise<boolean> {
-  const rows = await execute<{ id: number }>(
+// Write a new password hash, and set the "must change on next use" flag in the
+// same statement so the two can never disagree.
+//
+// Two callers with opposite intents — which is exactly why the flag is a
+// parameter rather than something each caller fixes up afterwards:
+//   • POST /api/auth/change-password  → false: the user chose this password, so
+//     the account is clean again.
+//   • POST /api/users/{id}/reset-password → true: an administrator has just
+//     handled this account a temporary password and must not keep a working
+//     credential for it.
+//
+// Kept deliberately separate from `updateUser`, whose SET list is explicit, so
+// the generic admin user-edit path can never write `password_hash` (or clear the
+// flag) as a side effect. Returns the updated row, so the caller can tell "no
+// such user" (null) from "changed" and can hand the caller a fresh user object
+// without a second SELECT.
+export async function updateUserPassword(
+  id: number,
+  passwordHash: string,
+  mustChangePassword = false
+): Promise<User | null> {
+  const rows = await execute<User>(
     dialect().updateReturning({
       table: "users",
-      set: "password_hash = @passwordHash",
+      set: "password_hash = @passwordHash, must_change_password = @mustChangePassword",
       where: "id = @id",
-      returning: ["id"],
+      returning: [
+        "id",
+        "email",
+        "password_hash",
+        "role",
+        "school_id",
+        "organization_id",
+        "display_name",
+        "active",
+        "show_on_test_screen",
+        "must_change_password",
+        "created_at",
+      ],
     }),
-    { id, passwordHash }
+    { id, passwordHash, mustChangePassword }
   );
   // Note: `rows` rather than `rowsAffected` — libSQL reports 0 affected rows for
   // an UPDATE that carries RETURNING.
-  return rows.length > 0;
+  return rows[0] ?? null;
 }
 
 // -----------------------------------------------------------------------------

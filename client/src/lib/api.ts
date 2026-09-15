@@ -17,6 +17,7 @@ import type {
   ReportQuery,
   ReportView,
   ReportViewInput,
+  ResetPasswordResult,
   Role,
   School,
   SchoolPage,
@@ -280,8 +281,12 @@ export const api = {
   async changePassword(
     current_password: string,
     new_password: string
-  ): Promise<{ message: string }> {
-    return request<{ message: string }>("/api/auth/change-password", {
+  ): Promise<{ message: string; user: User }> {
+    // The server returns the refreshed user so the caller never has to ASSUME that
+    // `must_change_password` was cleared — guessing wrong would either leave a
+    // reset user stuck on the change-password screen or leave a temporary
+    // password unenforced.
+    return request<{ message: string; user: User }>("/api/auth/change-password", {
       method: "POST",
       auth: true,
       body: { current_password, new_password },
@@ -456,6 +461,18 @@ export const api = {
       method: "PUT",
       auth: true,
       body: input,
+    });
+  },
+
+  // Issue a temporary password for another user (admin only). The server returns
+  // it exactly once — only the bcrypt hash is stored, so this response is the
+  // only chance to see it — and flags the account so the user must replace it at
+  // next sign-in. An admin cannot reset their own account this way; the server
+  // rejects that with a 400 pointing at Change Password.
+  async resetUserPassword(id: number): Promise<ResetPasswordResult> {
+    return request<ResetPasswordResult>(`/api/users/${id}/reset-password`, {
+      method: "POST",
+      auth: true,
     });
   },
 

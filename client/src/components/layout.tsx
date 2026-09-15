@@ -14,6 +14,7 @@ import {
   ChevronDown,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import { FORCED_PASSWORD_PATH } from "../pages/account/ChangePasswordPage";
 import { api } from "../lib/api";
 import {
   parseMenuItems,
@@ -346,6 +347,17 @@ export function AppShell({ children }: { children: ReactNode }) {
 }
 
 // Protected route wrapper
+//
+// Also the single enforcement point for the "admin reset your password" state.
+// Every authenticated page in the app is wrapped in this component, so gating
+// here means there is exactly one place to reason about — and no route that can
+// be forgotten and left reachable. The server is what actually protects the data
+// (`must_change_password` accounts can still call the API); this stops such a user
+// from *using* the app normally, which is the point of a temporary password.
+//
+// Enforced on the path rather than by hiding pages, so a bookmarked deep link or
+// a typed URL is gated identically to a nav click. See
+// docs/plans/password-recovery.md.
 export function ProtectedRoute({
   roles,
   children,
@@ -354,6 +366,7 @@ export function ProtectedRoute({
   children: ReactNode;
 }) {
   const { user, loading } = useAuth();
+  const location = useLocation();
   if (loading) {
     return (
       <div className="loading-state">
@@ -362,6 +375,9 @@ export function ProtectedRoute({
     );
   }
   if (!user) return <Navigate to="/login" replace />;
+  if (user.must_change_password && location.pathname !== FORCED_PASSWORD_PATH) {
+    return <Navigate to={FORCED_PASSWORD_PATH} replace />;
+  }
   if (roles && !roles.includes(user.role)) return <Navigate to="/" replace />;
   return <>{children}</>;
 }

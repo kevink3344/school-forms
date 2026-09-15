@@ -12,7 +12,7 @@ import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
 import ReportsPage from "./pages/reports/ReportsPage";
-import ChangePasswordPage from "./pages/account/ChangePasswordPage";
+import ChangePasswordPage, { FORCED_PASSWORD_PATH } from "./pages/account/ChangePasswordPage";
 import ParentSubmit from "./pages/parent/ParentSubmit";
 import ParentConfirmation from "./pages/parent/ParentConfirmation";
 import HomeRedirect from "./pages/HomeRedirect";
@@ -168,6 +168,21 @@ export default function App() {
             <AppShell>
               <ReportsPage />
             </AppShell>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Forced password change — an administrator-issued temporary password must
+          be replaced before the app is usable. Deliberately OUTSIDE <AppShell>:
+          rendering it without the sidebar and account menu means there is nothing
+          to navigate away to, and therefore nothing to escape the gate with.
+          ProtectedRoute sends every other authenticated path here while
+          `user.must_change_password` is true. */}
+      <Route
+        path={FORCED_PASSWORD_PATH}
+        element={
+          <ProtectedRoute>
+            <ChangePasswordPage forced />
           </ProtectedRoute>
         }
       />

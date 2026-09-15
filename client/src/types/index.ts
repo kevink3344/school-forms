@@ -62,6 +62,12 @@ export interface User {
   organization_id: number | null;
   organization_slug: string | null;
   display_name: string;
+  // True when an administrator has issued a temporary password for this account
+  // (POST /api/users/{id}/reset-password). The app refuses to render anything but
+  // the change-password screen while this is set, so a temporary password cannot
+  // quietly become a permanent one. Cleared by a successful password change.
+  // See docs/plans/password-recovery.md.
+  must_change_password: boolean;
 }
 
 // Login modes selectable in Settings → Login Mode (and stored in app_settings).
@@ -96,7 +102,19 @@ export interface AdminUser extends User {
   // Whether the account is offered in the select-mode ("Test") login dropdown.
   // Server defaults it to false, so it must be opted into per user.
   show_on_test_screen: boolean;
+  must_change_password: boolean;
   created_at: string;
+}
+
+// Response of POST /api/users/{id}/reset-password. `temporary_password` is
+// returned exactly once and cannot be retrieved again — the server keeps only the
+// bcrypt hash — so the UI must show it before the dialog closes.
+export interface ResetPasswordResult {
+  id: number;
+  email: string;
+  display_name: string;
+  temporary_password: string;
+  must_change_password: boolean;
 }
 
 export interface FormField {

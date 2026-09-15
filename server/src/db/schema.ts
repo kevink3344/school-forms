@@ -64,6 +64,14 @@ export interface User {
   // so a production-shaped user list never leaks into the test screen. This is a
   // curation control, not a security boundary — see docs/plans/login-mode.md.
   show_on_test_screen: boolean;
+  // Set when an administrator has reset this account's password and handed over
+  // a temporary one. While true, the account can still sign in (it must, in order
+  // to change the password) but the client refuses to render anything until the
+  // password has been replaced. The password reset leaves this true; the user's
+  // own POST /api/auth/change-password clears it. Without this flag an admin who
+  // reset a password would know a working credential for that account forever —
+  // see docs/plans/password-recovery.md.
+  must_change_password: boolean;
   created_at: Date;
 }
 
@@ -422,6 +430,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      display_name  NVARCHAR(120) NOT NULL,
      active        BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
      show_on_test_screen BIT NOT NULL CONSTRAINT DF_users_show_on_test_screen DEFAULT 0,
+     must_change_password BIT NOT NULL CONSTRAINT DF_users_must_change_password DEFAULT 0,
      created_at    DATETIME2 NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_users_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE SET NULL
    );
@@ -443,6 +452,15 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.users', 'show_on_test_screen') IS NULL
      ALTER TABLE dbo.users ADD show_on_test_screen BIT NOT NULL
        CONSTRAINT DF_users_show_on_test_screen DEFAULT 0;`,
+
+  // Idempotent migration for the admin password reset — adds the "must change
+  // password" flag to an ALREADY-EXISTING dbo.users table (safe to re-run). The
+  // default is 0/OFF, so on an existing deployment every account keeps working
+  // unchanged: nobody is retroactively forced to change a password. See the
+  // `User.must_change_password` note above.
+  `IF COL_LENGTH('dbo.users', 'must_change_password') IS NULL
+     ALTER TABLE dbo.users ADD must_change_password BIT NOT NULL
+       CONSTRAINT DF_users_must_change_password DEFAULT 0;`,
 
   // Idempotent migration for the School Contact role — widens the role CHECK
   // constraint to accept 'cdm_contact'. The original CREATE TABLE only runs when

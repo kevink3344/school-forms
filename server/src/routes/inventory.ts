@@ -65,6 +65,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "post", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "put", path: "/api/users/{id}", auth: "admin", tags: "Users" },
+  { method: "post", path: "/api/users/{id}/reset-password", auth: "admin", tags: "Users" },
   { method: "get", path: "/api/export/preview", auth: "staff", tags: "Export" },
   { method: "get", path: "/api/export/csv", auth: "staff", tags: "Export" },
   { method: "get", path: "/api/reports/preview", auth: "staff", tags: "Reports" },
