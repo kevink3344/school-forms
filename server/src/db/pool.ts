@@ -32,8 +32,25 @@ export { getClient, getDbKind };
 async function runDdl(): Promise<void> {
   const client = getClient();
   const dialect = getDialect(client.kind);
+
+  // Additive columns are applied BOTH before and after the schema batch.
+  //
+  // Before: `ddl` is the FINAL schema, so it also declares the INDEXES — and an
+  // index may name one of these late columns. libSQL executes the batch as one
+  // transaction and refuses all of it if any single statement fails, so on a
+  // database created before that column existed a `CREATE INDEX` on it does not
+  // merely skip the index: it aborts the whole batch (CREATE TABLEs included) and
+  // `initDb()` never sets dbReady, leaving the app unable to start at all.
+  // Widening first is what keeps that index creatable.
+  //
+  // After: not redundant. `ALTER TABLE` cannot touch a table that does not exist
+  // yet, so a brand-new database is widened only by the CREATE TABLE statements
+  // themselves. The second pass guarantees every declared column is present
+  // whichever path supplied it.
+  await applyAddColumns(dialect);
   await client.run(dialect.ddl);
   await applyAddColumns(dialect);
+
   await backfillSubmissionIds();
 }
 
@@ -41,15 +58,22 @@ async function runDdl(): Promise<void> {
 //
 // SQL Server declares none — its ladder is `COL_LENGTH`-guarded, so the column
 // arrives with the rest of the DDL. SQLite has no `ALTER TABLE ADD COLUMN IF NOT
-// EXISTS`, so the column is added only when `PRAGMA table_info` does not already
-// list it. That makes this safe on every boot: on a fresh database the preceding
-// `ddl` batch already created the table WITH the column, so the check skips.
-// The DDL runs first precisely so that ordering — and because a no-op
-// `CREATE TABLE IF NOT EXISTS` on an existing database cannot add columns.
+// EXISTS`, so the column is added only when it is genuinely absent. That makes
+// this safe on every boot, in either call position.
 async function applyAddColumns(dialect: Dialect): Promise<void> {
   if (dialect.addColumns.length === 0) return;
   const client = getClient();
   for (const { table, column, definition } of dialect.addColumns) {
+    // A table that does not exist yet is not an error, and must not be ALTERed:
+    // `ddl` creates it with this column already in place. Skipping is what makes
+    // the pre-batch call safe. (Both queries here are SQLite-specific and are only
+    // ever reached when `addColumns` is non-empty, which means the Turso dialect.)
+    const tableExists = await client.query<{ name: string }>(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = @table`,
+      { table }
+    );
+    if (tableExists.length === 0) continue;
+
     const existing = await client.query<{ name: string }>(`PRAGMA table_info(${table})`);
     if (existing.some((c) => c.name === column)) continue;
     await client.run([`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`]);

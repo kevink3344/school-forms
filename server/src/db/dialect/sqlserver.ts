@@ -61,6 +61,17 @@ export const sqlserverDialect: Dialect = {
     );
   },
 
+  selectPage({ select, from, where, orderBy }) {
+    // SQL Server requires ORDER BY to use OFFSET/FETCH.
+    return (
+      `SELECT ${select}\n` +
+      `     FROM ${from}\n` +
+      `     ${where}\n` +
+      `     ORDER BY ${orderBy}\n` +
+      `     OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`
+    );
+  },
+
   upsertSetting() {
     return (
       `MERGE dbo.app_settings AS target\n` +

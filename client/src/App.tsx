@@ -7,6 +7,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminForms from "./pages/admin/AdminForms";
 import AdminFormDesigner from "./pages/admin/AdminFormDesigner";
 import AdminSettings from "./pages/admin/AdminSettings";
+import WebhookLog from "./pages/admin/WebhookLog";
 import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
@@ -111,6 +112,19 @@ export default function App() {
           <ProtectedRoute roles={["admin"]}>
             <AppShell>
               <ReportsPage />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      {/* Admin only, with no separate visibility setting (Q2): every inbound
+          webhook attempt is recorded, so an admin must always be able to see
+          what arrived and re-send what did not land. */}
+      <Route
+        path="/admin/webhooks"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <WebhookLog />
             </AppShell>
           </ProtectedRoute>
         }

@@ -12,6 +12,12 @@ the webhook endpoint is **public** but **protected by a shared secret** so only 
 script can post. The submission itself is still just a `submissions` row — it shows up
 in the admin spreadsheet view and staff queue like any other.
 
+> **See also:** [`docs/plans/webhook-log.md`](./webhook-log.md) — the **Webhook Log &
+> Replay** feature. It records every attempt this endpoint receives (including the ones
+> that were rejected), and lets an admin re-send a response that arrived while its form
+> was unpublished. Where this document says a failure returns an error and persists
+> nothing, the log now records that failure before replying.
+
 > **Why a webhook route instead of reusing `POST /api/submissions` directly?**
 > The existing `POST /api/submissions` is the in-app public endpoint. Reusing it from
 > Google would be fine, but a separate `/api/webhook/google` endpoint lets us:

@@ -348,3 +348,130 @@ export interface ReportViewInput {
   format: ReportFormat;
   is_default?: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Webhook intake log (docs/plans/webhook-log.md)
+//
+// Every inbound Google Forms webhook attempt is recorded, succeeded or failed
+// (Q1), and this is the admin-only read side of it. `payload_raw` is never part
+// of a list row — a page of 100 failures must not ship 100 verbatim payloads to
+// the browser — so it appears only on the detail type, fetched when the drawer
+// is opened or a replay is requested.
+// ---------------------------------------------------------------------------
+
+export type WebhookEventStatus = "succeeded" | "failed";
+
+// Why the secret check went the way it did. "missing" is a misconfigured Apps
+// Script, "invalid" is a rotated secret — the distinction is the first thing an
+// admin needs.
+export type WebhookAuthResult = "ok" | "invalid" | "missing";
+
+// A machine-readable reason, kept separate from the HTTP status so the UI can say
+// "arrived while the form was unpublished" rather than "Form is not accepting
+// submissions". This is also what makes the failed rows replayable: a
+// `form_not_published` response becomes deliverable once the form is published.
+export type WebhookErrorCode =
+  | "unauthorized"
+  | "invalid_body"
+  | "form_not_found"
+  | "form_not_published"
+  | "internal_error";
+
+export interface WebhookEventRow {
+  id: number;
+  source: string;
+  received_at: string;
+  remote_ip: string | null;
+  user_agent: string | null;
+  auth_result: WebhookAuthResult;
+  status: WebhookEventStatus;
+  http_status: number;
+  error_code: WebhookErrorCode | null;
+  error: string | null;
+  form_id: number | null;
+  /** NULL means "could not be attributed to an organization" — such a row is
+   *  visible only as the `unattributed` count, never in a list. */
+  organization_id: number | null;
+  submission_id: number | null;
+  public_id: string | null;
+  payload_bytes: number | null;
+  payload_hash: string | null;
+  /** Set on the row a replay created, pointing at the attempt it retried. */
+  replay_of: number | null;
+  replayed_by: number | null;
+  // Joined for display — the row survives the deletion of either one.
+  form_title: string | null;
+  form_code: string | null;
+  replayed_by_name: string | null;
+  /** Whether a payload is stored, so the grid can decide whether Replay is
+   *  available without fetching any payloads. */
+  payload_present: boolean;
+  /** Whether a SUCCEEDING replay already exists. Replay is one-shot (Q5). */
+  has_replay: boolean;
+}
+
+export interface WebhookEventDetail extends WebhookEventRow {
+  payload_raw: string | null;
+}
+
+export interface WebhookEventStats {
+  succeeded: number;
+  failed: number;
+  total: number;
+}
+
+export interface WebhookRetention {
+  rows: number;
+  /** Row count above which the page shows a "consider trimming" warning (Q8). */
+  threshold: number;
+  warning: boolean;
+}
+
+export interface WebhookEventPage {
+  events: WebhookEventRow[];
+  stats: WebhookEventStats;
+  /** Attempts no organization owns. Reported as a bare count so they are never
+   *  silently missing from the feature whose job is to be complete. */
+  unattributed: number;
+  retention: WebhookRetention;
+}
+
+export interface WebhookEventSummary {
+  days: number;
+  /** The trailing-window counters for the dashboard (Q9). */
+  window: { succeeded: number; failed: number };
+  /** Per-form counters, or null when no form was asked about. Drives the
+   *  republish prompt (Q4). */
+  form: { form_id: number; succeeded: number; failed: number; total: number } | null;
+  unattributed: number;
+  retention: WebhookRetention;
+}
+
+export interface WebhookReplayResult {
+  id: number;
+  /** "skipped" means the row was ineligible (already replayed, no payload, or
+   *  not in the caller's organization) rather than that delivery failed. */
+  status: "succeeded" | "failed" | "skipped";
+  public_id: string | null;
+  error_code: string | null;
+  error: string | null;
+}
+
+export interface WebhookBulkReplayResult {
+  attempted: number;
+  succeeded: number;
+  failed: number;
+  skipped: number;
+  results: WebhookReplayResult[];
+}
+
+export interface WebhookEventQuery {
+  status?: WebhookEventStatus;
+  auth_result?: WebhookAuthResult;
+  form_id?: number;
+  from?: string;
+  to?: string;
+  search?: string;
+  limit?: number;
+  offset?: number;
+}

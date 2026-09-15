@@ -26,6 +26,12 @@ import type {
   SubmissionStatus,
   User,
   ViewColumnsConfig,
+  WebhookBulkReplayResult,
+  WebhookEventDetail,
+  WebhookEventPage,
+  WebhookEventQuery,
+  WebhookEventSummary,
+  WebhookReplayResult,
 } from "../types";
 
 // Use API base from env or dev proxy (vite proxy sends /api to backend).
@@ -202,6 +208,23 @@ function reportQueryString(query: ReportQuery): string {
   if (query.q && query.q.trim()) qs.set("q", query.q.trim());
   if (query.include_staff_only) qs.set("include_staff_only", "1");
   if (query.columns && query.columns.length) qs.set("columns", query.columns.join(","));
+  return qs.toString();
+}
+
+// Serialize a WebhookEventQuery for the log list endpoint. Every filter is
+// optional and omitted when unset, so an absent parameter means "no restriction"
+// rather than "match nothing". `limit`/`offset` are only sent when the caller
+// paged deliberately — the server has its own defaults.
+function webhookQueryString(query: WebhookEventQuery): string {
+  const qs = new URLSearchParams();
+  if (query.status) qs.set("status", query.status);
+  if (query.auth_result) qs.set("auth_result", query.auth_result);
+  if (query.form_id != null) qs.set("form_id", String(query.form_id));
+  if (query.from) qs.set("from", query.from);
+  if (query.to) qs.set("to", query.to);
+  if (query.search && query.search.trim()) qs.set("search", query.search.trim());
+  if (query.limit != null) qs.set("limit", String(query.limit));
+  if (query.offset != null) qs.set("offset", String(query.offset));
   return qs.toString();
 }
 
@@ -920,5 +943,75 @@ export const api = {
     const token = getToken();
     const qs = token ? `?token=${encodeURIComponent(token)}` : "";
     return `${API_BASE}/api/documents/${id}/pdf${qs}`;
+  },
+
+  // -------------------------------------------------------------------------
+  // Webhook intake log (admin only — Q2: `role === 'admin'` is the single gate)
+  // -------------------------------------------------------------------------
+
+  /**
+   * One page of inbound webhook attempts, plus the counters for the SAME filter.
+   * The stats come back with the page on purpose: a stats strip that computes
+   * its own number differently from its grid is the classic "showing 100 of 118"
+   * bug.
+   */
+  async listWebhookEvents(query: WebhookEventQuery = {}): Promise<WebhookEventPage> {
+    const qs = webhookQueryString(query);
+    return request<WebhookEventPage>(`/api/webhook/events${qs ? `?${qs}` : ""}`, {
+      auth: true,
+    });
+  },
+
+  /** One row including the stored payload — used by the detail drawer. */
+  async getWebhookEvent(id: number): Promise<WebhookEventDetail> {
+    return request<WebhookEventDetail>(`/api/webhook/events/${id}`, { auth: true });
+  },
+
+  /**
+   * The counters the dashboard (Q9) and the republish prompt (Q4) need without
+   * pulling a page of rows. `days` defaults to 7 server-side; `form_id` makes it
+   * per-form.
+   */
+  async getWebhookEventSummary(params: { days?: number; form_id?: number } = {}): Promise<WebhookEventSummary> {
+    const qs = new URLSearchParams();
+    if (params.days != null) qs.set("days", String(params.days));
+    if (params.form_id != null) qs.set("form_id", String(params.form_id));
+    const suffix = qs.toString();
+    return request<WebhookEventSummary>(`/api/webhook/events/summary${suffix ? `?${suffix}` : ""}`, {
+      auth: true,
+    });
+  },
+
+  /**
+   * Re-deliver one stored attempt through today's intake rules. One-shot (Q5):
+   * the server refuses with a 409 once a succeeding replay exists, because
+   * `createSubmission` mints a fresh id on every call and a second replay would
+   * silently file a duplicate submission.
+   *
+   * A 200 does NOT mean delivery succeeded — the outcome is in the body — so
+   * callers must read `status` rather than assume success from the response code.
+   */
+  async replayWebhookEvent(id: number): Promise<WebhookReplayResult> {
+    return request<WebhookReplayResult>(`/api/webhook/events/${id}/replay`, {
+      method: "POST",
+      auth: true,
+    });
+  },
+
+  /**
+   * Replay every eligible failed attempt for a form (or an explicit id list).
+   * The server re-derives `form_id` mode in SQL: only failed rows with a stored
+   * payload and no succeeding replay, oldest first, so recovered submissions are
+   * numbered in the order they originally arrived.
+   */
+  async replayWebhookEvents(input: {
+    event_ids?: number[];
+    form_id?: number;
+  }): Promise<WebhookBulkReplayResult> {
+    return request<WebhookBulkReplayResult>("/api/webhook/events/replay", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
   },
 };

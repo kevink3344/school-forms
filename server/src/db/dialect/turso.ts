@@ -241,6 +241,42 @@ const TURSO_DDL: string[] = [
         AND NOT EXISTS (SELECT 1 FROM user_form_view_columns u
                          WHERE u.user_id = f.designer_id AND u.form_id = f.id)`,
 
+  // --- webhook_events --------------------------------------------------------
+  // Inbound webhook intake log (docs/plans/webhook-log.md). NO foreign keys, by
+  // design: every candidate FK here would either destroy the audit trail with a
+  // CASCADE or block an existing delete with NO ACTION, and form_id must be
+  // recordable for a form that does not exist.
+  //
+  // `received_at` is a TEXT ISO-8601 instant and MUST also be listed in
+  // TIMESTAMP_COLUMNS (db/client.ts) — on Turso it reads back as a string, on
+  // SQL Server as a Date, and that set is what unifies the two.
+  `CREATE TABLE IF NOT EXISTS webhook_events (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     source        TEXT NOT NULL DEFAULT 'google',
+     received_at   TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     remote_ip     TEXT,
+     user_agent    TEXT,
+     auth_result   TEXT NOT NULL,
+     status        TEXT NOT NULL,
+     http_status   INTEGER NOT NULL,
+     error_code    TEXT,
+     error         TEXT,
+     form_id       INTEGER,
+     organization_id INTEGER,
+     submission_id INTEGER,
+     public_id     TEXT,
+     payload_raw   TEXT,
+     payload_bytes INTEGER,
+     payload_hash  TEXT,
+     replay_of     INTEGER,
+     replayed_by   INTEGER
+   )`,
+  `CREATE INDEX IF NOT EXISTS IX_webhook_events_received ON webhook_events(received_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS IX_webhook_events_status ON webhook_events(status, received_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS IX_webhook_events_form ON webhook_events(form_id, received_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS IX_webhook_events_org ON webhook_events(organization_id, received_at DESC)`,
+  `CREATE INDEX IF NOT EXISTS IX_webhook_events_replay_of ON webhook_events(replay_of)`,
+
   // --- reference data --------------------------------------------------------
   // The two known organizations, seeded idempotently exactly as the SQL Server
   // ladder does.
@@ -279,6 +315,18 @@ export const tursoDialect: Dialect = {
       column: "pre_archive_status",
       definition: "TEXT",
     },
+    {
+      // Webhook Log. The organization an intake attempt is attributed to, stored
+      // as a COLUMN rather than derived from the `form_id` join (a deleted form
+      // would blank the join and the row would disappear from every admin's view).
+      // Must match `TURSO_DDL` and `schema.ts` exactly; it was added to this table
+      // after the first Turso deployment, which is precisely the case this list
+      // exists for — and it also carries IX_webhook_events_org, which the index
+      // batch below cannot create until the column is present.
+      table: "webhook_events",
+      column: "organization_id",
+      definition: "INTEGER",
+    },
   ],
 
   insertReturning({ table, columns, returning, values }) {
@@ -302,6 +350,17 @@ export const tursoDialect: Dialect = {
     return (
       `SELECT id, source_id, name, grade_level, calendar, district, created_at\n` +
       `     FROM schools\n` +
+      `     ${where}\n` +
+      `     ORDER BY ${orderBy}\n` +
+      `     LIMIT @pageSize OFFSET @offset`
+    );
+  },
+
+  selectPage({ select, from, where, orderBy }) {
+    // SQLite does not require ORDER BY for LIMIT/OFFSET.
+    return (
+      `SELECT ${select}\n` +
+      `     FROM ${from}\n` +
       `     ${where}\n` +
       `     ORDER BY ${orderBy}\n` +
       `     LIMIT @pageSize OFFSET @offset`

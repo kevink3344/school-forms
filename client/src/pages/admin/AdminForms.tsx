@@ -1,6 +1,6 @@
 import { useEffect, useState, type CSSProperties } from "react";
-import { useNavigate } from "react-router-dom";
-import { Plus, X } from "lucide-react";
+import { Link, useNavigate } from "react-router-dom";
+import { AlertTriangle, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { Form } from "../../types";
 import { PageHead, FormStatusBadge, FormIdBadge, formStatusBadge } from "../../components/layout";
@@ -30,6 +30,13 @@ export default function AdminForms() {
   const [showArchived, setShowArchived] = useState(false);
   const [pending, setPending] = useState<{ kind: PendingKind; form: Form } | null>(null);
   const [busy, setBusy] = useState(false);
+  // Q4: republishing deliberately does NOT auto-replay the responses that were
+  // rejected while the form was unpublished — re-delivering real submissions on
+  // a status change is too much to do silently. Instead the publish surfaces the
+  // count and links to the filtered log so the admin decides.
+  const [webhookPrompt, setWebhookPrompt] = useState<
+    { formId: number; title: string; failed: number } | null
+  >(null);
 
   const load = () => {
     setLoading(true);
@@ -70,7 +77,21 @@ export default function AdminForms() {
     const next = form.status === "published" ? "draft" : "published";
     try {
       await api.updateFormStatus(form.id, next);
+      setWebhookPrompt(null);
       load();
+      // Only a publish can create recoverable work; unpublishing it cannot. The
+      // count is per-form and all-time, so an admin who ignores this can come
+      // back to it from the log at any point.
+      if (next === "published") {
+        try {
+          const summary = await api.getWebhookEventSummary({ form_id: form.id });
+          if (summary.form && summary.form.failed > 0) {
+            setWebhookPrompt({ formId: form.id, title: form.title, failed: summary.form.failed });
+          }
+        } catch {
+          // The prompt is a convenience; never let it break publishing.
+        }
+      }
     } catch {
       setError("Could not update status");
     }
@@ -153,6 +174,39 @@ export default function AdminForms() {
           </div>
         }
       />
+
+      {webhookPrompt && (
+        <div
+          className="card"
+          style={{
+            borderColor: "var(--orange-tint-line)",
+            background: "var(--orange-tint)",
+            padding: "12px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          <AlertTriangle size={16} />
+          <span>
+            <strong>{webhookPrompt.title}</strong> is published again, but {webhookPrompt.failed} response
+            {webhookPrompt.failed === 1 ? " was" : "s were"} posted while it was unpublished rejected and
+            {webhookPrompt.failed === 1 ? " was never stored." : " were never stored."}
+          </span>
+          <Link
+            className="badge-button"
+            to={`/admin/webhooks?form_id=${webhookPrompt.formId}&status=failed`}
+          >
+            Review and re-send
+          </Link>
+          <button className="icon-button" onClick={() => setWebhookPrompt(null)} aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div

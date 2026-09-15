@@ -78,6 +78,7 @@ export const TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   "submitted_at",
   "last_used_at",
   "staff_fields_updated_at",
+  "received_at",
 ]);
 
 /**

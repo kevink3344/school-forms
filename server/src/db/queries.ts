@@ -1306,7 +1306,13 @@ export async function resolveSubmissionSchoolId(
 
 export async function createSubmission(
   form: Form,
-  answers: { field_id: number; value: string | number | boolean | string[] | null }[]
+  answers: { field_id: number; value: string | number | boolean | string[] | null }[],
+  // Replay only (docs/plans/webhook-log.md Q7): the school year derived from the
+  // ORIGINAL webhook `received_at`. Without it a response captured in July and
+  // replayed in September is filed under the NEW school year, because the
+  // default is computed from `new Date()`. `submitted_at` intentionally keeps the
+  // replay time — the log row holds the true arrival time.
+  opts: { schoolYear?: string } = {}
 ): Promise<SubmissionDetail> {
   // Allocate the next incremental submission id for this form inside a transaction.
   // The single UPDATE ... RETURNING takes a row lock and returns the incremented
@@ -1334,7 +1340,7 @@ export async function createSubmission(
   const publicId = formatSubmissionPublicId(form.code, submissionSeq);
 
   const schoolId = await resolveSubmissionSchoolId(form, answers);
-  const schoolYear = schoolYearForDate(new Date());
+  const schoolYear = opts.schoolYear ?? schoolYearForDate(new Date());
   const subs = await execute<Submission>(
     dialect().insertReturning({
       table: "submissions",

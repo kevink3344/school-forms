@@ -309,6 +309,9 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span className="s-label">Reports</span>
                 </NavLink>
               )}
+              {/* The Webhook Log is no longer a sidebar item — it opens from the
+                  Webhook Log section on the Settings page. It is still always
+                  available to admins and cannot be switched off (Q2). */}
               <NavLink to="/admin/settings" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                 <Settings size={18} />
                 <span className="s-label">Settings</span>

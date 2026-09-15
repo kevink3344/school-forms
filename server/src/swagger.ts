@@ -373,6 +373,77 @@ export function buildSwaggerSpec(req?: Request) {
             phase1_result: { type: "string", nullable: true },
           },
         },
+        WebhookEvent: {
+          type: "object",
+          description:
+            "One inbound webhook attempt. Never contains a secret; `payload_raw` is the verbatim " +
+            "request body and is absent from list responses.",
+          properties: {
+            id: { type: "integer" },
+            source: { type: "string", example: "google" },
+            received_at: { type: "string", format: "date-time" },
+            remote_ip: { type: "string", nullable: true },
+            user_agent: { type: "string", nullable: true },
+            auth_result: {
+              type: "string",
+              enum: ["ok", "invalid", "missing"],
+              description:
+                "Whether the X-Webhook-Secret header was correct. Anything other than `ok` means "
+                + "no payload is stored for the row.",
+            },
+            status: { type: "string", enum: ["succeeded", "failed"] },
+            http_status: { type: "integer" },
+            error_code: {
+              type: "string",
+              nullable: true,
+              enum: ["unauthorized", "invalid_body", "form_not_found", "form_not_published", "internal_error"],
+            },
+            error: { type: "string", nullable: true },
+            form_id: { type: "integer", nullable: true },
+            organization_id: {
+              type: "integer",
+              nullable: true,
+              description: "The resolved form's organization; null when the form could not be resolved.",
+            },
+            submission_id: { type: "integer", nullable: true },
+            public_id: { type: "string", nullable: true },
+            payload_raw: {
+              type: "string",
+              nullable: true,
+              description:
+                "The verbatim request body, capped at 64 KB. Null when the secret check failed "
+                + "or when the body was over the cap — both cases are not replayable.",
+            },
+            payload_bytes: { type: "integer", nullable: true },
+            payload_hash: { type: "string", nullable: true, description: "sha256 of the stored body." },
+            payload_present: { type: "boolean" },
+            has_replay: { type: "boolean", description: "A succeeding replay already exists." },
+            replay_of: { type: "integer", nullable: true, description: "The source row this replay came from." },
+            replayed_by: { type: "integer", nullable: true },
+            form_title: { type: "string", nullable: true },
+            form_code: { type: "string", nullable: true },
+            replayed_by_name: { type: "string", nullable: true },
+          },
+        },
+        WebhookRetention: {
+          type: "object",
+          description: "Payloads are kept indefinitely; `warning` flags a log large enough to trim.",
+          properties: {
+            rows: { type: "integer" },
+            threshold: { type: "integer", example: 100000 },
+            warning: { type: "boolean" },
+          },
+        },
+        WebhookReplayResult: {
+          type: "object",
+          properties: {
+            id: { type: "integer", description: "The SOURCE event id that was replayed." },
+            status: { type: "string", enum: ["succeeded", "failed", "skipped"] },
+            public_id: { type: "string", nullable: true },
+            error_code: { type: "string", nullable: true },
+            error: { type: "string", nullable: true },
+          },
+        },
       },
     },
     paths: {
@@ -1855,6 +1926,194 @@ export function buildSwaggerSpec(req?: Request) {
             },
             "400": { description: "SCHOOL_JSON not configured" },
             "502": { description: "Failed to fetch feed" },
+          },
+        },
+      },
+      "/api/webhook/events": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "List inbound webhook attempts (admin)",
+          description:
+            "One page of the inbound webhook log, newest first, with the counts for the same " +
+            "filter. Only attempts belonging to the caller's organization are returned; " +
+            "`unattributed` reports how many attempts could not be tied to any organization. " +
+            "The stored payload is deliberately NOT included — fetch the row by id for that.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "status", in: "query", schema: { type: "string", enum: ["succeeded", "failed"] } },
+            { name: "auth_result", in: "query", schema: { type: "string", enum: ["ok", "invalid", "missing"] } },
+            { name: "form_id", in: "query", schema: { type: "integer" } },
+            { name: "from", in: "query", schema: { type: "string", format: "date-time" } },
+            { name: "to", in: "query", schema: { type: "string", format: "date-time" } },
+            { name: "search", in: "query", schema: { type: "string" } },
+            { name: "limit", in: "query", schema: { type: "integer", default: 100, maximum: 500 } },
+            { name: "offset", in: "query", schema: { type: "integer", default: 0 } },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      events: { type: "array", items: { $ref: "#/components/schemas/WebhookEvent" } },
+                      stats: {
+                        type: "object",
+                        properties: {
+                          succeeded: { type: "integer" },
+                          failed: { type: "integer" },
+                          total: { type: "integer" },
+                        },
+                      },
+                      unattributed: { type: "integer" },
+                      retention: { $ref: "#/components/schemas/WebhookRetention" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhook/events/summary": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "Webhook counters for the dashboard and the republish prompt (admin)",
+          description:
+            "Counts only, no rows. `window` is the last `days` days; `form` is present when " +
+            "`form_id` is supplied and gives that form's all-time totals, which is how the " +
+            "publish prompt knows there are responses waiting to be replayed.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "days", in: "query", schema: { type: "integer", default: 7, maximum: 365 } },
+            { name: "form_id", in: "query", schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      days: { type: "integer" },
+                      window: {
+                        type: "object",
+                        properties: { succeeded: { type: "integer" }, failed: { type: "integer" } },
+                      },
+                      form: {
+                        type: "object",
+                        nullable: true,
+                        properties: {
+                          form_id: { type: "integer" },
+                          succeeded: { type: "integer" },
+                          failed: { type: "integer" },
+                          total: { type: "integer" },
+                        },
+                      },
+                      unattributed: { type: "integer" },
+                      retention: { $ref: "#/components/schemas/WebhookRetention" },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/webhook/events/{id}": {
+        get: {
+          tags: ["Webhooks"],
+          summary: "Get one webhook attempt, stored payload included (admin)",
+          description:
+            "The full log row plus `payload_raw`. 404 covers both \"no such row\" and " +
+            "\"not in your organization\" on purpose, so the response cannot be used to " +
+            "probe for another organization's events.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/WebhookEvent" } } },
+            },
+            "400": { description: "Invalid event id" },
+            "404": { description: "Event not found" },
+          },
+        },
+      },
+      "/api/webhook/events/{id}/replay": {
+        post: {
+          tags: ["Webhooks"],
+          summary: "Replay one stored webhook attempt (admin)",
+          description:
+            "Re-runs the CURRENT intake rules against the STORED payload — the payload is " +
+            "unchanged but \"is this form published?\" is answered with today's answer, so a " +
+            "response lost while the form was unpublished can be delivered after it is " +
+            "republished. The submission is filed under the school year of the ORIGINAL " +
+            "arrival and the result is recorded as a new log row linked by `replay_of`. " +
+            "Replay is one-shot: it is refused with 409 if the attempt already succeeded, " +
+            "has no stored payload, or has already been replayed successfully.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "Processed — the body reports whether delivery succeeded",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/WebhookReplayResult" } } },
+            },
+            "400": { description: "Invalid event id" },
+            "404": { description: "Event not found" },
+            "409": { description: "Not replayable (already delivered, already replayed, or no stored payload)" },
+          },
+        },
+      },
+      "/api/webhook/events/replay": {
+        post: {
+          tags: ["Webhooks"],
+          summary: "Replay many stored webhook attempts (admin)",
+          description:
+            "Bulk replay. Supply `event_ids`, or `form_id` to replay every eligible failed " +
+            "attempt for that form (oldest first, so submission numbers stay in arrival " +
+            "order). Each row is checked with the same guards as the single-row endpoint and " +
+            "they run sequentially, so this is exactly N safe single replays. Capped at 200 " +
+            "rows per call.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    event_ids: { type: "array", items: { type: "integer" } },
+                    form_id: { type: "integer" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      attempted: { type: "integer" },
+                      succeeded: { type: "integer" },
+                      failed: { type: "integer" },
+                      skipped: { type: "integer" },
+                      results: {
+                        type: "array",
+                        items: { $ref: "#/components/schemas/WebhookReplayResult" },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Neither event_ids nor form_id supplied" },
           },
         },
       },

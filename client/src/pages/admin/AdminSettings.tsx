@@ -1,8 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import { ChevronDown, X } from "lucide-react";
+import { ChevronDown, Webhook, X } from "lucide-react";
 import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, type MenuItemKey } from "../../lib/settings";
-import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School } from "../../types";
+import type { AdminUser, LoginMode, OrganizationWithMembers, Role, School, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
@@ -178,6 +179,11 @@ export default function AdminSettings() {
   );
   const [slackBusy, setSlackBusy] = useState(false);
 
+  // Webhook Log section state — the trailing 7-day intake counters. Null until
+  // loaded, and left null on failure: the button below must still render, since
+  // the log is the place you go when something is wrong.
+  const [webhookSummary, setWebhookSummary] = useState<WebhookEventSummary | null>(null);
+
   const [modalOpen, setModalOpen] = useState<boolean>(false);
   const [form, setForm] = useState<FormState>(EMPTY);
   const [saving, setSaving] = useState(false);
@@ -226,6 +232,24 @@ export default function AdminSettings() {
   useEffect(() => {
     void load();
   }, [load]);
+
+  // Intake counters for the Webhook Log section. Deliberately its own try/catch:
+  // a webhook-stats failure must not blank out the account and organization
+  // panels, and the link to the log stays usable regardless.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getWebhookEventSummary({ days: 7 })
+      .then((s) => {
+        if (!cancelled) setWebhookSummary(s);
+      })
+      .catch(() => {
+        /* leave the counters out; the button still works */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const openCreate = () => {
     setForm(EMPTY);
@@ -805,6 +829,64 @@ export default function AdminSettings() {
             {slackBusy ? "Sending…" : "Send Test Message"}
           </button>
         </div>
+      </CollapsibleSection>
+
+      {/* Webhook Log — the log itself stays on its own page because its filters
+          are URL-driven: the dashboard, the post-publish banner, and the form
+          designer all link into it with query params. Settings therefore links
+          out to it rather than embedding it, which takes it off the sidebar
+          without breaking any of those deep links. */}
+      <CollapsibleSection
+        title="Webhook Log"
+        subtitle="Every response Google Forms has posted to this app, including the rejected ones"
+      >
+        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+          A response that is rejected — because its form was unpublished, its secret was
+          wrong, or its body was invalid — is recorded in the log instead of disappearing.
+          The log is read-only apart from <strong>Replay</strong>, which re-sends a rejected
+          attempt against its form's current state. It is always available to admins and
+          cannot be switched off.
+        </p>
+        {webhookSummary && (
+          <div
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              marginBottom: 14,
+              fontSize: 13,
+            }}
+          >
+            <span>
+              <strong>Last {webhookSummary.days} days</strong>
+            </span>
+            <span className="badge badge-green">{webhookSummary.window.succeeded} delivered</span>
+            {webhookSummary.window.failed > 0 && (
+              <span className="badge badge-red">{webhookSummary.window.failed} failed</span>
+            )}
+            {webhookSummary.unattributed > 0 && (
+              <span
+                className="badge badge-slate"
+                title="Attempts that could not be attributed to a form"
+              >
+                {webhookSummary.unattributed} unattributed
+              </span>
+            )}
+          </div>
+        )}
+        <Link
+          to={
+            webhookSummary && webhookSummary.window.failed > 0
+              ? "/admin/webhooks?status=failed"
+              : "/admin/webhooks"
+          }
+          className="primary-button"
+          style={{ textDecoration: "none" }}
+        >
+          <Webhook size={16} />
+          Open Webhook Log
+        </Link>
       </CollapsibleSection>
 
       {/* Organizations panel */}

@@ -58,6 +58,10 @@ const TABLES: { name: string; label: string }[] = [
   { name: "app_settings", label: "app settings" },
   { name: "report_views", label: "report views" },
   { name: "user_form_view_columns", label: "per-user grid columns" },
+  // Last on purpose: `webhook_events` has NO foreign keys at all (see the DDL),
+  // so it neither depends on nor is depended on by any other table. Keeping it at
+  // the end also means the wipe order never has to reason about it.
+  { name: "webhook_events", label: "webhook intake log" },
 ];
 
 /** Reverse order — children before parents, for the wipe. */

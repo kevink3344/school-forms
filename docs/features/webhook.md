@@ -17,6 +17,12 @@ arrived"). This is the classic **outbound webhook** pattern.
 Today the app only has *inbound* webhooks (Google Forms → us). This feature adds
 the inverse: **us → a customer URL**, configurable entirely from the Admin UI.
 
+> **Not this document:** the inbound side has its own feature — the **Webhook Log & Replay**
+> (`docs/plans/webhook-log.md`, user guide §2.18), which records every inbound attempt
+> including rejected ones and can re-send a response that arrived while its form was
+> unpublished. The `dbo.webhooks` / `dbo.webhook_deliveries` tables described below are
+> for **outbound** delivery and are unrelated to the inbound `dbo.webhook_events` log.
+
 ### Core capability
 
 The Admin opens **Settings → Webhooks** and sees a list of configured webhooks.

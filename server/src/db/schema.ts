@@ -232,6 +232,115 @@ export interface ListDocumentRow extends Document {
 }
 
 // -----------------------------------------------------------------------------
+// Inbound webhook intake log (docs/plans/webhook-log.md).
+//
+// ONE ROW PER ATTEMPT. The row is written for every inbound POST — success or
+// failure — and the FAILURE rows are what make the feature worth having: before
+// this table the webhook route returned 401/400/404 *before writing anything*,
+// so a Google Form response that arrived while its form was unpublished left no
+// trace at all. The row is therefore recorded before the outcome is decided.
+//
+// NO FOREIGN KEYS, deliberately:
+//   - form_id -> forms with CASCADE would DELETE the evidence the moment someone
+//     deleted the form, which is precisely the situation you want a record of.
+//     With NO ACTION, `DELETE /api/forms/:id` would start failing on an FK error
+//     and break an existing feature. So: plain INT, and the UI renders
+//     "(deleted)" when the join misses.
+//   - submission_id and replayed_by have the same problem in miniature.
+//   - A pleasant side effect: with no FK constraints there is no new cascade
+//     path, so SQL Server error 1785 ("multiple cascade paths") cannot occur.
+//
+// `payload_raw` holds the request body verbatim (captured from the raw bytes in
+// the express.json `verify` hook, capped at 64 KB) so a failed attempt can be
+// replayed. It is NULL for a failed secret check — that body is attacker-supplied
+// and storing it would turn the log into free storage for anyone who can guess
+// the URL. The row is still written, so you can see THAT someone probed.
+//
+// `auth_result` is a string rather than a BIT so that "missing" and "invalid" are
+// distinguishable (a misconfigured Apps Script versus a rotated secret) and so
+// no new column needs registering in BOOLEAN_COLUMNS.
+// -----------------------------------------------------------------------------
+export const WEBHOOK_EVENT_STATUS = ["succeeded", "failed"] as const;
+export type WebhookEventStatus = (typeof WEBHOOK_EVENT_STATUS)[number];
+
+export const WEBHOOK_AUTH_RESULTS = ["ok", "invalid", "missing"] as const;
+export type WebhookAuthResult = (typeof WEBHOOK_AUTH_RESULTS)[number];
+
+// Why an attempt failed. Kept separate from the HTTP status so the UI can say
+// "7 responses arrived while this form was unpublished" instead of the opaque
+// "Form is not accepting submissions".
+//
+// Deliberately no code for "the payload was too large to store" — that is a
+// property of the ROW (`payload_bytes` set, `payload_raw` NULL), not a reason the
+// attempt failed, and overwriting the real reason with it would hide exactly the
+// information the log exists to surface.
+export const WEBHOOK_ERROR_CODES = [
+  "unauthorized",
+  "invalid_body",
+  "form_not_found",
+  "form_not_published",
+  "internal_error",
+] as const;
+export type WebhookErrorCode = (typeof WEBHOOK_ERROR_CODES)[number];
+
+export interface WebhookEvent {
+  id: number;
+  source: string;
+  received_at: Date;
+  remote_ip: string | null;
+  user_agent: string | null;
+  auth_result: WebhookAuthResult;
+  status: WebhookEventStatus;
+  http_status: number;
+  error_code: WebhookErrorCode | null;
+  error: string | null;
+  form_id: number | null;
+  /**
+   * The resolved form's organization, captured at intake.
+   *
+   * Recorded as a COLUMN rather than derived from the `form_id` join, because
+   * `form_id` is best-effort (a `form_not_found` attempt has a payload-supplied
+   * id that may match nothing) and because a deleted form would leave the join
+   * NULL — which would make the row invisible to every organization, including
+   * the one that received it. NULL means "could not be attributed".
+   */
+  organization_id: number | null;
+  submission_id: number | null;
+  public_id: string | null;
+  payload_raw: string | null;
+  payload_bytes: number | null;
+  payload_hash: string | null;
+  replay_of: number | null;
+  replayed_by: number | null;
+}
+
+// A list row: the event plus the labels the grid needs, with `payload_raw`
+// omitted so a page of 100 failures doesn't ship 100 payloads to the browser.
+export interface ListWebhookEventRow extends Omit<WebhookEvent, "payload_raw"> {
+  form_title: string | null;
+  form_code: string | null;
+  replayed_by_name: string | null;
+  /**
+   * Whether a payload is actually stored for this row. Derived in SQL so the
+   * grid can grey out Replay without fetching 100 payloads, and so a row that is
+   * over the storage cap (payload_bytes set, payload_raw NULL) is visibly
+   * different from one with an empty body.
+   */
+  payload_present: boolean;
+  /**
+   * Whether a *succeeding* replay already exists for this row. Replay is
+   * one-shot (Q5), so the button is disabled on the strength of this flag rather
+   * than on the caller being told to try and see.
+   */
+  has_replay: boolean;
+}
+
+// Detail: the list row plus the payload, fetched only when the drawer opens.
+export interface WebhookEventDetail extends ListWebhookEventRow {
+  payload_raw: string | null;
+}
+
+// -----------------------------------------------------------------------------
 // SQL Server DDL — a cumulative migration ladder, executed once at startup.
 //
 // Deliberately SQL Server only: it is consumed by `dialect/sqlserver.ts`. The
@@ -761,6 +870,64 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
         AND f.designer_id IS NOT NULL
         AND NOT EXISTS (SELECT 1 FROM dbo.user_form_view_columns u
                          WHERE u.user_id = f.designer_id AND u.form_id = f.id);`,
+
+  // ---------------------------------------------------------------------
+  // Inbound webhook intake log (docs/plans/webhook-log.md).
+  //
+  // DELIBERATELY HAS NO FOREIGN KEYS. A cascade from dbo.forms would delete the
+  // evidence at exactly the moment it is most wanted, and NO ACTION would make
+  // an existing feature fail (DELETE /api/forms/:id would trip an FK error).
+  // Nothing references this table either, so it introduces no new cascade path
+  // and cannot trigger SQL Server error 1785.
+  //
+  // `received_at` is declared here but must also be added to TIMESTAMP_COLUMNS
+  // in db/client.ts — that is what makes the value land as an ISO-8601 string on
+  // Turso and a Date on SQL Server without the API layer noticing.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.webhook_events', 'U') IS NULL
+   CREATE TABLE dbo.webhook_events (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     source        NVARCHAR(30) NOT NULL CONSTRAINT DF_webhook_events_source DEFAULT 'google',
+     received_at   DATETIME2 NOT NULL CONSTRAINT DF_webhook_events_received_at DEFAULT SYSUTCDATETIME(),
+     remote_ip     NVARCHAR(64) NULL,
+     user_agent    NVARCHAR(200) NULL,
+     auth_result   NVARCHAR(20) NOT NULL,
+     status        NVARCHAR(20) NOT NULL,
+     http_status   INT NOT NULL,
+     error_code    NVARCHAR(40) NULL,
+     error         NVARCHAR(MAX) NULL,
+     form_id       INT NULL,
+     organization_id INT NULL,
+     submission_id INT NULL,
+     public_id     NVARCHAR(64) NULL,
+     payload_raw   NVARCHAR(MAX) NULL,
+     payload_bytes INT NULL,
+     payload_hash  NVARCHAR(64) NULL,
+     replay_of     INT NULL,
+     replayed_by   INT NULL
+   );`,
+
+  // Self-healing guard for a table created by an earlier revision of this
+  // branch, before `organization_id` existed. The CREATE TABLE above is skipped
+  // wholesale once the table is present, so without this the column would be
+  // permanently missing in any scratch database and IX_webhook_events_org — the
+  // index that carries this column — would fail to create.
+  `IF COL_LENGTH('dbo.webhook_events', 'organization_id') IS NULL
+     ALTER TABLE dbo.webhook_events ADD organization_id INT NULL;`,
+
+  // Indexes in their own batch — a CREATE INDEX must not share a batch with the
+  // CREATE TABLE that defines its columns (error 207: SQL Server compiles a
+  // batch before running it).
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_received')
+     CREATE INDEX IX_webhook_events_received ON dbo.webhook_events(received_at DESC);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_status')
+     CREATE INDEX IX_webhook_events_status ON dbo.webhook_events(status, received_at DESC);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_form')
+     CREATE INDEX IX_webhook_events_form ON dbo.webhook_events(form_id, received_at DESC);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_org')
+     CREATE INDEX IX_webhook_events_org ON dbo.webhook_events(organization_id, received_at DESC);
+   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_replay_of')
+     CREATE INDEX IX_webhook_events_replay_of ON dbo.webhook_events(replay_of);`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
-import { ArrowDown, ArrowUp, Check, CheckCircle2, Plus, X } from "lucide-react";
+import { Link, useParams, useNavigate } from "react-router-dom";
+import { AlertTriangle, ArrowDown, ArrowUp, Check, CheckCircle2, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { FormField, FieldType, FormWithFields } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
@@ -46,6 +46,13 @@ export default function AdminFormDesigner() {
   const [saving, setSaving] = useState(false);
   const [dirty, setDirty] = useState(false);
 
+  // Q4: set when the webhook log holds responses that were rejected while this
+  // form was unpublished. Publishing restores the ability to deliver them, but
+  // it never re-delivers them on its own — so the prompt is raised both right
+  // after a publish and on arrival, for an admin coming back to a form that was
+  // unpublished earlier (possibly by someone else) while it was still off.
+  const [webhookPrompt, setWebhookPrompt] = useState<{ failed: number } | null>(null);
+
   // Which field tab is active: parent-facing ("form") or staff-only ("staff").
   const [activeTab, setActiveTab] = useState<"form" | "staff">("form");
 
@@ -88,6 +95,27 @@ export default function AdminFormDesigner() {
         if (!cancelled) setLoading(false);
       });
 
+    return () => {
+      cancelled = true;
+    };
+  }, [formId]);
+
+  // Ask the webhook log whether anything was rejected for this form. Runs on
+  // arrival as well as after a publish: a rejected response is invisible
+  // everywhere else, and the admin may be opening this form precisely to fix it.
+  // Deliberately fire-and-forget — a log we cannot read must never block editing.
+  useEffect(() => {
+    if (!Number.isFinite(formId)) return;
+    let cancelled = false;
+    api
+      .getWebhookEventSummary({ form_id: formId })
+      .then((summary) => {
+        // `form` is null when the server has never seen a response for this id.
+        if (!cancelled && summary.form && summary.form.failed > 0) {
+          setWebhookPrompt({ failed: summary.form.failed });
+        }
+      })
+      .catch(() => {});
     return () => {
       cancelled = true;
     };
@@ -252,6 +280,21 @@ export default function AdminFormDesigner() {
     try {
       const updated = await api.updateFormStatus(formId, next);
       setForm(updated);
+      setWebhookPrompt(null);
+      // Q4: publishing again does not silently re-deliver anything. Responses
+      // that arrived while the form was unpublished were rejected, so they are
+      // recoverable — but only by an explicit action, which is why this reports
+      // the count and links to the log instead of replaying.
+      if (next === "published") {
+        try {
+          const summary = await api.getWebhookEventSummary({ form_id: formId });
+          if (summary.form && summary.form.failed > 0) {
+            setWebhookPrompt({ failed: summary.form.failed });
+          }
+        } catch {
+          // The prompt is a convenience; never let it break publishing.
+        }
+      }
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not update status");
     }
@@ -306,6 +349,49 @@ export default function AdminFormDesigner() {
           </>
         }
       />
+
+      {webhookPrompt && (
+        <div
+          className="card"
+          style={{
+            borderColor: "var(--orange-tint-line)",
+            background: "var(--orange-tint)",
+            padding: "12px 14px",
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            fontSize: 13,
+            marginBottom: 16,
+          }}
+        >
+          <AlertTriangle size={16} />
+          {/* The prompt is raised on arrival as well as after a publish, so the
+              wording has to follow the form's current status rather than assume
+              the admin just published it. */}
+          <span>
+            {form?.status === "published" ? (
+              <>
+                Published, but {webhookPrompt.failed} response{webhookPrompt.failed === 1 ? "" : "s"} that
+                arrived while this form was unpublished {webhookPrompt.failed === 1 ? "was" : "were"}{" "}
+                rejected. Since this form is published again, those responses can now be delivered.
+              </>
+            ) : (
+              <>
+                This form is not published, and {webhookPrompt.failed} response
+                {webhookPrompt.failed === 1 ? "" : "s"} posted while it was off {webhookPrompt.failed === 1 ? "was" : "were"}{" "}
+                rejected and never stored. Publishing it again makes them deliverable.
+              </>
+            )}
+          </span>
+          <Link className="badge-button" to={`/admin/webhooks?form_id=${formId}&status=failed`}>
+            Review and re-send
+          </Link>
+          <button className="icon-button" onClick={() => setWebhookPrompt(null)} aria-label="Dismiss">
+            <X size={14} />
+          </button>
+        </div>
+      )}
 
       {error && (
         <div

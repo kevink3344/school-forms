@@ -1,8 +1,8 @@
 import { useEffect, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link, useNavigate } from "react-router-dom";
 import { api } from "../../lib/api";
-import { Columns3, Download } from "lucide-react";
-import type { Form, School, SubmissionRow } from "../../types";
+import { Columns3, Download, Webhook } from "lucide-react";
+import type { Form, School, SubmissionRow, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
@@ -27,6 +27,10 @@ export default function AdminDashboard() {
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
+  // Q9: the org-wide webhook intake counts for the last 7 days. Null until they
+  // arrive — a strip reporting "0 failed" before the request lands would be a
+  // false all-clear on the one number that matters most.
+  const [webhook, setWebhook] = useState<WebhookEventSummary | null>(null);
 
   const [filters, setFilters] = useState<Filters>({
     school_id: "",
@@ -128,6 +132,26 @@ export default function AdminDashboard() {
     };
   }, [filters.school_id, filters.form_id, filters.status, filters.from, filters.to]);
 
+  // The counters are org-scoped server-side and deliberately ignore the grid's
+  // form/school filters: a Google Forms response is rejected before any of the
+  // app's own filters could apply, so narrowing by form would hide exactly the
+  // failures that happened while a form was unpublished.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getWebhookEventSummary({ days: 7 })
+      .then((s) => {
+        if (!cancelled) setWebhook(s);
+      })
+      .catch(() => {
+        // A missing strip is better than a broken page; the log itself will
+        // surface the error.
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const setFilter = (key: keyof Filters, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
 
@@ -185,6 +209,46 @@ export default function AdminDashboard() {
           </>
         }
       />
+
+      {/* A silently-rejected response looks exactly like a form nobody filled in,
+          so the intake counters sit on the dashboard rather than only inside the
+          log. It is a link because the useful next step is always the log. */}
+      {webhook && (
+        <Link
+          to={webhook.window.failed > 0 ? "/admin/webhooks?status=failed" : "/admin/webhooks"}
+          className="card"
+          style={{
+            display: "flex",
+            alignItems: "center",
+            gap: 10,
+            flexWrap: "wrap",
+            padding: "10px 14px",
+            marginBottom: 16,
+            textDecoration: "none",
+            color: "var(--text)",
+            fontSize: 13,
+          }}
+        >
+          <Webhook size={16} />
+          <span>
+            <strong>Webhook intake</strong> — last {webhook.days} days
+          </span>
+          <span className="badge badge-green">{webhook.window.succeeded} delivered</span>
+          {webhook.window.failed > 0 && (
+            <span className="badge badge-red">{webhook.window.failed} failed</span>
+          )}
+          {webhook.unattributed > 0 && (
+            <span className="badge badge-slate" title="Attempts that could not be attributed to a form">
+              {webhook.unattributed} unattributed
+            </span>
+          )}
+          <span className="head-hint">
+            {webhook.window.failed > 0
+              ? "Click to see what was rejected — and re-send it"
+              : "View the full log"}
+          </span>
+        </Link>
+      )}
 
       {/* Filter toolbar */}
       <div className="filter-bar">

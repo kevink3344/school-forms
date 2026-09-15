@@ -44,6 +44,7 @@ date: "September 2026"
 - 2.15 Slack notifications
 - 2.16 Organizations
 - 2.17 Reports
+- 2.18 Webhook Log
 
 **3. For Staff and School Contacts**
 - 3.1 Your submissions queue
@@ -319,6 +320,9 @@ Switch a toggle off to hide that item from that role.
 > [Documents Link](#213-documents-link) above to show or hide it — that setting also decides
 > whether the documents API accepts a request.
 
+> **Note:** **Webhook Log** is not listed here either. It is reached from
+> [Settings → Webhook Log](#218-webhook-log) and is always available to administrators.
+
 ## 2.15 Slack notifications
 
 Expand **Slack Notifications** to verify that admin alerts are being delivered.
@@ -374,6 +378,97 @@ Click **Save View**, give it a name, and click **Save as New**. Saved views reme
 form, filters, columns, and format. Select one from the **Saved View** dropdown to apply
 it; use **Update View** to overwrite it, **Make Default** to flag it as your preferred
 view, and **Delete** to remove it. Saved views are private to your account.
+
+## 2.18 Webhook Log
+
+**Webhook Log** lists every response that Google Forms has posted to this app — including
+the ones the app **rejected**. It is the answer to "a form looks empty, did anything even
+arrive?"
+
+It is visible to **administrators only**, and unlike most menu items it cannot be turned
+off, because it is a diagnostic tool rather than a feature.
+
+Open it from **Settings → Webhook Log**. That section shows the last seven days of intake
+at a glance — how many responses were delivered and how many were rejected — and links
+through to the log itself. The log is deliberately **not** a sidebar item, and it is not
+listed under [Menu Settings](#214-menu-settings), so there is no setting that can hide it.
+
+Each row is one **attempt**, not one submission. A response that was rejected and later
+re-sent appears twice: the original failure and the successful re-send.
+
+| Column | Meaning |
+| ------ | ------- |
+| **Received** | When the request arrived at the server. |
+| **Result** | `succeeded` or `failed`. |
+| **HTTP** | The status code the app returned to Google. `201` = stored, `400` = rejected, `401` = bad secret, `404` = unknown form. |
+| **Form** | Which form the response was for. Empty when the form no longer exists. |
+| **Reason** | A plain-language explanation, with the machine code (`form_not_published`, `invalid_body`, …) underneath. |
+| **Submission** | A link to the submission that was created — or `replay of #N` when this row is itself a re-send. |
+| **Replay** | Re-sends this attempt. Greyed out when it cannot be re-sent (see below). |
+
+Click any row to open a panel with the full detail, including the **exact payload** that
+Google sent, which is what makes a re-send possible.
+
+### Filtering
+
+The log opens showing **Failed** attempts, because those are the ones you act on. Use the
+filters above the grid to change **Status** (`Failed` / `Succeeded` / `All`), pick a single
+**Form**, filter by **Secret** (`Accepted` / `Wrong` / `Missing`), search, or restrict a date
+range. The header shows how many attempts matched and how they split between succeeded and
+failed.
+
+### Re-sending a response after republishing a form
+
+This is the case the log was built for. A form was unpublished — by accident, or while
+being edited — so Google kept collecting responses and the app rejected each one with
+`400 Form is not accepting submissions`. Those responses are **not lost**: the app stored
+what Google sent before rejecting it.
+
+1. **Publish the form again.** Re-publishing does *not* re-send anything by itself. A banner
+   appears on the Forms list and on the form's design page telling you how many responses
+   were rejected, with a **Review and re-send** link that opens the log already filtered to
+   that form.
+2. In the log, click **Replay** on a failed row — or **Replay all failed** to do every
+   eligible attempt for the selected form at once.
+3. The re-send runs through **today's** rules: the form must be published *now*, and its
+   fields are matched as they exist *now*. A recovered submission is stamped with today's
+   time, while its **school year** comes from the date the response originally arrived —
+   so a response from the previous school year lands in the previous school year.
+
+After a successful re-send the original row stays **failed** (the log is a record of what
+happened, and history is not rewritten) and reports `replay of #N` on the new row.
+
+### Why some rows cannot be replayed
+
+The **Replay** button is disabled, with the reason shown on hover, when:
+
+- the attempt **already succeeded** — there is nothing to recover;
+- **no payload was stored**, so there is nothing to send (see below);
+- the attempt **has already been replayed successfully** — a re-send is allowed **once**. A
+  second one would be a duplicate submission. If a re-send itself fails, *that* row can be
+  replayed, so retrying is always possible — just forward.
+
+### Attempts rejected for a bad or missing secret
+
+A request whose secret is wrong or missing is logged, but **its body is deliberately not
+stored** and it **cannot be listed** — the secret was never verified, so the form id in that
+body cannot be trusted to say which organization the row belongs to. These attempts appear
+only as a count at the top of the log:
+
+> *12 attempts could not be attributed to a form or organization and cannot be listed
+> here — usually a request with a wrong or missing secret, or one naming a form that no
+> longer exists.*
+
+If that count starts climbing, something is posting with an out-of-date secret — usually an
+Apps Script that was not updated after the secret was rotated. Because the payload is never
+stored, these attempts cannot be replayed.
+
+### Retention
+
+The log keeps every payload **indefinitely**. Past **100,000** rows a warning banner appears
+at the top of the page — that is a nudge to review and decide, not an automatic deletion.
+Nothing is ever removed on its own, because the log is sometimes the only remaining copy of
+a response.
 
 <div class="page-break"></div>
 
@@ -505,6 +600,17 @@ is your only reference for the submission.
 | **Completed** | Ready to view |
 | **Failed** | Generation failed and can be retried |
 
+**Webhook attempts**
+
+| Status / reason | Meaning |
+| --- | --- |
+| **Succeeded** | The app accepted the response and created a submission |
+| `form_not_published` | The form was not published when the response arrived. **Replayable** once the form is published again |
+| `invalid_body` | The payload was missing required keys. Not replayable |
+| `form_not_found` | The form id does not exist. Not replayable |
+| `unauthorized` | Wrong or missing secret. Logged **without** the payload, so not replayable and not listable |
+| `internal_error` | The server failed. Replayable |
+
 ## 5.2 Field types
 
 | Type | Use for |
@@ -525,6 +631,13 @@ An administrator may have hidden it in **Settings → Menu Settings**. Ask them 
 
 **A form says "Form is not accepting submissions".**
 The form is not published. An administrator must click **Publish**.
+
+**Responses sent from a Google Form are not appearing.**
+Open **Settings → Webhook Log** (administrators only) and look at the **Failed** filter — see
+[2.18 Webhook Log](#218-webhook-log). If the response was rejected because the form was
+unpublished, publish the form and click **Replay** on that row; the stored response is
+re-sent. If the count at the top of the page is climbing instead, the Apps Script is posting
+with a wrong or out-of-date secret and must be updated.
 
 **I cannot sign in.**
 Your account may be inactive, or the app may be in **System Maintenance** mode. Contact an

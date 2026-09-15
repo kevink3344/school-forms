@@ -17,10 +17,12 @@ import { organizationsRouter } from "./routes/organizations.js";
 import { exportRouter } from "./routes/export.js";
 import { reportsRouter } from "./routes/reports.js";
 import { webhookRouter } from "./routes/webhook.js";
+import { webhookEventsRouter } from "./routes/webhookEvents.js";
 import { documentsRouter } from "./routes/documents.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
 import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
+import { captureRawBody } from "./webhook/raw-body.js";
 
 const app = express();
 
@@ -38,7 +40,11 @@ app.use(
     credentials: true,
   })
 );
-app.use(express.json({ limit: "2mb" }));
+// `verify` stashes the verbatim body for the webhook path only, so a failed
+// intake can be replayed later (docs/plans/webhook-log.md). `JSON.stringify(req.body)`
+// cannot stand in for it: it loses key order and whitespace, drops fields that
+// the schema ignores, and a malformed body never reaches a route at all.
+app.use(express.json({ limit: "2mb", verify: captureRawBody }));
 app.use(cookieParser());
 
 // Rate limiting (skip health + docs)
@@ -90,6 +96,10 @@ app.use("/api/submissions", submissionsRouter);
 app.use("/api/organizations", organizationsRouter);
 app.use("/api/export", exportRouter);
 app.use("/api/reports", reportsRouter);
+// Mounted before the webhook router so the log's own paths are matched first;
+// they cannot actually collide (`/events` vs `/google`) but the ordering keeps
+// the reader from having to prove that.
+app.use("/api/webhook/events", webhookEventsRouter);
 app.use("/api/webhook", webhookRouter);
 app.use("/api/documents", documentsRouter);
 

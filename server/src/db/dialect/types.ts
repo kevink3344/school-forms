@@ -79,6 +79,21 @@ export interface Dialect {
   /** Paginated school search for the admin Schools page. */
   selectSchoolsPage(o: { where: string; orderBy: string }): string;
 
+  /**
+   * Generic paginated SELECT for a list that can exceed one screen.
+   *
+   * Exists because SQL Server expresses a row window as a *trailing clause*
+   * (`ORDER BY x OFFSET @offset ROWS FETCH NEXT @pageSize ROWS ONLY`) while
+   * libSQL uses `LIMIT @pageSize OFFSET @offset`. Neither spelling parses on the
+   * other dialect, and `OFFSET @n ROWS` is one of the constructs
+   * `driver/libsql.test.ts` bans from shared files, so it cannot be written
+   * inline. `selectSchoolsPage` above is the same idea hardcoded to `schools`.
+   *
+   * Callers MUST supply `@pageSize` and `@offset` params and MUST supply an
+   * `orderBy` — SQL Server rejects a windowed query without one.
+   */
+  selectPage(o: { select: string; from: string; where: string; orderBy: string }): string;
+
   /** Upsert a single `app_settings` row keyed on `key`. */
   upsertSetting(): string;
 
