@@ -101,7 +101,9 @@ The sign-in screen adapts to the mode your administrator has configured:
 - **Password (Production)** — enter your **Email** and **Password**, then click **Sign In**.
 - **System Maintenance** — sign-in is temporarily disabled and a maintenance message is shown.
 
-New staff members can click **Create an account** to register.
+New staff members can click **Create an account** to register. The sign-up form asks for your
+**Full Name**, **School**, **Email**, and **Password** — no organization picker, because your
+administrator configures which organization new accounts join.
 
 ## 1.4 Finding your way around
 

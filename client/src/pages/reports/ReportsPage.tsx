@@ -96,7 +96,9 @@ function buildReportQuery(
 
 export default function ReportsPage() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Only a School Contact is tied to one school. Admin and staff report across
+  // the whole organization and so get the school filter.
+  const schoolScoped = user?.role === "cdm_contact";
 
   const [forms, setForms] = useState<Form[]>([]);
   const [schools, setSchools] = useState<School[]>([]);
@@ -159,7 +161,7 @@ export default function ReportsPage() {
   }, []);
 
   useEffect(() => {
-    if (!isAdmin) return;
+    if (schoolScoped) return;
     let cancelled = false;
     api
       .listSchools()
@@ -170,7 +172,7 @@ export default function ReportsPage() {
     return () => {
       cancelled = true;
     };
-  }, [isAdmin]);
+  }, [schoolScoped]);
 
   const loadViews = () => {
     api
@@ -577,7 +579,7 @@ export default function ReportsPage() {
 
       {/* Filters */}
       <div className="filter-bar">
-        {isAdmin && (
+        {!schoolScoped && (
           <div className="filter-group">
             <label htmlFor="rp-school">School</label>
             <select
@@ -594,7 +596,7 @@ export default function ReportsPage() {
             </select>
           </div>
         )}
-        {!isAdmin && (
+        {schoolScoped && (
           <div className="filter-group">
             <label>School</label>
             <div className="static-value">{user?.school_name || "My school"}</div>

@@ -2,6 +2,7 @@ import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
+import { env } from "../config/env.js";
 import type {
   School,
   User,
@@ -127,11 +128,22 @@ export async function updateOrganization(
   return rows[0] ?? null;
 }
 
-// The default tenant that self-registered users land in. The plan defines
-// `academics` as the canonical default org (seeded in DDL).
+// The organization that new self-registrations land in, and the default applied
+// wherever an endpoint needs "the organization" without being told which one
+// (e.g. the login page's stat panel and the test-account seeds).
+//
+// The slug comes from the DEFAULT_ORG_REGISTRATION environment variable and
+// falls back to `academics` when blank or unset. Throwing when the slug does not
+// resolve is intentional: a typo'd env var should fail loudly at registration
+// rather than quietly file the account under the wrong organization.
 export async function getDefaultOrganization(): Promise<Organization> {
-  const org = await getOrganizationBySlug("academics");
-  if (!org) throw new Error("Default organization 'academics' not found — run initDb first");
+  const slug = env.defaultOrgRegistration;
+  const org = await getOrganizationBySlug(slug);
+  if (!org) {
+    throw new Error(
+      `DEFAULT_ORG_REGISTRATION organization '${slug}' not found — create the organization or fix the env var`
+    );
+  }
   return org;
 }
 

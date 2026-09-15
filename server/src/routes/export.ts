@@ -1,6 +1,6 @@
 import { Router } from "express";
 import { listSubmissions, getExportColumns, getForm } from "../db/queries.js";
-import { requireAuth, requireRoles } from "../auth.js";
+import { requireAuth, requireRoles, scopedSchoolId } from "../auth.js";
 import {
   filterColumnsForRole,
   withFieldId,
@@ -27,12 +27,11 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const isStaff = req.user!.role !== "admin";
-    // Admin may filter by school; staff and School Contacts are locked to their own school.
-    const schoolId = isStaff
-      ? req.user!.school_id ?? undefined
-      : req.query.school_id
-        ? Number(req.query.school_id)
-        : undefined;
+    // A school-scoped role is locked to its own school; admin and staff may
+    // narrow the export with an optional ?school_id filter.
+    const schoolId =
+      scopedSchoolId(req.user!) ??
+      (req.query.school_id ? Number(req.query.school_id) : undefined);
 
     if (!formId) {
       res.status(400).json({ error: "form_id is required" });
@@ -74,12 +73,11 @@ exportRouter.get("/csv", requireAuth, requireRoles("staff", "cdm_contact", "admi
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const isStaff = req.user!.role !== "admin";
-    // Admin may filter by school; staff and School Contacts are locked to their own school.
-    const schoolId = isStaff
-      ? req.user!.school_id ?? undefined
-      : req.query.school_id
-        ? Number(req.query.school_id)
-        : undefined;
+    // A school-scoped role is locked to its own school; admin and staff may
+    // narrow the export with an optional ?school_id filter.
+    const schoolId =
+      scopedSchoolId(req.user!) ??
+      (req.query.school_id ? Number(req.query.school_id) : undefined);
     // Staff-only columns are only exposed to admins, regardless of the flag.
     const includeStaffOnly = !isStaff && req.query.include_staff_only === "1";
 

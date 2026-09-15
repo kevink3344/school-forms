@@ -22,7 +22,7 @@ export function buildSwaggerSpec(req?: Request) {
     info: {
       title: "School Forms API",
       version: "1.0.0",
-      description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, and view only their school's submissions.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
+      description: `REST API for the School Forms application.\n\n**Roles:** \`admin\` and \`staff\` only. **Parents submit anonymously** (no auth).\n\n- Admins design forms, view all submissions in a spreadsheet view, filter, and export.\n- Staff register, choose their school, and see every submission in their organization. A School Contact (\`cdm_contact\`) is narrowed to their own school.\n\nAuth uses JWT access tokens (15 min) with an httpOnly refresh cookie (7 days).`,
       contact: { name: "School Forms Team" },
     },
     servers,
@@ -515,6 +515,12 @@ export function buildSwaggerSpec(req?: Request) {
         post: {
           tags: ["Auth"],
           summary: "Register a staff user",
+          description:
+            "Self-service STAFF registration. Creates a `staff` account only — the request cannot " +
+            "set a role (use `POST /api/auth/seed-admin` for administrators). The organization the " +
+            "account is saved into is resolved server-side from the `DEFAULT_ORG_REGISTRATION` " +
+            "environment variable (falling back to `academics`), so the request cannot specify an " +
+            "organization either. Unknown body fields such as `role` or `slug` are ignored.",
           security: [],
           requestBody: {
             required: true,
@@ -528,7 +534,6 @@ export function buildSwaggerSpec(req?: Request) {
                     password: { type: "string", minLength: 8 },
                     display_name: { type: "string" },
                     school_id: { type: "integer" },
-                    role: { type: "string", enum: ["staff"] },
                   },
                 },
               },

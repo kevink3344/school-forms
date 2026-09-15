@@ -4,6 +4,15 @@
 **Date:** 2026-09-13
 **Area:** Roles / Access control (`admin`, `staff`, `cdm_contact` → + future roles)
 
+> **Update (scoping consolidated):** school scoping now lives in **one** place —
+> `server/src/auth.ts` — and **staff is no longer school-scoped**. `isSchoolScoped()` returns
+> `true` only for `cdm_contact`, and the two primitives every route uses,
+> `scopedSchoolId(user)` (listing filter) and `canAccessSchool(user, schoolId)` (per-record
+> guard), are both derived from it. Because both read the same rule, a row that appears in a
+> list can never 403 on open — which was the bug this fixed (the submissions list was
+> org-wide when `users.school_id` was NULL, while the detail page compared
+> `school_id === null` and rejected everything). See §2 row 11.
+
 ---
 
 ## 1. Goal
@@ -37,7 +46,8 @@ list **data-driven** so future roles are a smaller, safer change.
 | 8 | `AdminSettings.tsx` `roleBadge()` | Maps role → badge class + label | Label map |
 | 9 | `server/src/auth.ts` `requireRoles(...)` | Route gate | Generic (no change) |
 | 10 | Routes: `forms.ts`, `submissions.ts`, `documents.ts`, `export.ts`, `schools.ts` | `requireRoles("staff","cdm_contact","admin")` etc. | Per-route lists |
-| 11 | `server/src/routes/submissions.ts` `isSchoolScoped()` | `role === "staff" \|\| role === "cdm_contact"` — decides school vs org scoping | **Behavioral** |
+| 11 | `server/src/auth.ts` `isSchoolScoped()` | `role === "cdm_contact"` — decides school vs org scoping. Staff is **not** school-scoped. | **Source of truth** |
+| 11a | `server/src/auth.ts` `scopedSchoolId()` / `canAccessSchool()` | The two scoping primitives every route uses: the listing filter and the per-record guard. Both derive from `isSchoolScoped()`, so a listed row can always be opened. | **Behavioral** |
 | 12 | `server/src/routes/export.ts` | Column visibility by role | Behavioral |
 | 13 | `.env` `ALLOWED_ROLES=admin,staff` | Roles allowed to self-register | Config |
 | 14 | `client/src/pages/HomeRedirect.tsx`, `LoginPage.tsx` | Post-login landing (`admin` → `/admin`, else `/staff`) | Routing |
@@ -81,7 +91,7 @@ Each role needs a small set of properties. Define them in one place:
 | `key` | Stored value | `"cdm_contact"` |
 | `label` | Display name | `"School Contact"` |
 | `badge` | Badge class | `"badge-teal"` |
-| `schoolScoped` | Sees only their school vs whole org | `true` for staff/cdm_contact |
+| `schoolScoped` | Sees only their school vs whole org | `true` for cdm_contact, `false` for admin/staff |
 | `landing` | Post-login route | `/staff` |
 | `canDesignForms` | Admin-only capability | `false` |
 | `defaultFieldAccess` | Pre-checked on new staff-only fields | `true` |
@@ -101,8 +111,9 @@ For a concrete example, adding a role `counselor` ("Counselor"):
    existing `cdm_contact` block at ~line 312). The pattern: drop any CHECK on `role` that
    doesn't include the new role, re-add with the full set. Must be guarded so it no-ops once
    applied.
-3. **`server/src/routes/submissions.ts`** — decide whether the new role is school-scoped
-   (`isSchoolScoped()`).
+3. **`server/src/auth.ts`** — decide whether the new role is school-scoped
+   (`isSchoolScoped()`); if it is, `scopedSchoolId()` / `canAccessSchool()` follow
+   automatically.
 4. **Routes** — add `"counselor"` to any `requireRoles(...)` list that should include it
    (forms list, submissions, documents, export).
 5. **`server/src/routes/settings.ts`** — nothing structural; `parseDocumentRoles` already
@@ -159,7 +170,7 @@ export interface RoleDef {
 
 export const ROLE_DEFS: RoleDef[] = [
   { key: "admin",       label: "Admin",       badge: "badge-orange", schoolScoped: false, landing: "/admin",  canDesignForms: true,  defaultFieldAccess: true },
-  { key: "staff",       label: "Staff",       badge: "badge-blue",   schoolScoped: true,  landing: "/staff",  canDesignForms: false, defaultFieldAccess: true },
+  { key: "staff",       label: "Staff",       badge: "badge-blue",   schoolScoped: false, landing: "/staff",  canDesignForms: false, defaultFieldAccess: true },
   { key: "cdm_contact", label: "School Contact", badge: "badge-teal",   schoolScoped: true,  landing: "/staff",  canDesignForms: false, defaultFieldAccess: true },
 ];
 
@@ -227,7 +238,7 @@ source of truth and the client never drifts.
 | `server/src/db/schema.ts` | Add role to `ROLES`; add CHECK-widening migration. |
 | `server/src/db/roles.ts` *(new)* | `ROLE_DEFS` descriptor (single source of truth). |
 | `server/src/routes/roles.ts` *(new, optional)* | `GET /api/roles` public endpoint. |
-| `server/src/routes/submissions.ts` | Update `isSchoolScoped()` to read the descriptor. |
+| `server/src/auth.ts` | Keep `isSchoolScoped()` reading the descriptor. |
 | `server/src/routes/{forms,documents,export}.ts` | Add role to relevant `requireRoles(...)`. |
 | `client/src/types/index.ts` | Add role to `Role` union. |
 | `client/src/lib/roles.ts` *(new)* | Client mirror or fetch from `/api/roles`. |

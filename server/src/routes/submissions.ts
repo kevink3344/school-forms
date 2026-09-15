@@ -13,7 +13,7 @@ import {
   getForm,
   getOrganizationBySlug,
 } from "../db/queries.js";
-import { requireAuth, requireRoles } from "../auth.js";
+import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId } from "../auth.js";
 import { maybeGenerateDocument } from "../google/docs.js";
 import { sendSlackAlert } from "../notify/slack.js";
 import {
@@ -25,13 +25,6 @@ import {
 } from "../schemas.js";
 
 export const submissionsRouter = Router();
-
-// Whether the current user is school-scoped (staff or School Contact) rather than
-// org-scoped (admin). School-scoped callers may only touch their own school's
-// submissions.
-export function isSchoolScoped(role: string): boolean {
-  return role === "staff" || role === "cdm_contact";
-}
 
 // -----------------------------------------------------------------------------
 // PUBLIC: POST /api/submissions — anonymous Parent submission
@@ -115,10 +108,12 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
-    // Staff and School Contacts are school-scoped; admins are org-scoped.
-    const isStaff = req.user!.role !== "admin";
+    // Every caller is org-scoped. A School Contact is narrowed further to their
+    // own school; admin and staff may narrow with an optional ?school_id filter.
     const organizationId = req.user!.organization_id;
-    const schoolId = isStaff ? req.user!.school_id : (req.query.school_id ? Number(req.query.school_id) : undefined);
+    const schoolId =
+      scopedSchoolId(req.user!) ??
+      (req.query.school_id ? Number(req.query.school_id) : undefined);
     const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
     const status = req.query.status ? String(req.query.status) : undefined;
     const from = req.query.from ? String(req.query.from) : undefined;
@@ -141,13 +136,10 @@ submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_cont
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    // Staff and School Contacts can only view submissions belonging to their own school within their org
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden: submission belongs to another school" });
-        return;
-      }
+    // A School Contact may only view submissions belonging to their own school.
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden: submission belongs to another school" });
+      return;
     }
     res.json(submission);
   } catch (err) {
@@ -170,12 +162,9 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     await updateSubmissionStatus(submission.id, parsed.data.status);
     const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
@@ -201,12 +190,9 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "c
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     await updateSubmissionValues(submission.id, parsed.data.answers, {
       staffOnly: parsed.data.staff_only === true,
@@ -235,12 +221,9 @@ submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff",
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     const documents = submission.documents;
     res.json(documents);
@@ -259,12 +242,9 @@ submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "cd
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     const fields = await listAdhocFields(submission.id);
     res.json(fields);
@@ -288,12 +268,9 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "c
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     const existing = await listAdhocFields(submission.id);
     const nextSort = existing.length ? Math.max(...existing.map((f) => f.sort_order)) + 1 : 0;
@@ -327,12 +304,9 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     const fieldId = Number(req.params.fieldId);
     const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
@@ -362,12 +336,9 @@ submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles(
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (isSchoolScoped(req.user!.role)) {
-      const isOwner = submission.school_id === req.user!.school_id;
-      if (!isOwner) {
-        res.status(403).json({ error: "Forbidden" });
-        return;
-      }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
     }
     const fieldId = Number(req.params.fieldId);
     const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);

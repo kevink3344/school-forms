@@ -39,6 +39,7 @@ Under **Settings → Configuration → Application settings**, add (mirroring yo
 | `CLIENT_URL` | `https://webform-sandbox-addph8hsd9feghdp.eastus2-01.azurewebsites.net` |
 | `API_BASE_URL` | `https://webform-sandbox-addph8hsd9feghdp.eastus2-01.azurewebsites.net` |
 | `PUBLIC_BASE_URL` | same as above |
+| `DEFAULT_ORG_REGISTRATION` | `academics` — the org slug new self-registrations land in (blank ⇒ `academics`) |
 | `DB_SERVER` | `wcpss-sql-serverless-freetier.database.windows.net` |
 | `DB_PORT` | `1433` |
 | `DB_DATABASE` | `school-form-data` |

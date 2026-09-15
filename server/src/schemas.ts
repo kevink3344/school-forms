@@ -4,13 +4,17 @@ import { ROLES, FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES, REPORT_FORMATS } fr
 // -----------------------------------------------------------------------------
 // Auth
 // -----------------------------------------------------------------------------
+// Public self-registration. Deliberately narrow: the only thing a caller gets to
+// choose is their own identity (email/password/name) and their school. The
+// organization comes from `DEFAULT_ORG_REGISTRATION` on the server and the role
+// is fixed to `staff` by the route, so an anonymous caller can neither pick a
+// tenant nor grant themselves `admin` (see POST /api/auth/seed-admin for the
+// deliberate, controlled way to create an administrator).
 export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),
   display_name: z.string().min(1).max(120),
   school_id: z.number().int().positive(),
-  role: z.enum(ROLES).default("staff"),
-  slug: z.string().min(1).max(60).optional(),
 });
 
 export const loginSchema = z.object({

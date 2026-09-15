@@ -4,18 +4,11 @@ import { useAuth } from "../context/AuthContext";
 import { api, ApiError } from "../lib/api";
 import type { School } from "../types";
 
-// Fixed org slug options shown on registration (defaults to Academics).
-const ORG_OPTIONS = [
-  { slug: "academics", label: "Academics" },
-  { slug: "technology-services", label: "Technology Services" },
-];
-
 export default function RegisterPage() {
   const { registerStaff } = useAuth();
   const navigate = useNavigate();
   const [schools, setSchools] = useState<School[]>([]);
   const [schoolId, setSchoolId] = useState("");
-  const [slug, setSlug] = useState("academics");
   const [name, setName] = useState("");
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -46,15 +39,15 @@ export default function RegisterPage() {
     }
     setBusy(true);
     try {
-      const u = await registerStaff({
+      // The organization is resolved by the server from its own configuration
+      // (DEFAULT_ORG_REGISTRATION); the client does not choose it.
+      await registerStaff({
         email,
         password,
         display_name: name,
         school_id: Number(schoolId),
-        slug,
       });
       navigate("/staff", { replace: true });
-      void u;
     } catch (err) {
       if (err instanceof ApiError) setError(err.message);
       else setError("Registration failed. Please try again.");
@@ -102,22 +95,6 @@ export default function RegisterPage() {
         )}
 
         <form onSubmit={handleSubmit} style={{ display: "flex", flexDirection: "column", gap: 14 }}>
-          <div className="filter-group" style={{ minWidth: 0 }}>
-            <label htmlFor="organization">Organization</label>
-            <select
-              id="organization"
-              value={slug}
-              onChange={(e) => setSlug(e.target.value)}
-              required
-            >
-              {ORG_OPTIONS.map((o) => (
-                <option key={o.slug} value={o.slug}>
-                  {o.label}
-                </option>
-              ))}
-            </select>
-          </div>
-
           <div className="filter-group" style={{ minWidth: 0 }}>
             <label htmlFor="school">School *</label>
             <select

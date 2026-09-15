@@ -7,7 +7,7 @@ import {
   listSchoolsPage,
   upsertSchoolFromSource,
 } from "../db/queries.js";
-import { requireAuth, requireRoles } from "../auth.js";
+import { requireAuth, requireRoles, scopedSchoolId } from "../auth.js";
 import { createSchoolSchema } from "../schemas.js";
 import { env } from "../config/env.js";
 
@@ -16,15 +16,13 @@ export const schoolsRouter = Router();
 // Max page size — also what the admin UI requests.
 const MAX_PAGE_SIZE = 50;
 
-// Authenticated: list schools, scoped for non-admins.
-//  - admin  → full list
-//  - staff  → only their own school (users.school_id)
+// Authenticated: list schools. Only a school-scoped role is narrowed to its own
+// school; admin and staff see the full shared list.
+//  - admin / staff  → full list
+//  - School Contact → their own school (users.school_id)
 schoolsRouter.get("/", requireAuth, async (req, res, next) => {
   try {
-    const schools =
-      req.user!.role === "admin"
-        ? await listSchools()
-        : await listSchools(req.user!.school_id);
+    const schools = await listSchools(scopedSchoolId(req.user!));
     res.json(schools);
   } catch (err) {
     next(err);

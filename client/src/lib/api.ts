@@ -182,12 +182,13 @@ export const api = {
     password: string;
     display_name: string;
     school_id: number;
-    slug?: string;
   }): Promise<AuthResponse> {
+    // The server fixes the role to `staff` and resolves the organization from
+    // its own configuration, so neither is sent from here.
     return request<AuthResponse>("/api/auth/register", {
       method: "POST",
       auth: false,
-      body: { ...input, role: "staff" },
+      body: input,
     });
   },
 

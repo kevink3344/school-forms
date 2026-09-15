@@ -69,11 +69,19 @@ export default function StaffQueue() {
 
   const openSubmission = (publicId: string) => navigate(`/staff/${publicId}`);
 
+  // Only a School Contact is tied to one school; staff work across the entire
+  // organization, so their headline is the organization, not a school.
+  const schoolScoped = user?.role === "cdm_contact";
+
   return (
     <div>
       <PageHead
-        title={user?.school_name || "My School's Submissions"}
-        subtitle="Submissions from your school, ready for you to review."
+        title={schoolScoped ? user?.school_name || "My School's Submissions" : "All Submissions"}
+        subtitle={
+          schoolScoped
+            ? "Submissions from your school, ready for you to review."
+            : "Submissions from every school in your organization, ready for you to review."
+        }
         actions={
           <>
             <button className="primary-button" onClick={() => setExportOpen(true)}>
@@ -165,7 +173,11 @@ export default function StaffQueue() {
           </div>
         ) : rows.length === 0 ? (
           <div className="empty-state">
-            {formFilter ? "No submissions for this report yet." : "No submissions for your school yet."}
+            {formFilter
+              ? "No submissions for this report yet."
+              : schoolScoped
+                ? "No submissions for your school yet."
+                : "No submissions yet."}
           </div>
         ) : viewMode === "cards" ? (
           <div className="queue-list" style={{ padding: 16 }}>

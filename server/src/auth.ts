@@ -112,6 +112,42 @@ export function requireRoles(...roles: Role[]) {
   };
 }
 
+// -----------------------------------------------------------------------------
+// School scoping
+// -----------------------------------------------------------------------------
+// The identity fields the scoping helpers need. `JwtUser` satisfies this.
+export interface ScopedUser {
+  role: Role | string;
+  school_id: number | null;
+  organization_id?: number | null;
+}
+
+// Roles restricted to a single school. Deliberately NOT staff: a staff member
+// sees every submission in their organization regardless of the school they
+// registered under. A School Contact stays scoped to their own school.
+export function isSchoolScoped(role: string): boolean {
+  return role === "cdm_contact";
+}
+
+// The school filter a listing endpoint should apply for this user. Returns the
+// user's school only when they are school-scoped AND actually have one;
+// otherwise `undefined`, meaning "no school filter" (the caller's organization
+// filter still applies). Every listing query treats a NULL school as "all".
+export function scopedSchoolId(user: ScopedUser): number | undefined {
+  return isSchoolScoped(user.role) ? user.school_id ?? undefined : undefined;
+}
+
+// Whether the caller may read or act on a record belonging to `schoolId`.
+//
+// This deliberately mirrors `scopedSchoolId`: whatever school filter applies to
+// a user's lists also governs the rows they can open, so a row that appears in
+// the list can never 403 on open. A school-scoped role with no school assigned
+// is therefore unrestricted (district-wide), exactly as its lists are.
+export function canAccessSchool(user: ScopedUser, schoolId: number | null): boolean {
+  const scope = scopedSchoolId(user);
+  return scope === undefined || schoolId === scope;
+}
+
 // Attach req.user when a *valid* token is supplied, but never reject anonymous
 // callers. Used by the public `/api/auth/schools` route so a logged-in non-admin
 // gets scoped to their own school while the register screen stays open.

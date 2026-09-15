@@ -1,5 +1,5 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
-import { requireAuth, requireRoles, verifyAccessToken } from "../auth.js";
+import { requireAuth, requireRoles, verifyAccessToken, scopedSchoolId } from "../auth.js";
 import { listDocuments, getDocumentById, listDocumentsBySubmission } from "../db/documents.js";
 import { generateDocument, regenerateDocument, getDocumentPdf } from "../google/docs.js";
 import { getSetting } from "../db/queries.js";
@@ -23,18 +23,30 @@ export async function documentsEnabled(req: Request, res: Response, next: NextFu
   }
 }
 
+// Every document query is bounded by the caller's organization; a school-scoped
+// role is narrowed further to its own school when it has one. Reading a document
+// therefore uses the same scope as listing documents, so a row that appears in
+// the list can always be opened.
+function documentScope(user: {
+  role: string;
+  school_id: number | null;
+  organization_id: number | null;
+}): { schoolId?: number; organizationId: number | null } {
+  const schoolId = scopedSchoolId(user);
+  return schoolId === undefined
+    ? { organizationId: user.organization_id }
+    : { schoolId, organizationId: user.organization_id };
+}
+
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/documents — the Documents list page.
-// Staff scoped to their school; admin scoped to their org. Returns the enriched
-// ListDocumentRow[] (student/school/course/phase fields + document_id + status).
+// Staff and admin see their whole organization; a School Contact sees only
+// their school. Returns the enriched ListDocumentRow[] (student/school/course/
+// phase fields + document_id + status).
 // -----------------------------------------------------------------------------
 documentsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
-    const rows = await listDocuments(
-      req.user!.role !== "admin"
-        ? { schoolId: req.user!.school_id }
-        : { organizationId: req.user!.organization_id }
-    );
+    const rows = await listDocuments(documentScope(req.user!));
     res.json(rows);
   } catch (err) {
     next(err);
@@ -45,7 +57,7 @@ documentsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admi
 // STAFF: POST /api/documents/:id/retry — re-attempt a Failed (or Pending) doc.
 // Sets the row back to Pending and runs the Google generator in the background
 // (fire-and-forget, the retry responds immediately). Ownership scoped like the
-// list: staff → their school, admin → their org.
+// list: admin and staff → their organization, School Contact → their school.
 // -----------------------------------------------------------------------------
 documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "cdm_contact", "admin"), documentsEnabled, async (req, res, next) => {
   try {
@@ -55,12 +67,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "cdm_conta
       return;
     }
 
-    const doc = await getDocumentById(
-      dbId,
-      req.user!.role !== "admin"
-        ? { schoolId: req.user!.school_id }
-        : { organizationId: req.user!.organization_id }
-    );
+    const doc = await getDocumentById(dbId, documentScope(req.user!));
     if (!doc) {
       res.status(404).json({ error: "Document not found" });
       return;
@@ -76,12 +83,7 @@ documentsRouter.post("/:id/retry", requireAuth, requireRoles("staff", "cdm_conta
     void generateDocument(doc.submission_id, req.user!.id).catch(() => undefined);
 
     // Return the row as it stands (now Pending once the generator resets it).
-    const refreshed = await getDocumentById(
-      dbId,
-      req.user!.role !== "admin"
-        ? { schoolId: req.user!.school_id }
-        : { organizationId: req.user!.organization_id }
-    );
+    const refreshed = await getDocumentById(dbId, documentScope(req.user!));
     res.json(refreshed ?? doc);
   } catch (err) {
     next(err);
@@ -106,12 +108,7 @@ documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "cdm_
       return;
     }
 
-    const doc = await getDocumentById(
-      dbId,
-      req.user!.role !== "admin"
-        ? { schoolId: req.user!.school_id }
-        : { organizationId: req.user!.organization_id }
-    );
+    const doc = await getDocumentById(dbId, documentScope(req.user!));
     if (!doc) {
       res.status(404).json({ error: "Document not found" });
       return;
@@ -131,8 +128,9 @@ documentsRouter.post("/:id/regenerate", requireAuth, requireRoles("staff", "cdm_
 
 // -----------------------------------------------------------------------------
 // STAFF: GET /api/documents/:id/pdf — stream the Google Doc as a PDF for the
-// inline preview ("View PDF"). Access is scoped exactly like the list: staff
-// → their school, admin → their org, via getDocumentById. The Google Doc is
+// inline preview ("View PDF"). Access is scoped exactly like the list: admin
+// and staff → their organization, School Contact → their school, via
+// getDocumentById. The Google Doc is
 // owned by the app's OAuth account, so the only way a staff member with a
 // normal account can see it is through this endpoint (no Google login or
 // shared-drive membership required). The PDF is a snapshot of the doc at the
@@ -179,12 +177,7 @@ documentsRouter.get("/:id/pdf", requireAuthForPdf, requireRoles("staff", "cdm_co
       return;
     }
 
-    const doc = await getDocumentById(
-      dbId,
-      req.user!.role !== "admin"
-        ? { schoolId: req.user!.school_id }
-        : { organizationId: req.user!.organization_id }
-    );
+    const doc = await getDocumentById(dbId, documentScope(req.user!));
     if (!doc) {
       res.status(404).json({ error: "Document not found" });
       return;

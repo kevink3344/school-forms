@@ -1,5 +1,5 @@
 import { Router } from "express";
-import { requireAuth, requireRoles, type JwtUser } from "../auth.js";
+import { requireAuth, requireRoles, scopedSchoolId, isSchoolScoped, type JwtUser } from "../auth.js";
 import {
   createReportView,
   deleteReportView,
@@ -53,7 +53,6 @@ interface ResolvedReport {
   formId: number;
   columns: ExportColumnWithFieldId[];
   rows: Record<string, unknown>[];
-  isStaff: boolean;
   schoolId?: number;
 }
 
@@ -76,12 +75,11 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
   const q: ReportQueryInput = parsed.data;
 
   const isStaff = user.role !== "admin";
-  // Admin may filter by school; staff and School Contacts are locked to their own.
-  const schoolId = isStaff
-    ? user.school_id ?? undefined
-    : q.school_id
-      ? Number(q.school_id)
-      : undefined;
+  // A school-scoped role is locked to its own school; admin and staff may
+  // narrow the report with an optional school_id filter.
+  const schoolId =
+    scopedSchoolId(user) ??
+    (q.school_id ? Number(q.school_id) : undefined);
   // Staff-only columns can only ever be exposed to admins, and only on request.
   const includeStaffOnly = !isStaff && q.include_staff_only === "1";
 
@@ -120,14 +118,14 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
 
   return {
     ok: true,
-    report: { formTitle: form.title, formId: q.form_id, columns, rows, isStaff, schoolId },
+    report: { formTitle: form.title, formId: q.form_id, columns, rows, schoolId },
   };
 }
 
 // Human-readable caption printed at the top of PDF/XLSX exports.
 function buildSubtitle(query: ReportQueryInput, report: ResolvedReport): string {
   const parts: string[] = [];
-  parts.push(report.isStaff ? "My school" : report.schoolId ? `School #${report.schoolId}` : "All schools");
+  parts.push(report.schoolId ? `School #${report.schoolId}` : "All schools");
   parts.push(query.status ? `Status: ${query.status}` : "All statuses");
   if (query.from || query.to) {
     parts.push(`Dates: ${query.from || "…"} – ${query.to || "…"}`);
@@ -172,7 +170,7 @@ reportsRouter.get("/preview", requireAuth, requireRoles(...REPORT_ROLES), async 
     res.json({
       form_id: report.formId,
       form_title: report.formTitle,
-      school_scoped: report.isStaff,
+      school_scoped: isSchoolScoped(req.user!.role),
       columns: report.columns.map((c) => ({
         key: c.key,
         label: c.label,

@@ -327,7 +327,9 @@ Add a `requireOrgSlug` resolver that loads an org by slug and attaches it, plus 
 
 ### 7.5 `schemas.ts`
 
-- `registerSchema`: add required `organization_id` (defaults to Academics if omitted).
+- `registerSchema`: **no org field.** Registration is organization-scoped by the
+  `DEFAULT_ORG_REGISTRATION` env var (default `academics`), resolved server-side
+  in `POST /api/auth/register` — the client cannot pick the tenant.
 - `createFormSchema` / `updateFormSchema`: `organization_id` validated against the caller's org.
 - User create/update schemas: add `organization_id: number` (single, required).
 - Add `organization_id` to relevant response DTOs.

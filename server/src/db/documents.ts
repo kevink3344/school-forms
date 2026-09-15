@@ -121,8 +121,9 @@ export async function markDocumentPending(dbId: number): Promise<void> {
  * comes from the schools table join (user decision: use the school name, not
  * the parent-typed "School" answer).
  *
- * Scoping: staff sees only rows for their school, admin sees only rows in their
- * organization (via the submission → form → school → organization chain).
+ * Scoping: every caller is bounded by their organization; a school-scoped role
+ * (School Contact) is narrowed further to their own school. Admin and staff see
+ * the whole organization. See `documentScope()` in routes/documents.ts.
  */
 export async function listDocuments(params: {
   schoolId?: number | null;
@@ -173,10 +174,16 @@ export async function getDocumentById(
 ): Promise<(ListDocumentRow & { form_id: number }) | null> {
   const clauses: string[] = ["d.id = @dbId"];
   const p: Record<string, unknown> = { dbId };
+  // Both filters are ANDed, matching listDocuments. A school implies its
+  // organization, so the org clause is redundant for a school-scoped caller —
+  // but ANDing means a caller that passes both can never have one silently
+  // ignored, which is exactly the kind of divergence that lets a row appear in a
+  // list yet 404 on open.
   if (params.schoolId !== undefined && params.schoolId !== null) {
     clauses.push("s.school_id = @schoolId");
     p.schoolId = params.schoolId;
-  } else if (params.organizationId !== undefined && params.organizationId !== null) {
+  }
+  if (params.organizationId !== undefined && params.organizationId !== null) {
     clauses.push("s.organization_id = @organizationId");
     p.organizationId = params.organizationId;
   }

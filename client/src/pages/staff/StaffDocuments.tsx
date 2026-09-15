@@ -22,7 +22,8 @@ function docStatusBadge(status: string): { cls: string; label: string } {
 
 export default function StaffDocuments() {
   const { user } = useAuth();
-  const isAdmin = user?.role === "admin";
+  // Only a School Contact is tied to one school; staff see the whole org.
+  const schoolScoped = user?.role === "cdm_contact";
   const [rows, setRows] = useState<DocumentRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState<DocumentRow | null>(null);
@@ -81,9 +82,9 @@ export default function StaffDocuments() {
       <PageHead
         title="Generated Documents"
         subtitle={
-          isAdmin
-            ? "Google Docs generated from your organization's submissions."
-            : "Google Docs generated from your school's submissions."
+          schoolScoped
+            ? "Google Docs generated from your school's submissions."
+            : "Google Docs generated from your organization's submissions."
         }
         actions={
           <button className="primary-button" onClick={load}>

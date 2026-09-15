@@ -20,7 +20,6 @@ interface AuthContextValue {
     password: string;
     display_name: string;
     school_id: number;
-    slug?: string;
   }) => Promise<User>;
   logout: () => Promise<void>;
   setUser: (u: User) => void;
@@ -73,7 +72,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const registerStaff = useCallback(
-    async (input: { email: string; password: string; display_name: string; school_id: number; slug?: string }) => {
+    async (input: { email: string; password: string; display_name: string; school_id: number }) => {
       const res = await api.registerStaff(input);
       setToken(res.access_token);
       setUser(res.user);

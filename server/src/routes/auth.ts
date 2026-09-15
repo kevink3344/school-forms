@@ -99,7 +99,7 @@ authRouter.post("/register", async (req, res, next) => {
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
-    const { email, password, display_name, school_id, role, slug } = parsed.data;
+    const { email, password, display_name, school_id } = parsed.data;
 
     const existing = await getUserByEmail(email);
     if (existing) {
@@ -107,24 +107,21 @@ authRouter.post("/register", async (req, res, next) => {
       return;
     }
 
-    // Self-registration lands in the org identified by `slug` (default Academics).
-    const defaultOrg = await getDefaultOrganization();
-    let targetOrg = defaultOrg;
-    if (slug) {
-      const orgFromSlug = await getOrganizationBySlug(slug);
-      if (!orgFromSlug) {
-        res.status(400).json({ error: "Organization not found" });
-        return;
-      }
-      targetOrg = orgFromSlug;
-    }
+    // Registration is organization-scoped by deployment configuration, not by
+    // the caller: the org is whatever DEFAULT_ORG_REGISTRATION names (falling
+    // back to `academics`). No org slug is accepted from the request body, so a
+    // client cannot choose the tenant it registers into.
+    const targetOrg = await getDefaultOrganization();
     // Never register a new account into a deactivated organization.
     if (!targetOrg.active) {
       res.status(403).json({ error: "Organization is deactivated. Contact an administrator." });
       return;
     }
+    // Role is fixed, never taken from the body: this endpoint is public, so
+    // honouring a caller-supplied role would let anyone self-register as an
+    // admin. Administrators are created through POST /api/auth/seed-admin.
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await createUser(email, passwordHash, role as Role, school_id, display_name, true, targetOrg.id);
+    const user = await createUser(email, passwordHash, "staff", school_id, display_name, true, targetOrg.id);
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user.id);

@@ -69,6 +69,17 @@ export const env = {
   apiBaseUrl: process.env.API_BASE_URL ?? "http://localhost:4000",
   clientUrl: process.env.CLIENT_URL ?? "http://localhost:5173",
 
+  // The organization a NEW self-registration is saved into, identified by its
+  // slug. A blank or absent value falls back to `academics`, so an unconfigured
+  // deployment keeps the behaviour it had before this was configurable.
+  //
+  // This is deliberately server-side only. The registration endpoint no longer
+  // accepts an org slug from the client, so a caller cannot pick the tenant they
+  // land in — the deployment decides. A slug that does not resolve to an
+  // existing organization surfaces as an error at registration time (see
+  // `getDefaultOrganization`), not as a silent fallback to the wrong tenant.
+  defaultOrgRegistration: (process.env.DEFAULT_ORG_REGISTRATION ?? "").trim().toLowerCase() || "academics",
+
   db: {
     server: requiredForSqlServer("DB_SERVER", "localhost"),
     port: int("DB_PORT", 1433),
