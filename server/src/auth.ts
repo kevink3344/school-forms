@@ -100,7 +100,26 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
     // the organization from the user's row — so a token minted before the
     // multi-tenancy change (or one whose claim was dropped) recovers on the next
     // request instead of failing with a misleading message.
-    if (!Number.isInteger(payload.organization_id)) {
+    //
+    // This detects the ABSENCE of a tenant; it must not assert its TYPE.
+    // `Number.isInteger` was wrong here and took the whole deployment down: the
+    // SQL Server driver returns these id columns as STRINGS, so this deployment
+    // issues `organization_id: "1"` and `Number.isInteger("1")` is false — every
+    // authenticated request answered 401. It passed verification because the
+    // check ran under DB_MODE=turso, where libSQL returns real numbers, so the
+    // two dialects disagree about the type of the same column. Any type-strict
+    // numeric check on a value that came out of the database carries this hazard.
+    //
+    // The claim is kept VERBATIM rather than coerced to a number. Every
+    // downstream use compares it against a value read back from the same
+    // database (`target.organization_id !== req.user!.organization_id` in
+    // routes/users.ts, plus ~33 scoping sites), and those agree only while both
+    // sides keep the type the driver produced. Coercing this side alone would
+    // make `"1" !== 1` true and reinstate the very 403 this guard was added
+    // alongside — so preserving the type IS the fix, not an oversight.
+    const orgClaim = payload.organization_id;
+    const orgId = orgClaim === null || orgClaim === undefined ? NaN : Number(orgClaim);
+    if (!Number.isFinite(orgId) || orgId <= 0) {
       res.status(401).json({ error: "Session is missing an organization. Sign in again." });
       return;
     }
@@ -109,7 +128,7 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
       email: payload.email,
       role: payload.role,
       school_id: payload.school_id,
-      organization_id: payload.organization_id,
+      organization_id: orgClaim,
     };
     next();
   } catch {
