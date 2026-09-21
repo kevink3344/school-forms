@@ -124,9 +124,25 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       return;
     }
 
-    // Guard: an admin cannot move a user OUT of their own org.
-    if (data.organization_id !== undefined && data.organization_id !== null &&
-        data.organization_id !== req.user!.organization_id) {
+    // Guard: same tenant only — checked against the TARGET user's own row, not
+    // against the `organization_id` in the request body.
+    //
+    // The body's value cannot move anyone: `updateUser` below always writes
+    // `req.user!.organization_id`, whatever was submitted, so org assignment on
+    // this route is inert by design (docs/plans/workspaces.md §6.4). Comparing
+    // the submitted value therefore rejected writes this handler was about to
+    // perform correctly — an admin whose Add/Edit User form happened to hold an
+    // organization other than their own was told "You can only assign users
+    // within your own organization" while activating a user in their OWN
+    // organization, because the Users grid renders no organization column and
+    // so never showed them the disagreement. `/:id/reset-password` below already
+    // guards the target row; this is the same check, on the same operand.
+    const target = await getUserById(id);
+    if (!target) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+    if (target.organization_id !== req.user!.organization_id) {
       res.status(403).json({ error: "You can only assign users within your own organization" });
       return;
     }
@@ -140,7 +156,9 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       }
     }
 
-    // Allow org assignment by passing it through (constrained to own org above).
+    // The tenant is pinned explicitly rather than trusted from the body, so the
+    // target cannot leave the caller's organization even if `data` carries a
+    // different one (`target.organization_id` is the caller's org at this point).
     const user = await updateUser(id, { ...data, organization_id: req.user!.organization_id });
     if (!user) {
       res.status(404).json({ error: "User not found" });

@@ -283,8 +283,12 @@ export default function AdminSettings() {
       email: u.email,
       password: "",
       role: u.role,
-      school_id: u.school_id === null ? "" : String(u.school_id),
-      organization_id: u.organization_id === null ? "" : String(u.organization_id),
+      // `== null` rather than `=== null`: a key that is merely ABSENT would become
+      // the string "undefined", which is truthy, so `Number("undefined")` reaches
+      // the API as NaN and comes back as a flat "Validation failed" naming no
+      // field. Catching both nullish shapes keeps that from being reachable.
+      school_id: u.school_id == null ? "" : String(u.school_id),
+      organization_id: u.organization_id == null ? "" : String(u.organization_id),
       active: u.active,
       show_on_test_screen: u.show_on_test_screen,
     });
@@ -294,6 +298,17 @@ export default function AdminSettings() {
     setModalOpen(true);
     setSaveError("");
   };
+
+  // The signed-in admin's own tenant, which is the ONLY tenant this form can act
+  // on: `GET /api/users` returns only users inside it and `PUT /api/users/:id`
+  // pins `organization_id` to the caller's own org regardless of what is sent.
+  // Derived from the auth context (not from the user being edited) because that is
+  // the value the server will actually write.
+  const ownOrgId = user?.organization_id != null ? String(user.organization_id) : "";
+  const ownOrgName =
+    orgs.find((o) => o.id === user?.organization_id)?.name ??
+    user?.organization_slug ??
+    "Your organization";
 
   const closeModal = () => {
     if (saving || resetBusy) return;
@@ -1237,21 +1252,34 @@ export default function AdminSettings() {
                   <option value="admin">Admin</option>
                 </select>
               </Field>
+              {/* The tenant is SHOWN, not chosen.
+
+                  This control used to list every organization while its own
+                  placeholder and label implied "your organization", and
+                  `handleSave` submits the field on every save — including a save
+                  whose only intent was toggling Active. But the server discards
+                  it: `PUT /api/users/:id` always writes the caller's org, and
+                  `GET /api/users` only ever returns users inside it. So the
+                  dropdown offered a choice that could not take effect, and the
+                  one thing it COULD do was disagree with the caller's org — which
+                  is what produced "You can only assign users within your own
+                  organization" while activating a user in the admin's OWN
+                  organization. (The Users grid renders no organization column, so
+                  the disagreement was never visible anywhere in the UI.)
+
+                  The boundary itself is the server's to enforce; this just stops
+                  the form promising a capability it does not have. */}
               <Field label="Organization">
                 <select
                   className="edit-select"
-                  value={form.organization_id}
-                  onChange={(e) => setForm((f) => ({ ...f, organization_id: e.target.value }))}
+                  value={ownOrgId}
+                  onChange={() => undefined}
+                  disabled
+                  title="You can only manage users in your own organization."
                 >
-                  <option value="">
-                    {user?.organization_slug ? `— ${user.organization_slug} —` : "— Default (Academics) —"}
-                  </option>
-                  {orgs.map((o) => (
-                    <option key={o.id} value={o.id}>
-                      {o.name}
-                    </option>
-                  ))}
+                  <option value={ownOrgId}>{ownOrgName}</option>
                 </select>
+                <span className="field-note">Fixed — users stay in your organization.</span>
               </Field>
               <Field label="School" full>
                 <select

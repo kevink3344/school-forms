@@ -832,6 +832,31 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .edit-input:focus, .edit-select:focus, .edit-textarea:focus { border-color: var(--accent); }
 .edit-select { appearance: auto; }
 
+/* The Add/Edit User drawer's Organization field is a fixed read-only display (see
+   AdminSettings.tsx): an admin can only manage users inside their own tenant, so
+   the value is shown rather than offered. A disabled control is normally painted
+   in the browser's greyed GreyText colour, which reads as "unavailable" when the
+   meaning is "not yours to change" — keep the normal colours so the org name
+   stays legible. -webkit-text-fill-color is required on top of `color`, because
+   Blink/WebKit otherwise keep painting a disabled select's text grey. */
+.edit-select:disabled {
+  color: var(--text);
+  -webkit-text-fill-color: var(--text);
+  background: var(--input-bg);
+  opacity: 1;
+  cursor: default;
+}
+
+/* A one-line explanation under a form control. Resets the uppercase/letterspaced
+   treatment that .form-grid label.cf applies to its children, so the note reads as
+   a sentence rather than as a second field label. */
+.form-grid label.cf .field-note {
+  text-transform: none;
+  letter-spacing: normal;
+  font-weight: 400;
+  font-size: 11px;
+}
+
 /* The status pill in the submission-detail header — the one .edit-select that is a
    filled accent control rather than a plain field box.
    It draws its own chevron instead of the native one, because Chrome pins the

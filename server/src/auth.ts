@@ -85,6 +85,25 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   const token = header.slice("Bearer ".length);
   try {
     const payload = verifyAccessToken(token);
+    // A token carrying no tenant cannot be authorized, so it must not be allowed
+    // to pass silently. Every scoped read and every guard in the app takes its
+    // organization from this claim (34 sites), and a missing one is not neutral:
+    // `listUsers(undefined)` drops its WHERE clause and lists EVERY
+    // organization's users, while each `!== req.user!.organization_id`
+    // comparison then fails against `undefined` — so a same-org edit answers 403
+    // with a message about organizations that says nothing about the session
+    // (e.g. "You can only assign users within your own organization", for a user
+    // who is in the caller's own organization).
+    //
+    // 401 rather than 403 because it is truthful and self-healing: the client
+    // refreshes once on a 401 and replays the request, and /refresh re-derives
+    // the organization from the user's row — so a token minted before the
+    // multi-tenancy change (or one whose claim was dropped) recovers on the next
+    // request instead of failing with a misleading message.
+    if (!Number.isInteger(payload.organization_id)) {
+      res.status(401).json({ error: "Session is missing an organization. Sign in again." });
+      return;
+    }
     req.user = {
       id: payload.sub,
       email: payload.email,
