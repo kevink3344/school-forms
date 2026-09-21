@@ -1,6 +1,6 @@
 import sql, { type ConnectionPool, type Transaction } from "mssql";
 import { env } from "../../config/env.js";
-import type { DbClient, DbParams } from "../client.js";
+import { normalizeRow, type DbClient, type DbParams } from "../client.js";
 
 // -----------------------------------------------------------------------------
 // Azure SQL Server driver.
@@ -18,11 +18,26 @@ import type { DbClient, DbParams } from "../client.js";
 //      connection storms during a slow wake. Sharing one in-flight promise means
 //      all callers await the SAME attempt.
 //
-// `normalizeParamValue` is deliberately NOT applied here. `mssql` binds a JS
-// `Date` as a real datetime2, which is exactly what the SQL Server path has
-// always done; converting to an ISO string would change the wire type. Only the
-// libSQL driver normalises, because there a bound `Date` becomes an epoch
-// number.
+//   3. Row normalisation through the shared `normalizeRow` — the mirror image of
+//      the libSQL driver's, and not optional. An earlier version of this comment
+//      said "only the libSQL driver normalises". That described how the driver
+//      was written, not what the API needs: every consumer is written against the
+//      normalised contract (`ExportSourceSubmission.submitted_at: Date`, the grid
+//      calling `toLocaleString`), so on a host whose timestamp column holds TEXT
+//      the raw string reached `Intl.DateTimeFormat.format` and turned the whole
+//      report into `500 {"error":"Invalid time value"}`. Measured on production.
+//
+// `normalizeParamValue` is deliberately NOT applied — that half is still
+// libSQL-only. `mssql` binds a JS `Date` as a real datetime2, which is exactly
+// what the SQL Server path has always done, and converting it to an ISO string
+// would change the bound type. The libSQL driver normalises parameters because
+// there a bound `Date` becomes an epoch number.
+//
+// `normalizeRow` is safe here even though SQL Server already returns real
+// `Date`s and real booleans: it only converts strings, so a row that is already
+// correct passes through by identity. The wire format is unchanged either way,
+// because `JSON.stringify` renders a `Date` as `toISOString()` — the very string
+// a text column held.
 // -----------------------------------------------------------------------------
 
 const config: sql.config = {
@@ -98,6 +113,15 @@ export async function getPool(): Promise<ConnectionPool> {
   return poolPromise;
 }
 
+// Both query paths funnel their recordset through the shared row normaliser, so
+// a host whose timestamp columns hold TEXT hands the app the same shapes a real
+// `DATETIME2` would. No `columnTypes` are passed: `BIT` columns already arrive
+// as real booleans on this driver, so the declared-type branch has nothing to do
+// and only the timestamp repair matters.
+function normalizeResult<T>(recordset: Record<string, unknown>[] | undefined): T[] {
+  return (recordset ?? []).map((row) => normalizeRow({ ...row }) as T);
+}
+
 function bindParams(request: sql.Request, params: DbParams): void {
   for (const [name, value] of Object.entries(params)) {
     request.input(name, value as never);
@@ -111,7 +135,7 @@ function transactionClient(transaction: Transaction): DbClient {
       const request = new sql.Request(transaction);
       bindParams(request, params);
       const result = await request.query(statement);
-      return (result.recordset ?? []) as T[];
+      return normalizeResult<T>(result.recordset);
     },
     async run(): Promise<void> {
       throw new Error("nested DB runs are not supported inside a transaction");
@@ -133,7 +157,7 @@ export const mssqlClient: DbClient = {
     const request = db.request();
     bindParams(request, params);
     const result = await request.query(statement);
-    return (result.recordset ?? []) as T[];
+    return normalizeResult<T>(result.recordset);
   },
 
   async run(statements: string[]): Promise<void> {

@@ -82,12 +82,52 @@ export const TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
 ]);
 
 /**
- * Exactly the fixed-width ISO-8601 UTC form the Turso DDL writes and the
- * migration script copies (`2026-09-15T02:33:35.273Z`). Anything else — a
- * user-entered value that merely looks date-ish, a legacy string — is left as a
- * string rather than turning into an `Invalid Date`.
+ * The fixed-width ISO-8601 form the Turso DDL writes and the migration script
+ * copies (`2026-09-15T02:33:35.273Z`), with the trailing `Z` **optional**.
+ *
+ * The `Z` used to be required. It no longer is: production holds rows whose
+ * `submitted_at` is that same string with the `Z` missing
+ * (`2026-09-21T15:39:12.080`), written by an earlier build whose SQLite default
+ * omitted it and preserved in the database since. Demanding the `Z` left those
+ * rows as strings, which is how `/api/reports/preview` reached
+ * `Intl.DateTimeFormat.format(string)` and threw `RangeError: Invalid time
+ * value` on a host whose other rows were fine.
+ *
+ * Everything else — second-precision, an explicit offset, a user-entered value
+ * that merely looks date-ish — is still left as a string rather than turning
+ * into an `Invalid Date`.
  */
-const ISO_UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/;
+const ISO_UTC_INSTANT = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}(Z)?$/;
+
+/**
+ * Parse a timestamp that may be a real `Date` (SQL Server `DATETIME2`), one of
+ * the ISO-8601 strings above (Turso, or any column created as text), or epoch
+ * milliseconds. Returns `null` for anything else, so a caller can decide what to
+ * do rather than being handed an `Invalid Date` that throws the moment it is
+ * used.
+ *
+ * An offset-less string is read as **UTC**. The app only ever writes UTC
+ * (`SYSUTCDATETIME()`, `strftime(…,'now')`, `Date#toISOString()`), so reading a
+ * bare value as local time would shift it by the server's own offset and make
+ * the rendered time depend on which machine happened to run the query.
+ */
+export function parseTimestamp(value: unknown): Date | null {
+  if (value instanceof Date) {
+    return Number.isNaN(value.getTime()) ? null : value;
+  }
+  // Epoch milliseconds, which is what a JSON payload or a numeric column
+  // carries. A non-finite or out-of-range number is `null`, not an Invalid Date.
+  if (typeof value === "number") {
+    if (!Number.isFinite(value)) return null;
+    const fromNumber = new Date(value);
+    return Number.isNaN(fromNumber.getTime()) ? null : fromNumber;
+  }
+  if (typeof value !== "string") return null;
+  const match = ISO_UTC_INSTANT.exec(value);
+  if (!match) return null;
+  const parsed = new Date(match[1] ? value : `${value}Z`);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
 
 // -----------------------------------------------------------------------------
 // Parameter normalisation, shared by both drivers.
@@ -118,10 +158,15 @@ export function normalizeRow(
     if (value === null || value === undefined) continue;
 
     // A SQL Server `DATETIME2` already arrives as a `Date`, so this is a no-op
-    // there and only fires on the libSQL TEXT form.
-    if (typeof value === "string" && TIMESTAMP_COLUMNS.has(key) && ISO_UTC_INSTANT.test(value)) {
-      row[key] = new Date(value);
-      continue;
+    // there and only fires on a text timestamp column. A string that is not the
+    // recognised shape falls through untouched rather than becoming an Invalid
+    // Date.
+    if (typeof value === "string" && TIMESTAMP_COLUMNS.has(key)) {
+      const parsed = parseTimestamp(value);
+      if (parsed) {
+        row[key] = parsed;
+        continue;
+      }
     }
 
     const declared = columnTypes?.[i];

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { toLibsql, TURSO_NOW } from "./libsql.js";
-import { TIMESTAMP_COLUMNS, normalizeRow } from "../client.js";
+import { TIMESTAMP_COLUMNS, normalizeRow, parseTimestamp } from "../client.js";
 import { tursoDialect } from "../dialect/turso.js";
 import { sqlserverDialect } from "../dialect/sqlserver.js";
 
@@ -544,5 +544,34 @@ describe("normalizeRow — both drivers must hand the app the same shapes", () =
       if (m[1].toLowerCase().endsWith("_at")) declared.add(m[1].toLowerCase());
     }
     expect([...declared].sort()).toEqual([...TIMESTAMP_COLUMNS].sort());
+  });
+
+  it("restores a Date from the Z-LESS ISO form an earlier build wrote", () => {
+    // Production serves rows stamped `2026-09-21T15:39:12.080` — the same
+    // fixed-width form with the trailing `Z` missing, written by a build whose
+    // SQLite default omitted it and preserved ever since. Requiring the `Z` left
+    // that row as a string, and one string row was enough to 500 the whole
+    // report. Neighbouring rows in the SAME response carried a `Z`, which is why
+    // the shape is mixed and why the fix is here rather than in a driver.
+    const row = normalizeRow({ submitted_at: "2026-09-21T15:39:12.080" });
+    expect(row.submitted_at).toBeInstanceOf(Date);
+    expect((row.submitted_at as Date).toISOString()).toBe("2026-09-21T15:39:12.080Z");
+  });
+
+  it("reads the Z-less form as UTC, not as server-local time", () => {
+    // If a bare value were read as local time, the rendered hour would depend on
+    // the machine that happened to run the query. Both spellings must land on
+    // the same instant.
+    const bare = normalizeRow({ submitted_at: "2026-09-21T15:39:12.080" }).submitted_at as Date;
+    const suffixed = normalizeRow({ submitted_at: "2026-09-21T15:39:12.080Z" }).submitted_at as Date;
+    expect(bare.getTime()).toBe(suffixed.getTime());
+  });
+
+  it("accepts epoch milliseconds and rejects values it cannot use", () => {
+    expect(parseTimestamp(1789439615279)).toBeInstanceOf(Date);
+    expect(parseTimestamp(Number.NaN)).toBeNull();
+    expect(parseTimestamp(new Date("not a date"))).toBeNull();
+    expect(parseTimestamp("nonsense")).toBeNull();
+    expect(parseTimestamp(null)).toBeNull();
   });
 });
