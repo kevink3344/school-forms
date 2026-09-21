@@ -174,13 +174,21 @@ export const updateFormSchema = z.object({
 // -----------------------------------------------------------------------------
 const answerValue = z.union([z.string(), z.number(), z.boolean(), z.array(z.string())]).nullable();
 
+// `field_id` / `form_id` here are TRANSMITTED ids, not server-minted ones. JSON
+// has no integer type, and callers legitimately hold these ids as text: the
+// Google Apps Script reads `field.id` back from `GET /forms/:id/public` and
+// posts it verbatim, and anything that round-trips an id through a spreadsheet
+// cell or `String()` hands it back as a string. `z.number()` rejected those with
+// "Expected number, received string" — an API refusing the very ids it serves.
+// `z.coerce` is the correct contract for a transmitted id, and it matches how
+// exportQuerySchema / reportQuerySchema already read their ids below.
 export const submissionAnswerSchema = z.object({
-  field_id: z.number().int().positive(),
+  field_id: z.coerce.number().int().positive(),
   value: answerValue,
 });
 
 export const createSubmissionSchema = z.object({
-  form_id: z.number().int().positive(),
+  form_id: z.coerce.number().int().positive(),
   answers: z.array(submissionAnswerSchema).min(1),
 });
 
