@@ -6,6 +6,7 @@ import { toLibsql, TURSO_NOW } from "./libsql.js";
 import { TIMESTAMP_COLUMNS, normalizeRow, parseTimestamp } from "../client.js";
 import { tursoDialect } from "../dialect/turso.js";
 import { sqlserverDialect } from "../dialect/sqlserver.js";
+import { expectedIndexNames } from "../schema.js";
 
 // -----------------------------------------------------------------------------
 // toLibsql() is the only place SQL Server-flavoured shared SQL is allowed to be
@@ -420,6 +421,19 @@ describe("dialect schema parity", () => {
 
   it("both dialects create the same tables", () => {
     expect(tablesFrom(tursoDialect.ddl)).toEqual(tablesFrom(sqlserverDialect.ddl));
+  });
+
+  // `expectedIndexNames` is what the boot-time report uses to name the indexes the
+  // SQL Server ladder had to skip, so it has to read the real statements. A regex
+  // that matched nothing would make the report print nothing — indistinguishable
+  // from "nothing is missing" — hence the length floor before the comparison.
+  it("both dialects declare the same indexes", () => {
+    const sqlserver = expectedIndexNames(sqlserverDialect.ddl);
+    const turso = expectedIndexNames(tursoDialect.ddl);
+
+    expect(sqlserver.length).toBeGreaterThanOrEqual(25);
+    expect(turso.length).toBeGreaterThanOrEqual(25);
+    expect(sqlserver).toEqual(turso);
   });
 
   it("sqlserver dialect is wired to the live DDL ladder", () => {

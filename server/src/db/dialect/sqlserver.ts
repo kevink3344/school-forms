@@ -5,11 +5,13 @@ import type { Dialect } from "./types.js";
 // -----------------------------------------------------------------------------
 // SQL Server dialect.
 //
-// The 39-statement migration ladder lives in `schema.ts` (exported as
+// The migration ladder lives in `schema.ts` (exported as
 // `SQLSERVER_DDL_STATEMENTS`) and is consumed here rather than transcribed — it
 // IS the SQL Server schema, and an accidental edit during a copy would be fatal
 // on the live database. The Turso dialect (./turso.ts) does NOT port it: a fresh
 // libSQL database gets the final shape directly (docs/plans/dual-db.md §5.3).
+// (No statement count is quoted here on purpose: it changed on every migration
+// and a stale figure reads as a fact.)
 //
 // Every builder below emits SQL that is semantically identical to the literals
 // that were inline in `queries.ts` before the dialect split, so the SQL Server

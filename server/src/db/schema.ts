@@ -362,6 +362,97 @@ export interface WebhookEventDetail extends ListWebhookEventRow {
 // purpose: SQL Server compiles each batch before executing it, so a statement
 // referencing a column ADDed in the same batch fails with error 207.
 // -----------------------------------------------------------------------------
+// -----------------------------------------------------------------------------
+// Guard helpers for the migration ladder.
+//
+// These exist because the ladder is ALSO run against a database this app did not
+// create. On such a database the string columns are `nvarchar(max)` — which SQL
+// Server refuses as an index key — and the foreign keys carry different names
+// (a `_id` suffix). A guard keyed only on an object's NAME therefore "misses" an
+// object that is already there and tries to create it again, with two different
+// outcomes:
+//
+//   * a `CREATE INDEX` on an `nvarchar(max)` column FAILS, and because the driver
+//     runs the ladder batch by batch and stops at the first failure, that single
+//     statement aborts every batch after it and `dbReady` is never set — the app
+//     cannot start at all;
+//   * a `CREATE ... FOREIGN KEY` guarded by name SUCCEEDS, adding a duplicate
+//     constraint to a live production database.
+//
+// So the guards below test the preconditions that actually matter instead. None
+// of them changes behaviour on a database this app created itself: there the
+// types are already indexable, the FK is already absent and the column is a
+// nullable INT, so each guard evaluates exactly as the name-only guard did.
+// -----------------------------------------------------------------------------
+
+// `max_length` on sys.columns is in BYTES: -1 means `(MAX)`, which can never be a
+// key, and more than 1700 exceeds the nonclustered key-size limit. `text`,
+// `ntext`, `image` and `xml` are not indexable at any length.
+function isIndexable(table: string, column: string): string {
+  return (
+    `EXISTS (SELECT 1 FROM sys.columns c\n` +
+    `               JOIN sys.types t ON t.user_type_id = c.user_type_id\n` +
+    `              WHERE c.object_id = OBJECT_ID('dbo.${table}')\n` +
+    `                AND c.name = '${column}'\n` +
+    `                AND t.name NOT IN ('text','ntext','image','xml')\n` +
+    `                AND c.max_length BETWEEN 1 AND 1700)`
+  );
+}
+
+// `IF NOT EXISTS(<index name>) AND <every key column is indexable as it stands>`.
+function indexGuard(name: string, table: string, keyColumns: string[]): string {
+  return (
+    `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='${name}')` +
+    keyColumns.map((column) => `\n   AND ${isIndexable(table, column)}`).join("")
+  );
+}
+
+// True only when the column is a NULLABLE `int` — i.e. when the `ALTER COLUMN …
+// INT NOT NULL` that follows is both needed and safe. That is exactly the state
+// the ladder leaves the column in on the app's own database; on a copied one the
+// column is `bigint` (and already NOT NULL), and narrowing it fails with error
+// 5074 as soon as an index or foreign key references it.
+function isNullableInt(table: string, column: string): string {
+  return (
+    `EXISTS (SELECT 1 FROM sys.columns c\n` +
+    `               JOIN sys.types t ON t.user_type_id = c.user_type_id\n` +
+    `              WHERE c.object_id = OBJECT_ID('dbo.${table}')\n` +
+    `                AND c.name = '${column}'\n` +
+    `                AND t.name = 'int' AND c.is_nullable = 1)`
+  );
+}
+
+// `IF NOT EXISTS(<an FK on THIS relationship>)` — keyed on the parent table, the
+// parent column and the referenced table, never on the constraint's name.
+function fkGuard(table: string, column: string, referenced: string): string {
+  return (
+    `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys fk\n` +
+    `                JOIN sys.foreign_key_columns fkc\n` +
+    `                  ON fkc.constraint_object_id = fk.object_id\n` +
+    `               WHERE fk.parent_object_id = OBJECT_ID('dbo.${table}')\n` +
+    `                 AND COL_NAME(fk.parent_object_id, fkc.parent_column_id) = '${column}'\n` +
+    `                 AND fk.referenced_object_id = OBJECT_ID('dbo.${referenced}'))`
+  );
+}
+
+/**
+ * Every index name a ladder declares, parsed out of its statements.
+ *
+ * Used to report the declarations the guards above had to skip. Deriving the list
+ * from the DDL keeps it correct by construction — a hand-copied list of the same
+ * names drifts the moment an index is added, and nothing reminds the author the
+ * copy exists. The optional `IF NOT EXISTS` is there because the Turso ladder
+ * spells the same declaration that way, so one parser reads both.
+ */
+export function expectedIndexNames(statements: string[]): string[] {
+  const names = new Set<string>();
+  const declared = /CREATE\s+(?:UNIQUE\s+)?INDEX\s+(?:IF\s+NOT\s+EXISTS\s+)?([A-Za-z_][A-Za-z0-9_]*)/gi;
+  for (const statement of statements) {
+    for (const match of statement.matchAll(declared)) names.add(match[1]);
+  }
+  return [...names].sort();
+}
+
 export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `IF OBJECT_ID('dbo.schools', 'U') IS NULL
    CREATE TABLE dbo.schools (
@@ -370,7 +461,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      district    NVARCHAR(200) NULL,
      created_at  DATETIME2 NOT NULL CONSTRAINT DF_schools_created_at DEFAULT SYSUTCDATETIME()
    );
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_name')
+   ${indexGuard("UX_schools_name", "schools", ["name"])}
      CREATE UNIQUE INDEX UX_schools_name ON dbo.schools(name);`,
 
   // Idempotent migration for the school import feature — adds columns to the
@@ -401,9 +492,9 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      active      BIT NOT NULL CONSTRAINT DF_organizations_active DEFAULT 1,
      created_at  DATETIME2 NOT NULL CONSTRAINT DF_organizations_created_at DEFAULT SYSUTCDATETIME()
    );
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_slug')
+   ${indexGuard("UX_organizations_slug", "organizations", ["slug"])}
      CREATE UNIQUE INDEX UX_organizations_slug ON dbo.organizations(slug);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_organizations_name')
+   ${indexGuard("UX_organizations_name", "organizations", ["name"])}
      CREATE UNIQUE INDEX UX_organizations_name ON dbo.organizations(name);
    IF COL_LENGTH('dbo.organizations', 'active') IS NULL
      ALTER TABLE dbo.organizations ADD active BIT NOT NULL
@@ -434,7 +525,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      created_at    DATETIME2 NOT NULL CONSTRAINT DF_users_created_at DEFAULT SYSUTCDATETIME(),
      CONSTRAINT FK_users_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE SET NULL
    );
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_users_email')
+   ${indexGuard("UX_users_email", "users", ["email"])}
      CREATE UNIQUE INDEX UX_users_email ON dbo.users(email);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_users_school')
      CREATE INDEX IX_users_school ON dbo.users(school_id);`,
@@ -502,9 +593,10 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      FROM dbo.users u CROSS JOIN dbo.organizations o
      WHERE o.slug = N'academics' AND u.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.users WHERE organization_id IS NULL)
+     AND ${isNullableInt("users", "organization_id")}
      ALTER TABLE dbo.users ALTER COLUMN organization_id INT NOT NULL;`,
 
-  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_users_organization')
+  `${fkGuard("users", "organization_id", "organizations")}
      ALTER TABLE dbo.users ADD CONSTRAINT FK_users_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_users_organization')
@@ -527,7 +619,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_school')
      CREATE INDEX IX_forms_school ON dbo.forms(school_id);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_status')
+   ${indexGuard("IX_forms_status", "forms", ["status"])}
      CREATE INDEX IX_forms_status ON dbo.forms(status);`,
 
   // ---------------------------------------------------------------------
@@ -543,9 +635,10 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      FROM dbo.forms f CROSS JOIN dbo.organizations o
      WHERE o.slug = N'academics' AND f.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.forms WHERE organization_id IS NULL)
+     AND ${isNullableInt("forms", "organization_id")}
      ALTER TABLE dbo.forms ALTER COLUMN organization_id INT NOT NULL;`,
 
-  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_forms_organization')
+  `${fkGuard("forms", "organization_id", "organizations")}
      ALTER TABLE dbo.forms ADD CONSTRAINT FK_forms_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_forms_organization')
@@ -578,7 +671,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `IF COL_LENGTH('dbo.forms', 'code') IS NULL
      ALTER TABLE dbo.forms ADD code NVARCHAR(20) NULL;`,
 
-  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_forms_code')
+  `${indexGuard("UX_forms_code", "forms", ["code"])}
      CREATE UNIQUE INDEX UX_forms_code ON dbo.forms(code) WHERE code IS NOT NULL;`,
 
   // Per-form monotonic counter used to allocate incremental submission ids.
@@ -621,14 +714,21 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // One-time backfill for rows created before the column existed. Derives each
   // row's year from ITS OWN submitted_at (not the current date), so a June 2026
   // submission correctly gets '2025-2026'. Idempotent: only fills NULL/empty.
+  // `TRY_CONVERT` rather than a bare `MONTH(...)`: on a database whose
+  // `submitted_at` is TEXT (the app's own is DATETIME2, where TRY_CONVERT is the
+  // identity) the implicit conversion is what is being relied on, and a single
+  // unparseable value would throw and abort the rest of the ladder. Rows that do
+  // not convert are left as they are instead — visibly NULL — rather than taking
+  // the schema down with them.
   `UPDATE dbo.submissions
      SET school_year =
        CASE
-         WHEN MONTH(submitted_at) >= 8
-           THEN CAST(YEAR(submitted_at) AS nvarchar(4)) + '-' + CAST(YEAR(submitted_at) + 1 AS nvarchar(4))
-         ELSE CAST(YEAR(submitted_at) - 1 AS nvarchar(4)) + '-' + CAST(YEAR(submitted_at) AS nvarchar(4))
+         WHEN MONTH(TRY_CONVERT(datetime2, submitted_at)) >= 8
+           THEN CAST(YEAR(TRY_CONVERT(datetime2, submitted_at)) AS nvarchar(4)) + '-' + CAST(YEAR(TRY_CONVERT(datetime2, submitted_at)) + 1 AS nvarchar(4))
+         ELSE CAST(YEAR(TRY_CONVERT(datetime2, submitted_at)) - 1 AS nvarchar(4)) + '-' + CAST(YEAR(TRY_CONVERT(datetime2, submitted_at)) AS nvarchar(4))
        END
-   WHERE school_year IS NULL OR school_year = '';`,
+   WHERE (school_year IS NULL OR school_year = '')
+     AND TRY_CONVERT(datetime2, submitted_at) IS NOT NULL;`,
 
   `IF OBJECT_ID('dbo.form_fields', 'U') IS NULL
    CREATE TABLE dbo.form_fields (
@@ -674,11 +774,9 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      CONSTRAINT FK_submissions_form FOREIGN KEY (form_id) REFERENCES dbo.forms(id) ON DELETE CASCADE,
      CONSTRAINT FK_submissions_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE NO ACTION
    );
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_submissions_public_id')
+   ${indexGuard("UX_submissions_public_id", "submissions", ["public_id"])}
      CREATE UNIQUE INDEX UX_submissions_public_id ON dbo.submissions(public_id);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_school_form')
-     CREATE INDEX IX_submissions_school_form ON dbo.submissions(school_id, form_id);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_submitted_at')
+   ${indexGuard("IX_submissions_submitted_at", "submissions", ["submitted_at"])}
      CREATE INDEX IX_submissions_submitted_at ON dbo.submissions(submitted_at);`,
 
   // ---------------------------------------------------------------------
@@ -694,13 +792,12 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      FROM dbo.submissions s JOIN dbo.forms f ON f.id = s.form_id
      WHERE s.organization_id IS NULL;
    IF NOT EXISTS (SELECT 1 FROM dbo.submissions WHERE organization_id IS NULL AND form_id IS NOT NULL)
+     AND ${isNullableInt("submissions", "organization_id")}
      ALTER TABLE dbo.submissions ALTER COLUMN organization_id INT NOT NULL;`,
 
-  `IF NOT EXISTS (SELECT 1 FROM sys.foreign_keys WHERE name='FK_submissions_organization')
+  `${fkGuard("submissions", "organization_id", "organizations")}
      ALTER TABLE dbo.submissions ADD CONSTRAINT FK_submissions_organization
        FOREIGN KEY (organization_id) REFERENCES dbo.organizations(id) ON DELETE NO ACTION;
-   IF EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_school_form')
-     DROP INDEX IX_submissions_school_form ON dbo.submissions;
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_submissions_org_school_form')
      CREATE INDEX IX_submissions_org_school_form ON dbo.submissions(organization_id, school_id, form_id);`,
 
@@ -824,7 +921,8 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   `DECLARE @legacy_ck sysname;
    SELECT TOP 1 @legacy_ck = name FROM sys.check_constraints
     WHERE parent_object_id = OBJECT_ID('dbo.submissions')
-      AND name <> 'CK_submissions_status';
+      AND name <> 'CK_submissions_status'
+      AND definition LIKE '%status%';
    IF @legacy_ck IS NOT NULL
      EXEC('ALTER TABLE dbo.submissions DROP CONSTRAINT ' + @legacy_ck);
 
@@ -936,13 +1034,13 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // Indexes in their own batch — a CREATE INDEX must not share a batch with the
   // CREATE TABLE that defines its columns (error 207: SQL Server compiles a
   // batch before running it).
-  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_received')
+  `${indexGuard("IX_webhook_events_received", "webhook_events", ["received_at"])}
      CREATE INDEX IX_webhook_events_received ON dbo.webhook_events(received_at DESC);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_status')
+   ${indexGuard("IX_webhook_events_status", "webhook_events", ["status", "received_at"])}
      CREATE INDEX IX_webhook_events_status ON dbo.webhook_events(status, received_at DESC);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_form')
+   ${indexGuard("IX_webhook_events_form", "webhook_events", ["form_id", "received_at"])}
      CREATE INDEX IX_webhook_events_form ON dbo.webhook_events(form_id, received_at DESC);
-   IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_org')
+   ${indexGuard("IX_webhook_events_org", "webhook_events", ["organization_id", "received_at"])}
      CREATE INDEX IX_webhook_events_org ON dbo.webhook_events(organization_id, received_at DESC);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_replay_of')
      CREATE INDEX IX_webhook_events_replay_of ON dbo.webhook_events(replay_of);`,

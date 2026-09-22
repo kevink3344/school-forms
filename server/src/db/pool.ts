@@ -1,7 +1,7 @@
 import { getDialect } from "./dialect/index.js";
 import type { Dialect } from "./dialect/types.js";
 import { getClient, getDbKind } from "./driver/index.js";
-import { formatSubmissionPublicId } from "./schema.js";
+import { expectedIndexNames, formatSubmissionPublicId } from "./schema.js";
 
 // -----------------------------------------------------------------------------
 // Thin facade over the active driver.
@@ -17,8 +17,8 @@ import { formatSubmissionPublicId } from "./schema.js";
 //
 // Schema creation and the one-time submission-id backfill are written against
 // the DbClient interface, so they run unchanged on both dialects. The DDL comes
-// from the active dialect: SQL Server replays its 39-statement migration ladder,
-// Turso creates the final shape directly.
+// from the active dialect: SQL Server replays its migration ladder, Turso
+// creates the final shape directly.
 // -----------------------------------------------------------------------------
 
 let dbReady = false;
@@ -52,6 +52,52 @@ async function runDdl(): Promise<void> {
   await applyAddColumns(dialect);
 
   await backfillSubmissionIds();
+
+  // Report only — a missing index must never stop the app from starting.
+  try {
+    await reportSkippedIndexes(dialect);
+  } catch (err) {
+    // eslint-disable-next-line no-console
+    console.warn(`[db] Could not report skipped indexes: ${err instanceof Error ? err.message : err}`);
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Report the index declarations the ladder had to skip.
+//
+// Some of the index guards in `schema.ts` skip their `CREATE INDEX` outright —
+// that is what lets the app start against a database it did not create, where the
+// string columns are `nvarchar(max)` and such an index is impossible. Skipping is
+// invisible by nature, and several of those indexes are UNIQUE, so a skip
+// silently drops a real business rule (one account per email address, one
+// submission per public id). One line at boot is what makes the cost visible.
+//
+// The expected names are derived from the ladder itself, never listed here: a
+// hand-copied list of the same names drifts as soon as somebody adds an index,
+// and nothing reminds whoever added it that the copy exists.
+// -----------------------------------------------------------------------------
+async function reportSkippedIndexes(dialect: Dialect): Promise<void> {
+  // SQL Server is the only dialect that can skip — its catalog is `sys.indexes`.
+  // The libSQL path issues `CREATE INDEX IF NOT EXISTS` against the final shape,
+  // so it never has this gap.
+  if (getDbKind() !== "sqlserver") return;
+
+  const expected = expectedIndexNames(dialect.ddl);
+  if (expected.length === 0) return;
+
+  const rows = await getClient().query<{ name: string }>(
+    `SELECT name FROM sys.indexes WHERE name IN (${expected.map((name) => `'${name}'`).join(", ")})`
+  );
+  const present = new Set(rows.map((row) => row.name));
+  const missing = expected.filter((name) => !present.has(name));
+  if (missing.length === 0) return;
+
+  // eslint-disable-next-line no-console
+  console.warn(
+    `[db] ${missing.length} index(es) the schema declares are MISSING and could not be created, ` +
+      `because their key columns are not indexable as they stand (e.g. nvarchar(max)). ` +
+      `Any uniqueness they enforced is NOT enforced: ${missing.join(", ")}`
+  );
 }
 
 // Additive columns for databases created by an EARLIER version of the schema.

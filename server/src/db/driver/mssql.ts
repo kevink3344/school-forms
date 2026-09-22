@@ -85,7 +85,7 @@ async function connectWithRetry(attempts = 60, baseDelayMs = 3000): Promise<Conn
       // eslint-disable-next-line no-console
       console.error(
         `[db] Connection attempt ${attempt}/${attempts} failed (${err instanceof Error ? err.message : err}). ` +
-          `Retrying in ${Math.round(jitter / 1000)}s${isNetworkReset ? " (serverless wake)" : ""}...`
+          `Retrying in ${Math.round(jitter / 1000)}s${isNetworkReset ? " (network reset during login)" : ""}...`
       );
       await sleep(jitter);
     }
