@@ -117,9 +117,14 @@ export async function markDocumentPending(dbId: number): Promise<void> {
 
 /**
  * The documents list page. Enriched with the submission public id (for the
- * through-link) and the label-derived columns shown in the grid. `school_name`
- * comes from the schools table join (user decision: use the school name, not
- * the parent-typed "School" answer).
+ * through-link) and the label-derived columns shown in the grid.
+ *
+ * `school_name` is the school the submission DECLARES (its "School" answer,
+ * resolved to the canonical `schools.name` when one matches), falling back to
+ * the `school_id` join. The canonical name still wins, as the original user
+ * decision required — the answer is only consulted because the stored
+ * `school_id` can be a stale form-level fallback, which would otherwise print
+ * the district's placeholder school on every row.
  *
  * Scoping: every caller is bounded by their organization; a school-scoped role
  * (School Contact) is narrowed further to their own school. Admin and staff see
@@ -150,7 +155,7 @@ export async function listDocuments(params: {
     `SELECT d.id, d.submission_id, d.document_id, d.status, d.created_by,
             d.created_at, d.updated_at, d.error,
             s.public_id, s.school_id,
-            sc.name AS school_name,
+            COALESCE(${dialect().submissionSchoolNameSubquery()}, sc.name) AS school_name,
             ${dialect().submissionValueSubquery(STUDENT_NAME_LABEL)} AS student_name,
             ${dialect().submissionValueSubquery(COURSE_TITLE_LABEL)} AS course_title,
             ${dialect().submissionValueSubquery(PHASE1_RESULT_LABEL)} AS phase1_result
@@ -191,7 +196,7 @@ export async function getDocumentById(
     `SELECT d.id, d.submission_id, d.document_id, d.status, d.created_by,
             d.created_at, d.updated_at, d.error,
             s.public_id, s.school_id, s.form_id,
-            sc.name AS school_name,
+            COALESCE(${dialect().submissionSchoolNameSubquery()}, sc.name) AS school_name,
             ${dialect().submissionValueSubquery(STUDENT_NAME_LABEL)} AS student_name,
             ${dialect().submissionValueSubquery(COURSE_TITLE_LABEL)} AS course_title,
             ${dialect().submissionValueSubquery(PHASE1_RESULT_LABEL)} AS phase1_result

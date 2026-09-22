@@ -35,3 +35,27 @@ export function submissionValuePredicate(label?: string): string {
   if (label === undefined) return "ff.staff_only = 0";
   return `LOWER(ff.label) = ${sqlLiteral(label.toLowerCase())}`;
 }
+
+/**
+ * The labels that identify a form's "which school?" field.
+ *
+ * A district-wide form (e.g. CDM) collects the school as a parent ANSWER rather
+ * than being tied to one school, and `submissions.school_id` is derived from
+ * that answer — see `resolveSubmissionSchoolId` in `db/queries.ts`. The set
+ * lives here so the SQL subquery and the TypeScript resolver read ONE list; a
+ * second hand-copied list is a claim, not a check.
+ */
+export const SCHOOL_FIELD_LABELS = ["school", "school name"] as const;
+
+/**
+ * The WHERE predicate matching a school-labelled field, shared by both dialects
+ * (the dialect supplies `TOP 1` vs `LIMIT 1` around it).
+ *
+ * Trimmed as well as lowercased so it agrees with `resolveSubmissionSchoolId`,
+ * which normalises the same way in TypeScript — a label stored as `"School "`
+ * would otherwise resolve in one place and not the other.
+ */
+export function schoolFieldPredicate(): string {
+  const labels = SCHOOL_FIELD_LABELS.map(sqlLiteral).join(", ");
+  return `LOWER(LTRIM(RTRIM(ff.label))) IN (${labels})`;
+}

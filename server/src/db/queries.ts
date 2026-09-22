@@ -1,5 +1,6 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
+import { SCHOOL_FIELD_LABELS } from "./dialect/shared.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { env } from "../config/env.js";
@@ -1145,7 +1146,7 @@ export async function listSubmissions(params: {
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name,
-            sch.name AS school_name,
+            COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
             ${dialect().submissionValueSubquery()} AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
@@ -1174,9 +1175,11 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
             s.staff_fields_updated_by, s.staff_fields_updated_at,
             su.display_name AS staff_fields_updated_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
+            COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
             ${dialect().submissionValueSubquery()} AS student_name
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
+     LEFT JOIN dbo.schools sch ON sch.id = s.school_id
      LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
      WHERE ${clauses.join(" AND ")}`,
     params
@@ -1311,12 +1314,14 @@ export async function resolveSubmissionSchoolId(
   const fallback = form.school_id ?? null;
 
   // Identify "school" answer fields by their label — the CDM Google Form uses a
-  // plain-text field labeled "School" (also tolerate "School Name").
+  // plain-text field labeled "School" (also tolerate "School Name"). The label
+  // set is shared with the SQL that displays the school, so the two cannot
+  // disagree about which field answers the question.
   const fields = await listFormFields(form.id);
   const schoolFieldIds = new Set<number>();
   for (const f of fields) {
     const label = f.label.trim().toLowerCase();
-    if (label === "school" || label === "school name") schoolFieldIds.add(f.id);
+    if ((SCHOOL_FIELD_LABELS as readonly string[]).includes(label)) schoolFieldIds.add(f.id);
   }
   if (schoolFieldIds.size === 0) return fallback;
 
@@ -1324,10 +1329,12 @@ export async function resolveSubmissionSchoolId(
     if (!schoolFieldIds.has(a.field_id)) continue;
     if (typeof a.value !== "string" || !a.value.trim()) continue;
     const name = a.value.trim();
-    // Exact match against schools.name (Azure SQL default collation is
-    // case-insensitive, so "broughton high school" matches "Broughton High School").
+    // Match case-insensitively in the QUERY rather than relying on the
+    // database's default collation: Azure SQL's is case-insensitive but
+    // libSQL's `=` is not, so the same answer would resolve in production and
+    // silently fall back on a Turso workspace.
     const rows = await execute<Pick<School, "id">>(
-      "SELECT id FROM dbo.schools WHERE name = @name",
+      "SELECT id FROM dbo.schools WHERE LOWER(name) = LOWER(@name) ORDER BY id",
       { name }
     );
     if (rows[0]?.id) return rows[0].id;

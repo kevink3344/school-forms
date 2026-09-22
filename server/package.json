@@ -11,6 +11,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "seed": "tsx src/db/seed.ts",
     "backfill:school-year": "tsx src/db/backfill-school-year.ts",
+    "backfill:school-id": "tsx src/db/backfill-school-id.ts",
     "test": "vitest run"
   },
   "dependencies": {

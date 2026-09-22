@@ -125,4 +125,18 @@ export interface Dialect {
    * are always source constants, never user input.
    */
   submissionValueSubquery(label?: string): string;
+
+  /**
+   * Parenthesised scalar subquery yielding the SCHOOL a submission declares —
+   * the value of its "School"-labelled answer, resolved against `schools` so
+   * the canonical spelling wins over whatever the parent typed, and falling
+   * back to the typed text when no school matches (a typo, or a school the
+   * district feed has not imported yet).
+   *
+   * Correlated on the outer alias `s` (a `submissions` row), same shape and
+   * ordering as `submissionValueSubquery`. Callers COALESCE it with the name
+   * from the `school_id` join, which is the fallback for a submission that
+   * declares nothing.
+   */
+  submissionSchoolNameSubquery(): string;
 }

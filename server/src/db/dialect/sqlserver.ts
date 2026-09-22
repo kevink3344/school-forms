@@ -1,5 +1,5 @@
 import { SQLSERVER_DDL_STATEMENTS } from "../schema.js";
-import { submissionValuePredicate } from "./shared.js";
+import { submissionValuePredicate, schoolFieldPredicate } from "./shared.js";
 import type { Dialect } from "./types.js";
 
 // -----------------------------------------------------------------------------
@@ -127,6 +127,26 @@ export const sqlserverDialect: Dialect = {
       `        AND ${submissionValuePredicate(label)}\n` +
       `        AND sv.value IS NOT NULL\n` +
       `      ORDER BY ff.sort_order)`
+    );
+  },
+
+  submissionSchoolNameSubquery() {
+    // The answer is what `submissions.school_id` is derived FROM, so it is the
+    // only value that can name a school the district feed has not imported yet.
+    // The LEFT JOIN turns the typed answer into the canonical school name when
+    // one matches; `scs.id` breaks a tie between duplicate names the same way
+    // for both dialects, and matching on LOWER() keeps that true on libSQL,
+    // whose comparison operators are case-sensitive.
+    return (
+      `(SELECT TOP 1 COALESCE(scs.name, sv.value)\n` +
+      `       FROM dbo.submission_values sv\n` +
+      `       JOIN dbo.form_fields ff ON ff.id = sv.field_id\n` +
+      `       LEFT JOIN dbo.schools scs ON LOWER(scs.name) = LOWER(sv.value)\n` +
+      `      WHERE sv.submission_id = s.id\n` +
+      `        AND ${schoolFieldPredicate()}\n` +
+      `        AND sv.value IS NOT NULL\n` +
+      `        AND LTRIM(RTRIM(sv.value)) <> ''\n` +
+      `      ORDER BY ff.sort_order, scs.id)`
     );
   },
 };

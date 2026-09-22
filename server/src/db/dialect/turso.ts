@@ -1,4 +1,4 @@
-import { submissionValuePredicate } from "./shared.js";
+import { submissionValuePredicate, schoolFieldPredicate } from "./shared.js";
 import type { Dialect } from "./types.js";
 
 // -----------------------------------------------------------------------------
@@ -434,6 +434,24 @@ export const tursoDialect: Dialect = {
       `        AND ${submissionValuePredicate(label)}\n` +
       `        AND sv.value IS NOT NULL\n` +
       `      ORDER BY ff.sort_order\n` +
+      `      LIMIT 1)`
+    );
+  },
+
+  submissionSchoolNameSubquery() {
+    // Same limit relocation as `submissionValueSubquery`, and the same shared
+    // predicate — including the LOWER() match, which matters more here than on
+    // SQL Server because libSQL's `=` is case-sensitive.
+    return (
+      `(SELECT COALESCE(scs.name, sv.value)\n` +
+      `       FROM submission_values sv\n` +
+      `       JOIN form_fields ff ON ff.id = sv.field_id\n` +
+      `       LEFT JOIN schools scs ON LOWER(scs.name) = LOWER(sv.value)\n` +
+      `      WHERE sv.submission_id = s.id\n` +
+      `        AND ${schoolFieldPredicate()}\n` +
+      `        AND sv.value IS NOT NULL\n` +
+      `        AND LTRIM(RTRIM(sv.value)) <> ''\n` +
+      `      ORDER BY ff.sort_order, scs.id\n` +
       `      LIMIT 1)`
     );
   },

@@ -6,6 +6,7 @@ import { toLibsql, TURSO_NOW } from "./libsql.js";
 import { TIMESTAMP_COLUMNS, normalizeRow, parseTimestamp } from "../client.js";
 import { tursoDialect } from "../dialect/turso.js";
 import { sqlserverDialect } from "../dialect/sqlserver.js";
+import { SCHOOL_FIELD_LABELS } from "../dialect/shared.js";
 import { expectedIndexNames } from "../schema.js";
 
 // -----------------------------------------------------------------------------
@@ -446,16 +447,21 @@ describe("dialect schema parity", () => {
 // -----------------------------------------------------------------------------
 // submissionValueSubquery — the shape behind the 8 broken endpoints.
 // -----------------------------------------------------------------------------
-describe("dialect submissionValueSubquery", () => {
-  /** Reduce both variants to what they have in common, for a drift check. */
-  const canonical = (sql: string) =>
-    sql
-      .replace(/\s+/g, " ")
-      .replaceAll("dbo.", "")
-      .replace("TOP 1 ", "")
-      .replace(" LIMIT 1", "")
-      .trim();
 
+/**
+ * Reduce a dialect subquery to what both variants should have in common. The
+ * only permitted differences are the row-limit token and, for libSQL, the
+ * stripped `dbo.` qualifier.
+ */
+const canonical = (sql: string) =>
+  sql
+    .replace(/\s+/g, " ")
+    .replaceAll("dbo.", "")
+    .replace("TOP 1 ", "")
+    .replace(" LIMIT 1", "")
+    .trim();
+
+describe("dialect submissionValueSubquery", () => {
   it("limits at the head on SQL Server and at the tail on Turso", () => {
     const sg = sqlserverDialect.submissionValueSubquery();
     const lite = tursoDialect.submissionValueSubquery();
@@ -501,6 +507,74 @@ describe("dialect submissionValueSubquery", () => {
     for (const label of [undefined, "student name"]) {
       expect(sqlserverDialect.submissionValueSubquery(label)).not.toMatch(/\bAS\b/i);
       expect(tursoDialect.submissionValueSubquery(label)).not.toMatch(/\bAS\b/i);
+    }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// submissionSchoolNameSubquery — the School column on every submission list.
+//
+// The column used to be the bare `schools.name` from the `school_id` join, so a
+// row whose `school_id` was never re-derived (it kept the form-level fallback)
+// printed the district's placeholder school on a submission that named a real
+// one. These pin the replacement — the declared answer, resolved to the
+// canonical school name — and the dialect parity of its limit token.
+// -----------------------------------------------------------------------------
+describe("dialect submissionSchoolNameSubquery", () => {
+  it("limits at the head on SQL Server and at the tail on Turso", () => {
+    const sg = sqlserverDialect.submissionSchoolNameSubquery();
+    const lite = tursoDialect.submissionSchoolNameSubquery();
+    expect(sg).toMatch(/SELECT TOP 1 COALESCE\(scs\.name, sv\.value\)/);
+    expect(sg).not.toMatch(/\bLIMIT\b/);
+    expect(lite).toMatch(/LIMIT 1\)/);
+    expect(lite).not.toMatch(/\bTOP\b/);
+  });
+
+  it("cannot be fixed by the token rewriter — hence a dialect method", () => {
+    expect(toLibsql(sqlserverDialect.submissionSchoolNameSubquery())).toMatch(/\bTOP\b/);
+    expect(toLibsql(tursoDialect.submissionSchoolNameSubquery())).not.toMatch(/\bTOP\b/);
+  });
+
+  it("keeps a no-op translation for the Turso variant", () => {
+    const lite = tursoDialect.submissionSchoolNameSubquery();
+    expect(toLibsql(lite)).toBe(lite);
+  });
+
+  it("shares one predicate so the two variants cannot drift", () => {
+    expect(canonical(tursoDialect.submissionSchoolNameSubquery())).toBe(
+      canonical(sqlserverDialect.submissionSchoolNameSubquery())
+    );
+  });
+
+  // The label set lives in ONE place and is read by the TypeScript resolver in
+  // queries.ts as well. A hand-copied second list is a claim, not a check, so
+  // this asserts the SQL actually names every label in the exported set — and
+  // that the set is non-empty, or the loop below would pass vacuously.
+  it("matches every label in SCHOOL_FIELD_LABELS, trimmed and case-folded", () => {
+    expect(SCHOOL_FIELD_LABELS.length).toBeGreaterThan(0);
+    for (const dialect of [sqlserverDialect, tursoDialect]) {
+      const sql = dialect.submissionSchoolNameSubquery();
+      expect(sql).toMatch(/LOWER\(LTRIM\(RTRIM\(ff\.label\)\)\) IN \(/);
+      for (const label of SCHOOL_FIELD_LABELS) {
+        expect(sql).toContain(`'${label}'`);
+      }
+    }
+  });
+
+  it("prefers the canonical school name and falls back to the typed answer", () => {
+    for (const dialect of [sqlserverDialect, tursoDialect]) {
+      const sql = dialect.submissionSchoolNameSubquery();
+      expect(sql).toMatch(/COALESCE\(scs\.name, sv\.value\)/);
+      expect(sql).toMatch(/LEFT JOIN [\w.]*schools scs ON LOWER\(scs\.name\) = LOWER\(sv\.value\)/);
+      // A blank field is not an answer: without this the first school-labelled
+      // field, left empty, would COALESCE to '' and out-rank the real join.
+      expect(sql).toMatch(/LTRIM\(RTRIM\(sv\.value\)\) <> ''/);
+    }
+  });
+
+  it("returns the subquery without an alias, so no identifier is interpolated", () => {
+    for (const dialect of [sqlserverDialect, tursoDialect]) {
+      expect(dialect.submissionSchoolNameSubquery()).not.toMatch(/\bAS\b/i);
     }
   });
 });
