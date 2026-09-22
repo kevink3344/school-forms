@@ -1,4 +1,4 @@
-import { Router } from "express";
+import { Router, type Request } from "express";
 import {
   createSubmission,
   getSubmissionDetail,
@@ -6,6 +6,10 @@ import {
   listSubmissionValues,
   updateSubmissionStatus,
   updateSubmissionValues,
+  archiveSubmission,
+  restoreSubmission,
+  deleteSubmission,
+  submissionArchiveCounts,
   createAdhocField,
   updateAdhocField,
   deleteAdhocField,
@@ -104,23 +108,68 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 });
 
 // -----------------------------------------------------------------------------
+// Shared filter reading for the submission list AND its archive counts.
+//
+// ONE reader for both. The counts badge ("N archived hidden") is only meaningful
+// if it was computed from the exact filter the grid was handed, so a second,
+// hand-written parameter list here is precisely how the badge starts describing a
+// different query than the rows underneath it.
+// -----------------------------------------------------------------------------
+function submissionFiltersFrom(req: Request) {
+  // Every caller is org-scoped. A School Contact is narrowed further to their
+  // own school; admin and staff may narrow with an optional ?school_id filter.
+  return {
+    organizationId: req.user!.organization_id,
+    schoolId:
+      scopedSchoolId(req.user!) ??
+      (req.query.school_id ? Number(req.query.school_id) : undefined),
+    formId: req.query.form_id ? Number(req.query.form_id) : undefined,
+    status: req.query.status ? String(req.query.status) : undefined,
+    from: req.query.from ? String(req.query.from) : undefined,
+    to: req.query.to ? String(req.query.to) : undefined,
+  };
+}
+
+// -----------------------------------------------------------------------------
 // STAFF: GET /api/submissions — list submissions scoped to their school
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
-    // Every caller is org-scoped. A School Contact is narrowed further to their
-    // own school; admin and staff may narrow with an optional ?school_id filter.
-    const organizationId = req.user!.organization_id;
-    const schoolId =
-      scopedSchoolId(req.user!) ??
-      (req.query.school_id ? Number(req.query.school_id) : undefined);
-    const formId = req.query.form_id ? Number(req.query.form_id) : undefined;
-    const status = req.query.status ? String(req.query.status) : undefined;
-    const from = req.query.from ? String(req.query.from) : undefined;
-    const to = req.query.to ? String(req.query.to) : undefined;
-
-    const submissions = await listSubmissions({ organizationId, schoolId, formId, status, from, to });
+    // Archive visibility, and the ONE place the grid's flag is read:
+    //   omitted / 0  → the normal view; archived rows are HIDDEN
+    //   1 / true     → the Archive view; ONLY archived rows
+    // There is no "both" mode on purpose. A merged list cannot answer "which of
+    // these is put away?", so the reader could not tell an archived row from an
+    // active one — and every count, export and action downstream would have to
+    // carry that doubt. Two lists, one at a time, keeps the question answerable.
+    //
+    // Accepts "true" as well as "1" because the client builds this from a
+    // boolean, and `String(true)` is "true" — a URL that says ?archived=true and
+    // silently returns the unarchived list would be a lie the type system cannot
+    // see through.
+    const archived = req.query.archived === "1" || req.query.archived === "true";
+    const submissions = await listSubmissions({ ...submissionFiltersFrom(req), archived });
     res.json(submissions);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/archive/counts — how many rows the CURRENT filter
+// puts on each side of the archive line ({ active, archived }).
+//
+// Exists so the UI can say what it is hiding. Without it, a filtered grid with
+// the Archive toggle off looks identical whether four of its rows were archived
+// or four never matched — the two only differ by a number the client cannot
+// compute from a list it never received.
+//
+// Registered at a two-segment path so it can never be captured by the
+// single-segment `GET /:publicId` below, whatever order these are wired in.
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/archive/counts", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    res.json(await submissionArchiveCounts(submissionFiltersFrom(req)));
   } catch (err) {
     next(err);
   }
@@ -169,6 +218,151 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
     await updateSubmissionStatus(submission.id, parsed.data.status);
     const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: POST /api/submissions/:publicId/archive — hide a submission from every
+// view (lists, counts, exports, reports, document lists) without deleting it.
+//
+// Staff and school contacts, not admin-only — matching the rest of this router.
+// The row is resolved by public id (org-scoped) and then gated on the actor's
+// school, so the reach of this endpoint is the actor's own schools either way;
+// making it admin-only only decided *who inside a school* could do it, and left
+// the staff member who is actually looking at the queue unable to put anything
+// away. DELETE below is the one that stays admin-only, because it is the one that
+// cannot be undone.
+//
+// Reversible and non-destructive: every answer, staff-only field, ad-hoc field and
+// generated document stays exactly where it was, which is what makes Restore a
+// single column update rather than a rebuild. The app's one destructive path for a
+// submission is `DELETE /:publicId` below, and it can only be reached once this
+// one has already been applied.
+//
+// 409 when the row is already archived rather than a silent 200: the action has
+// a visible effect (the button becomes "Restore"), so "nothing changed" must be
+// distinguishable from "it changed and you are seeing a stale page". The guard
+// lives in the UPDATE's WHERE clause (`archived_at IS NULL`), so two concurrent
+// clicks cannot both report success.
+// -----------------------------------------------------------------------------
+submissionsRouter.post("/:publicId/archive", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const changed = await archiveSubmission(submission.id, req.user!.id);
+    if (!changed) {
+      res.status(409).json({ error: "This submission is already archived." });
+      return;
+    }
+    // Re-read and return the detail so the client renders the banner and the
+    // Restore button from the server's own state rather than from its guess about
+    // what the POST did.
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: POST /api/submissions/:publicId/restore — return a submission to every
+// view.
+//
+// Same guards as the archive above, and for the same reason: the action is only
+// half a feature if whoever put something away cannot get it back. Workflow
+// status is untouched by both directions, so restoring lands on the status the
+// submission held when it was archived. That is the property the separate
+// `archived_at` column buys over a `status = 'archived'` value: there is no
+// remembered status to get out of step with the row.
+// -----------------------------------------------------------------------------
+submissionsRouter.post("/:publicId/restore", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const changed = await restoreSubmission(submission.id);
+    if (!changed) {
+      res.status(409).json({ error: "This submission is not archived." });
+      return;
+    }
+    const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// ADMIN: DELETE /api/submissions/:publicId — delete an ARCHIVED submission for
+// good, with its answers, ad-hoc fields and document rows.
+//
+// THE ORDER IS THE DESIGN: archive first, then delete. Every control in the app
+// therefore asks the reader to make the reversible move before it offers the
+// irreversible one, and the extra step is where a second look is cheap. The rule
+// is enforced in `deleteSubmission`'s own WHERE clause (`archived_at IS NOT
+// NULL`), not by a check here — see that function for why the predicate has to
+// live in the statement.
+//
+// 409, not 403, for a row that is not archived. The actor IS allowed to delete
+// archived submissions here; what is wrong is the row's state, and a 403 would
+// tell an admin to go and get a permission they already have. It also matches
+// what archive/restore answer for a no-op, so "the row was not in the state this
+// action needs" reads the same in all three endpoints.
+//
+// 204 with no body: there is no row left to return, and the client's next move is
+// to refresh the list it came from. Returning the old detail would be a body
+// describing something that no longer exists.
+//
+// Admin-only, unlike archive/restore. Deleting destroys the submission's answers
+// and its links to any generated document, and unlike archiving that cannot be
+// walked back — so it is the one submission action that stays administrative.
+//
+// ONE KNOWN, DELIBERATELY UNCLOSED WINDOW: a fire-and-forget document generation
+// (see `maybeGenerateDocument` in google/docs.ts) can be in flight while this
+// runs. If its `documents` INSERT lands between `deleteSubmission`'s child removes
+// and its parent remove, the new child re-blocks the parent and this answers 500
+// rather than 204 — retrying succeeds and leaves nothing behind. Closing it would
+// need ON DELETE CASCADE on the live child keys (a schema change on a database
+// this app did not create) or a cross-instance lock (there is none; an in-process
+// guard serializes nothing under App Service scale-out and would be a false
+// guarantee). The full description is on the Swagger path for this route.
+// -----------------------------------------------------------------------------
+submissionsRouter.delete("/:publicId", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    // Resolve first so an unknown id is 404 and another school's id is 403. Without
+    // this the delete's own WHERE would answer 409 for a submission the actor
+    // cannot even see, which reads as "archive it first" and would be advice about
+    // someone else's data.
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    if (!canAccessSchool(req.user!, submission.school_id)) {
+      res.status(403).json({ error: "Forbidden" });
+      return;
+    }
+    const deleted = await deleteSubmission(submission.id);
+    if (!deleted) {
+      res.status(409).json({ error: "This submission must be archived before it can be deleted." });
+      return;
+    }
+    res.status(204).end();
   } catch (err) {
     next(err);
   }

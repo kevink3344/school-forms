@@ -1,6 +1,6 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
-import { SCHOOL_FIELD_LABELS } from "./dialect/shared.js";
+import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { env } from "../config/env.js";
@@ -163,12 +163,20 @@ export interface LoginStats {
 // directly and are scoped to the org. Schools are a GLOBAL shared directory with
 // NO organization_id column (no school-org mapping table), so every school is
 // counted regardless of org — that's the total directory size.
+//
+// Archived submissions are EXCLUDED: this box is a claim about the work the org
+// is holding, and it is the first thing anyone sees — a number that only goes up
+// because things were put away is a claim the data does not support. It is also
+// the reason the archive feature had to touch this function at all; a stat box
+// fed by a query nobody re-read is how "hidden from all views" quietly becomes
+// "hidden from the views I remembered".
 export async function getLoginStats(organizationId: number): Promise<LoginStats> {
   const rows = await execute<LoginStats>(
     `SELECT
        (SELECT COUNT(*) FROM dbo.users                WHERE organization_id = @orgId) AS users,
        (SELECT COUNT(*) FROM dbo.schools)                                              AS schools,
-       (SELECT COUNT(*) FROM dbo.submissions          WHERE organization_id = @orgId) AS submissions`,
+       (SELECT COUNT(*) FROM dbo.submissions          WHERE organization_id = @orgId
+                                                        AND ${notArchived("dbo.submissions")}) AS submissions`,
     { orgId: organizationId }
   );
   return rows[0] ?? { users: 0, schools: 0, submissions: 0 };
@@ -588,6 +596,16 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
     params.schoolId = schoolId;
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  // ⚠ `submission_count` counts EVERY submission including archived ones, and
+  // that is deliberate — do not add `AND s.archived_at IS NULL` here.
+  //
+  // It is not a view count: the Forms list renders it beside a Delete button, and
+  // the delete guard (`countSubmissionsForForm`) refuses when a form has ANY
+  // submission history because `submissions.form_id` CASCADES. A form whose
+  // submissions have all been archived therefore still cannot be deleted — so a
+  // count that dropped them would put a Delete button in front of the user, read
+  // as 0, and then fail with "This form has submissions". The two counts must
+  // agree with each other, which is why they use the same rule.
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
             f.status, f.pre_archive_status, f.view_columns, f.code, f.submission_seq,
@@ -601,6 +619,19 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
 // Count the submissions attached to a form. Used to guard form deletion: a form
 // with any submission history must NOT be deleted, because submissions.form_id
 // cascades on delete and would silently destroy submission data.
+//
+// ARCHIVED SUBMISSIONS COUNT. Archiving is a view-level hiding, not a deletion —
+// the row is still here and the FK still cascades — so excluding them would let
+// the guard wave through a delete that then destroys exactly the history the user
+// put away for safe keeping. Must match `listForms`'s `submission_count`, which
+// feeds the same Delete button.
+//
+// PERMANENTLY DELETED SUBMISSIONS DO NOT COUNT, and they must not: `deleteSubmission`
+// removes the row outright, so the FK that makes a form undeletable is gone with
+// it. A form whose submissions have all been archived AND then permanently
+// deleted therefore becomes deletable again, which is the correct reading of the
+// guard ("do not destroy history that exists") rather than a loophole in it. That
+// falls out of computing the count live — nothing here needed changing for it.
 export async function countSubmissionsForForm(formId: number): Promise<number> {
   const rows = await execute<{ n: number }>(
     `SELECT COUNT(*) AS n FROM dbo.submissions WHERE form_id = @formId`,
@@ -1060,6 +1091,10 @@ export interface SubmissionRow extends Submission {
   student_name: string | null;
   // Display name of the staff member who last saved the staff-only fields.
   staff_fields_updated_by_name: string | null;
+  // Display name of whoever archived this submission. Only meaningful when
+  // `archived_at` is set, and only present on rows returned by a query that
+  // asked for it (the archived list view).
+  archived_by_name?: string | null;
 }
 
 export interface SubmissionValueRow extends SubmissionValue {
@@ -1084,7 +1119,13 @@ export interface SubmissionDetail extends SubmissionRow {
   documents: ListDocumentRow[];
 }
 
-export async function listSubmissions(params: {
+// A submission can be filtered by org, school, form, workflow status, date
+// range, and a free-text term. Shared by `listSubmissions` (the rows) and
+// `submissionArchiveCounts` (how many are hidden behind the current filter), so
+// the two can never disagree about which rows a filter selects — the count is
+// what the UI says out loud ("N archived hidden"), which makes a divergence a
+// visible lie rather than a private one.
+export interface SubmissionListFilters {
   organizationId?: number | null;
   schoolId?: number | null;
   formId?: number | null;
@@ -1095,7 +1136,21 @@ export async function listSubmissions(params: {
   // school name, or ANY answer value. Applied in SQL so the preview grid and
   // every export format see exactly the same rows (WYSIWYG export).
   q?: string | null;
-}): Promise<SubmissionRow[]> {
+}
+
+/**
+ * Build the non-archive WHERE clauses for a submission query.
+ *
+ * Deliberately EXCLUDES the archive predicate: the caller decides which side of
+ * the archive line it wants (`listSubmissions` by its `archived` flag,
+ * `submissionArchiveCounts` by running twice). Callers must join
+ * `LEFT JOIN dbo.schools sch ON sch.id = s.school_id`, because the search term
+ * matches the school name.
+ */
+function buildSubmissionFilters(params: SubmissionListFilters): {
+  clauses: string[];
+  p: Record<string, unknown>;
+} {
   const p: Record<string, unknown> = {};
   const clauses: string[] = [];
   if (params.organizationId !== undefined && params.organizationId !== null) {
@@ -1138,13 +1193,36 @@ export async function listSubmissions(params: {
         ` AND CAST(svq.value AS NVARCHAR(MAX)) LIKE @q ESCAPE '\\'))`
     );
   }
+  return { clauses, p };
+}
+
+export async function listSubmissions(
+  params: SubmissionListFilters & {
+    // Archive visibility. Omitted / false = the normal view (archived rows are
+    // HIDDEN); true = the "Archived" view (only archived rows). There is no
+    // "both" mode on purpose: a list that mixes them would need every caller to
+    // re-explain which rows are which, and the two views are what the UI has.
+    //
+    // This is the ONE place the archive rule is written for listings, which is
+    // why the admin grid, the staff queue, both export endpoints and the reports
+    // preview all inherit it: they all call this function.
+    archived?: boolean | null;
+  }
+): Promise<SubmissionRow[]> {
+  const { clauses, p } = buildSubmissionFilters(params);
+  // Pushed FIRST (rather than appended) so that a caller who forgets the flag
+  // still hides archived rows — the failure mode has to be "a row the user
+  // expected to see is missing", never "an archived row is on screen".
+  clauses.unshift(params.archived ? archivedOnly("s") : notArchived("s"));
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   return execute<SubmissionRow>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
             s.school_year,
             s.staff_fields_updated_by, s.staff_fields_updated_at,
+            s.archived_at, s.archived_by,
             su.display_name AS staff_fields_updated_by_name,
+            au.display_name AS archived_by_name,
             f.title AS form_name,
             COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
             ${dialect().submissionValueSubquery()} AS student_name
@@ -1152,15 +1230,76 @@ export async function listSubmissions(params: {
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id
      LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
+     LEFT JOIN dbo.users au ON au.id = s.archived_by
      ${where}
      ORDER BY s.submitted_at DESC`,
     p
   );
 }
 
+/**
+ * How many submissions the CURRENT filter selects on each side of the archive
+ * line — `{ active, archived }` — so the UI can say out loud what it is hiding.
+ *
+ * This exists because "hidden from all views" is otherwise indistinguishable
+ * from "there is nothing to see": with the Archived toggle off, a filtered grid
+ * that has quietly dropped four rows looks identical to a grid that matched
+ * four fewer rows, and the only way to tell is to go and look. The queue and the
+ * dashboard print `{archived} archived hidden` from this, and the count is what
+ * makes the toggle's badge truthful rather than decorative.
+ *
+ * Both counts come from `buildSubmissionFilters`, the same clause builder
+ * `listSubmissions` uses, so the pair always describes the rows the grid would
+ * actually show under the same filter — never a second, hand-written WHERE that
+ * can drift out of step with it.
+ *
+ * ONE statement returning both numbers, not two COUNTs. Two statements would each
+ * re-evaluate the filter, so a submission archived between them would be counted
+ * on neither side (or on both) and the pair would not describe any single moment
+ * — a toggle badge reading "3 hidden" over a grid of 41 rows that actually holds
+ * 45. One read cannot disagree with itself.
+ *
+ * `COUNT(CASE … THEN 1 END)` rather than `COUNT(*) - SUM(CASE …)` because SUM
+ * over zero rows is NULL, and a NULL count is exactly the value that renders as
+ * blank or as 0 depending on the consumer — see the guard note in this file's
+ * callers. COUNT of an expression counts the non-NULL results, so an empty side
+ * reports a real 0.
+ */
+export async function submissionArchiveCounts(
+  params: SubmissionListFilters
+): Promise<{ active: number; archived: number }> {
+  const { clauses, p } = buildSubmissionFilters(params);
+  // The `forms` and `schools` joins are NOT used by any current filter clause,
+  // but they are kept so this statement stays textually parallel to
+  // `listSubmissions`: the search clause already matches `sch.name`, and a future
+  // filter that reaches a form column must find the join here rather than fail
+  // with "invalid column name" only on the counts endpoint.
+  const rows = await execute<{ active_count: number; archived_count: number }>(
+    `SELECT
+            COUNT(CASE WHEN ${notArchived("s")} THEN 1 END) AS active_count,
+            COUNT(CASE WHEN ${archivedOnly("s")} THEN 1 END) AS archived_count
+     FROM dbo.submissions s
+     JOIN dbo.forms f ON f.id = s.form_id
+     LEFT JOIN dbo.schools sch ON sch.id = s.school_id
+     WHERE ${clauses.length ? clauses.join(" AND ") : "1 = 1"}`,
+    p
+  );
+  return {
+    active: Number(rows[0]?.active_count ?? 0),
+    archived: Number(rows[0]?.archived_count ?? 0),
+  };
+}
+
 // Fetch a submission by its public id. When an organizationId is provided, the
 // submission must belong to that org — used to keep public submission readback
 // and detail views scoped to the org that owns the form.
+//
+// ARCHIVED ROWS ARE RETURNED DELIBERATELY (see the archive note in
+// dialect/shared.ts): archiving hides a submission from every VIEW, it does not
+// make its own URL 404. This function is the by-identity lookup behind the
+// detail page — the page reads `archived_at` from this row and renders an
+// "Archived" banner, so a bookmarked link, a Webhook Log link or a browser
+// Back all land somewhere that explains itself and offers Restore.
 export async function getSubmissionByPublicId(publicId: string, organizationId?: number | null): Promise<SubmissionRow | null> {
   const clauses: string[] = ["s.public_id = @publicId"];
   const params: Record<string, unknown> = { publicId };
@@ -1173,7 +1312,9 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
             s.submission_seq, s.submitted_at, s.updated_at,
             s.school_year,
             s.staff_fields_updated_by, s.staff_fields_updated_at,
+            s.archived_at, s.archived_by,
             su.display_name AS staff_fields_updated_by_name,
+            au.display_name AS archived_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
             COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
             ${dialect().submissionValueSubquery()} AS student_name
@@ -1181,6 +1322,7 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id
      LEFT JOIN dbo.users su ON su.id = s.staff_fields_updated_by
+     LEFT JOIN dbo.users au ON au.id = s.archived_by
      WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -1190,6 +1332,11 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
 // Fetch a submission by its internal numeric id. Used internally by the Google
 // document generator (which works with submission ids) to read back form_id and
 // public_id without a public-id round trip.
+//
+// ARCHIVED ROWS ARE RETURNED DELIBERATELY: this is an identity lookup feeding the
+// document generator, so archiving a submission must not make an in-flight job
+// fail to find the row it was started for. (Documents are hidden from
+// `listDocuments` separately — see db/documents.ts.)
 export async function getSubmissionById(
   id: number
 ): Promise<{ id: number; form_id: number; public_id: string; school_id: number | null; organization_id: number } | null> {
@@ -1434,6 +1581,150 @@ export async function updateSubmissionStatus(id: number, status: string): Promis
     `UPDATE dbo.submissions SET status = @status, updated_at = SYSUTCDATETIME() WHERE id = @id`,
     { id, status }
   );
+}
+
+// -----------------------------------------------------------------------------
+// Archive / Restore (submissions)
+// -----------------------------------------------------------------------------
+// Same shape as archiveForm / restoreForm above, and the same idempotence rule:
+// the guard predicate (`archived_at IS NULL` / `archived_at IS NOT NULL`) is part
+// of the WHERE clause rather than checked in TypeScript, so two staff clicking
+// Archive at once cannot both "succeed" and the second one reports "already
+// archived" instead of restamping who archived it.
+//
+// Those two functions are also why this is the shape that works on BOTH dialects
+// without a migration: `archived_at` is added to `submissions` by the DDL ladder
+// (schema.ts) and by `addColumns` (dialect/turso.ts), and the statement is a
+// plain UPDATE with a RETURNING-shaped clause — no T-SQL-only construct.
+//
+// Both return TRUE when a row was actually changed, so the route can answer 409
+// for a no-op instead of pretending it did something. `db.query()` hands back a
+// bare row array with no affected-row count on either driver, which is exactly
+// why `updateReturning` + `returning: ["id"]` is used here rather than `execute`
+// (the mistake `updateSubmissionStatus` above makes — it cannot tell you whether
+// it matched anything).
+//
+// These are NOT scoped by organization here: the route resolves the submission
+// by public id first (org-scoped) and then gates on the school, so the row is
+// already known to be in scope by the time it reaches this function. Passing an
+// extra org clause would be a second, silently-disagreeing copy of that check.
+export async function archiveSubmission(id: number, archivedBy: number | null): Promise<boolean> {
+  const updated = await execute<{ id: number }>(
+    dialect().updateReturning({
+      table: "submissions",
+      set: "archived_at = SYSUTCDATETIME(), archived_by = @archivedBy, updated_at = SYSUTCDATETIME()",
+      where: "id = @id AND archived_at IS NULL",
+      returning: ["id"],
+    }),
+    { id, archivedBy }
+  );
+  return updated.length > 0;
+}
+
+// Restore clears both columns. `archived_by` is nulled rather than kept as "who
+// archived it last" so the pair can never disagree: a row is archived when
+// `archived_at` is set, and a restored row holding a leftover `archived_by` would
+// be a half-state that any future reader would have to know to ignore.
+export async function restoreSubmission(id: number): Promise<boolean> {
+  const updated = await execute<{ id: number }>(
+    dialect().updateReturning({
+      table: "submissions",
+      set: "archived_at = NULL, archived_by = NULL, updated_at = SYSUTCDATETIME()",
+      where: "id = @id AND archived_at IS NOT NULL",
+      returning: ["id"],
+    }),
+    { id }
+  );
+  return updated.length > 0;
+}
+
+// -----------------------------------------------------------------------------
+// Permanent delete (submissions)
+// -----------------------------------------------------------------------------
+// The ONE irreversible action in this feature, and the reason `archived_at IS NOT
+// NULL` is part of the DELETE's WHERE clause rather than a test made by the
+// caller: "must be archived first" is a rule about the row, so it is evaluated
+// where the row is removed. A caller that read the row, saw `archived_at` set,
+// and then deleted would be racing a Restore — and would win the race wrongly.
+// With the predicate in the statement, a restore landing in between turns the
+// delete into a no-op (0 rows changed) that the route reports as 409, which is
+// the same "nothing changed, and not because you are seeing a stale page" answer
+// archive/restore give.
+//
+// ⚠ The children are deleted HERE, one statement each, rather than by relying on
+// ON DELETE CASCADE — and that is a measurement, not a preference. schema.ts
+// declares all three child foreign keys `ON DELETE CASCADE`, but the LIVE Azure
+// SQL database was created by an earlier revision of that DDL, whose constraints
+// carry different names and NO ACTION:
+//
+//   measured: FK_documents_submission_id / FK_submission_values_submission_id /
+//             FK_submission_adhoc_fields_submission_id, all ON DELETE NO_ACTION
+//   in schema.ts: FK_documents_submission / … , all ON DELETE CASCADE
+//
+// Every CREATE TABLE in schema.ts is guarded by `IF OBJECT_ID(…) IS NULL`, so a
+// corrected declaration is a no-op once the table exists: editing the DDL does
+// not change the database, and the delete answered 500 (SQL Server 547,
+// "conflicted with the REFERENCE constraint") against the live row. Depending on
+// the cascade would also mean the feature works on a fresh database and fails on
+// this one, which is the worst of both. So the child list is explicit:
+//
+//   submission_values.submission_id        → the answers
+//   submission_adhoc_fields.submission_id  → the per-submission extra fields
+//   documents.submission_id                → the generated-document metadata rows
+//
+// ★ SUBMISSION_CHILD_TABLES is a hand-copy of the foreign keys that point at
+// `dbo.submissions`, so it can drift. `submissions-archive.test.ts` derives the
+// same set out of schema.ts and fails if the two disagree (in either direction),
+// rather than trusting a comment to keep them in step.
+//
+// `webhook_events.submission_id` deliberately has NO foreign key and is NOT in
+// that list: the intake log is evidence of what arrived, so it keeps its row (and
+// its `submission_id`) after the submission is gone.
+//
+// ⚠ What this does NOT delete: the generated Google Doc FILE itself, and any
+// files the submission's answers referenced. Nothing in this app has ever had a
+// path that deletes from the org's Drive folder, and adding one is a different
+// feature with a different blast radius (a shared Drive, outside this database,
+// where a wrong id is unrecoverable). The `documents` row that recorded the file
+// goes away with the submission, so the file becomes unreachable *from here* —
+// the UI and the API descriptions both say so, because "Delete permanently" that
+// leaves a file behind is a claim the reader would otherwise make for us.
+//
+// ⚠ One transaction, and the ORDER is load-bearing. The children go first because
+// their foreign keys would refuse the parent delete; the parent's
+// `archived_at IS NOT NULL` predicate stays in the parent statement, because that
+// is the statement that decides whether anything is deleted at all. If it matches
+// nothing — a non-archived row, or a Restore that landed between the two steps —
+// the sentinel below unwinds the child deletes, so the 409 the route reports
+// genuinely means "nothing was deleted". Without the rollback, that same race
+// would leave a restored submission standing with its answers and document rows
+// gone, which is the half-deletion this ordering exists to make impossible.
+const SUBMISSION_CHILD_TABLES = ["submission_values", "submission_adhoc_fields", "documents"] as const;
+
+/** Internal signal: the parent delete matched nothing, so unwind the children. */
+const NOT_ARCHIVED = new Error("submission is not archived");
+
+export async function deleteSubmission(id: number): Promise<boolean> {
+  try {
+    await getClient().transaction(async (tx) => {
+      for (const table of SUBMISSION_CHILD_TABLES) {
+        await tx.query(`DELETE FROM dbo.${table} WHERE submission_id = @id`, { id });
+      }
+      const removed = await tx.query<{ id: number }>(
+        dialect().deleteReturning({
+          table: "submissions",
+          where: "id = @id AND archived_at IS NOT NULL",
+          returning: ["id"],
+        }),
+        { id }
+      );
+      if (removed.length === 0) throw NOT_ARCHIVED;
+    });
+    return true;
+  } catch (err) {
+    if (err === NOT_ARCHIVED) return false;
+    throw err;
+  }
 }
 
 // -----------------------------------------------------------------------------

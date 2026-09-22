@@ -47,15 +47,38 @@ app.use(
 app.use(express.json({ limit: "2mb", verify: captureRawBody }));
 app.use(cookieParser());
 
-// Rate limiting (skip health + docs)
+// Rate limiting.
+//
+// Two classes of request never count against the budget:
+//   * `/health` + `/docs` — the readiness probe and the API docs page. Both are
+//     polled, neither carries per-user data.
+//   * the login page's BOOTSTRAP reads (`GET /settings/*`, `GET /info`, also
+//     reached as `GET /health/stats`). These are what tell the browser which
+//     sign-in form to draw. They are unauthenticated and return only the login
+//     mode, the maintenance message and the app version — and if one is refused
+//     the client cannot know the mode at all.
+//
+// The limiter must never be able to change WHICH form is shown. It could: a 429
+// on `/settings/login_mode` left LoginPage on its "Select User (Test)" fallback
+// — a password-free sign-in — on an app whose stored mode was "password". The
+// client now shows an error + retry instead of guessing (see
+// client/src/pages/LoginPage.tsx), and this exemption removes the trigger.
+//
+// Only GET is skipped, so every WRITE under /settings (`PUT /:key`,
+// `POST /slack/test`) is still counted, as is all of /auth — sign-in, and the
+// passwordless `/auth/select` in particular, are exactly what a limiter is for.
+const BOOTSTRAP_GET_PREFIXES = ["/health", "/docs", "/settings", "/info"];
 const apiLimiter = rateLimit({
   windowMs: env.rateLimit.windowMs,
   max: env.rateLimit.max,
   standardHeaders: true,
   legacyHeaders: false,
   skip: (req) => {
+    // NOTE: `req.path` is RELATIVE to the "/api/" mount below, so it reads
+    // "/settings/login_mode", not "/api/settings/login_mode".
     const p = req.path;
-    return p.startsWith("/health") || p.startsWith("/docs");
+    if (p.startsWith("/health") || p.startsWith("/docs")) return true;
+    return req.method === "GET" && BOOTSTRAP_GET_PREFIXES.some((s) => p.startsWith(s));
   },
 });
 app.use("/api/", apiLimiter);

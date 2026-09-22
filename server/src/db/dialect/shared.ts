@@ -59,3 +59,35 @@ export function schoolFieldPredicate(): string {
   const labels = SCHOOL_FIELD_LABELS.map(sqlLiteral).join(", ");
   return `LOWER(LTRIM(RTRIM(ff.label))) IN (${labels})`;
 }
+
+// -----------------------------------------------------------------------------
+// Archive visibility.
+//
+// A submission is archived when `submissions.archived_at` is stamped; NULL means
+// it is in the views. Every statement that LISTS submissions, COUNTS them for a
+// view, or exports them must therefore say which side it means — and the honest
+// way to do that is a single named predicate that a reader (and a test) can
+// recognise, rather than a hand-typed `archived_at IS NULL` per query that can
+// be forgotten in one place and silently leak archived rows in another.
+//
+// `db/submissions-archive.test.ts` scans every read site for one of these two
+// calls and fails on any that carries neither (unless it is on the explicit
+// allowlist of statements that legitimately read every row — the delete guard,
+// the migrations, and the by-id lookups behind the detail page's "this is
+// archived" banner).
+//
+// Lookups BY IDENTITY are deliberately NOT filtered: the point of archiving is
+// to hide a submission from views, not to make its own URL 404. See the route
+// notes in routes/submissions.ts.
+// -----------------------------------------------------------------------------
+
+/** Restricts a statement to submissions that are NOT archived — the default view. */
+export function notArchived(alias: string): string {
+  return `${alias}.archived_at IS NULL`;
+}
+
+/** Restricts a statement to archived submissions only — the "Archived" filter. */
+export function archivedOnly(alias: string): string {
+  return `${alias}.archived_at IS NOT NULL`;
+}
+

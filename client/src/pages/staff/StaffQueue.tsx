@@ -1,15 +1,17 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { Columns3, Download } from "lucide-react";
+import { Columns3, Download, Archive } from "lucide-react";
 import { api } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import type { Form, SubmissionRow } from "../../types";
 import { PageHead } from "../../components/layout";
+import { Toggle } from "../../components/Toggle";
 import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 import { formLabel, selectableForms } from "../../lib/forms";
+import { ARCHIVE_TOGGLE_LABEL, archivedMatches, submissionNoun } from "../../lib/archive";
 
 // ---------------------------------------------------------------------------
 // The staff and School Contact queue.
@@ -38,6 +40,16 @@ export default function StaffQueue() {
   // "" means "all forms". A school normally has exactly one form, in which
   // case we select it outright rather than offering a choice that isn't one.
   const [formFilter, setFormFilter] = useState("");
+  // Archived submissions are put away, not deleted — so the queue has to be able
+  // to show them, and has to SAY how many it is hiding. Staff are the people who
+  // notice a submission they were working on has gone; this is the two controls
+  // that let them find out where it went.
+  const [showArchived, setShowArchived] = useState(false);
+  // Both sides of the flag, so the strip can say what is hidden whichever view
+  // you are in. Null until they arrive: rendering "0 archived" before the request
+  // lands is a false all-clear on the one number whose job is to reveal an
+  // omission.
+  const [archiveCounts, setArchiveCounts] = useState<{ active: number; archived: number } | null>(null);
 
   const formId = formFilter ? Number(formFilter) : 0;
 
@@ -68,6 +80,7 @@ export default function StaffQueue() {
       .listSubmissions({
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(formFilter ? { form_id: Number(formFilter) } : {}),
+        archived: showArchived,
       })
       .then((s) => {
         if (!cancelled) setRows(s);
@@ -77,6 +90,34 @@ export default function StaffQueue() {
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [statusFilter, formFilter, showArchived]);
+
+  // What the list above cannot tell us — a filtered list is the wrong instrument
+  // for reporting its own omissions, because with the archived rows hidden they
+  // are absent by construction.
+  //
+  // `showArchived` is deliberately neither a dependency nor a parameter: the
+  // pair is the answer to "how many on each side", so this is the one request
+  // that must see both lists at once. Narrowing it by the flag it is measuring
+  // would return whichever half is already on screen and neither number useful.
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getSubmissionArchiveCounts({
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(formFilter ? { form_id: Number(formFilter) } : {}),
+      })
+      .then((c) => {
+        if (!cancelled) setArchiveCounts(c);
+      })
+      .catch(() => {
+        // Null, not zero — an unreachable count must not render as "nothing is
+        // hidden", which is a claim about the data this page cannot make.
+        if (!cancelled) setArchiveCounts(null);
       });
     return () => {
       cancelled = true;
@@ -214,7 +255,45 @@ export default function StaffQueue() {
             {t.value === "submitted" && counts.submitted > 0 && ` (${counts.submitted})`}
           </button>
         ))}
+        {/* Pushed to the right: the chips are "narrow the queue", this switch is
+            "look at the other list". Its label is its children, so the visible
+            words are the checkbox's accessible name. */}
+        <div style={{ marginLeft: "auto" }}>
+          <Toggle checked={showArchived} onChange={setShowArchived}>
+            {ARCHIVE_TOGGLE_LABEL}
+          </Toggle>
+        </div>
       </div>
+
+      {/* What this filter is hiding.
+          Rendered unconditionally in the archive view, because there the EMPTY
+          queue is the case that needs explaining: "nothing archived here, 12
+          still active" is a complete answer, whereas a bare table says nothing.
+          With the toggle off it appears only when something IS hidden — a strip
+          reading "0 archived" on every ordinary visit would be noise, and here
+          0 genuinely means nothing is being withheld. */}
+      {archiveCounts &&
+        (showArchived ? (
+          <div className="archive-note">
+            <Archive size={14} />
+            <span className="an-text">
+              Showing <strong>archived</strong> submissions only — {archivedMatches(archiveCounts.archived)}{" "}
+              these filters.
+              {archiveCounts.active > 0
+                ? ` ${archiveCounts.active} active ${submissionNoun(archiveCounts.active)} are hidden; switch off “${ARCHIVE_TOGGLE_LABEL}” to go back to them.`
+                : " No active submissions match these filters."}
+            </span>
+          </div>
+        ) : archiveCounts.archived > 0 ? (
+          <div className="archive-note">
+            <Archive size={14} />
+            <span className="an-text">
+              <strong>{archiveCounts.archived}</strong> archived{" "}
+              {submissionNoun(archiveCounts.archived)} hidden by these filters — switch on
+              “{ARCHIVE_TOGGLE_LABEL}” to list them.
+            </span>
+          </div>
+        ) : null)}
 
       {busy ? (
         <div className="loading-state">
@@ -231,11 +310,13 @@ export default function StaffQueue() {
           submissionPath={(publicId) => `/staff/${publicId}`}
           edit={edit}
           emptyMessage={
-            formFilter
-              ? "No submissions for this form yet."
-              : schoolScoped
-                ? "No submissions for your school yet."
-                : "No submissions yet."
+            showArchived
+              ? "No archived submissions match these filters."
+              : formFilter
+                ? "No submissions for this form yet."
+                : schoolScoped
+                  ? "No submissions for your school yet."
+                  : "No submissions yet."
           }
         />
       )}

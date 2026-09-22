@@ -621,12 +621,18 @@ export const api = {
   // -------------------------------------------------------------------------
   // Submissions
   // -------------------------------------------------------------------------
+  // `archived` chooses WHICH list, not whether to include archived rows: omitted
+  // (or false) is the normal view with archived rows hidden, true is the Archive
+  // view holding only them. There is no merged list on purpose — a merged one
+  // cannot answer "which of these is put away?", so nothing downstream could
+  // trust it.
   async listSubmissions(params: {
     school_id?: number;
     form_id?: number;
     status?: string;
     from?: string;
     to?: string;
+    archived?: boolean;
   } = {}): Promise<SubmissionRow[]> {
     const qs = new URLSearchParams();
     if (params.school_id !== undefined) qs.set("school_id", String(params.school_id));
@@ -634,12 +640,73 @@ export const api = {
     if (params.status) qs.set("status", params.status);
     if (params.from) qs.set("from", params.from);
     if (params.to) qs.set("to", params.to);
+    if (params.archived) qs.set("archived", "1");
     const q = qs.toString();
     return request<SubmissionRow[]>(`/api/submissions${q ? `?${q}` : ""}`, { auth: true });
   },
 
+  // How many rows the CURRENT filter puts on each side of the archive line, so
+  // the grid can say what it is hiding. Uses the same filter params as
+  // listSubmissions and deliberately carries no `archived` flag — the counts are
+  // the one answer that must see both sides at once.
+  async getSubmissionArchiveCounts(params: {
+    school_id?: number;
+    form_id?: number;
+    status?: string;
+    from?: string;
+    to?: string;
+  } = {}): Promise<{ active: number; archived: number }> {
+    const qs = new URLSearchParams();
+    if (params.school_id !== undefined) qs.set("school_id", String(params.school_id));
+    if (params.form_id !== undefined) qs.set("form_id", String(params.form_id));
+    if (params.status) qs.set("status", params.status);
+    if (params.from) qs.set("from", params.from);
+    if (params.to) qs.set("to", params.to);
+    const q = qs.toString();
+    return request<{ active: number; archived: number }>(
+      `/api/submissions/archive/counts${q ? `?${q}` : ""}`,
+      { auth: true }
+    );
+  },
+
   async getSubmission(publicId: string): Promise<SubmissionDetail> {
     return request<SubmissionDetail>(`/api/submissions/${publicId}`, { auth: true });
+  },
+
+  // Archive / restore. Available to staff and school contacts as well as
+  // admins; both return the refreshed detail so the caller never has to guess the
+  // new state. Archiving an already-archived row (or restoring an active one)
+  // answers 409 — surface that message rather than assuming it cannot happen,
+  // because the button label is read from the row the viewer loaded, which may be
+  // stale.
+  async archiveSubmission(publicId: string): Promise<SubmissionDetail> {
+    return request<SubmissionDetail>(`/api/submissions/${publicId}/archive`, {
+      method: "POST",
+      auth: true,
+    });
+  },
+
+  async restoreSubmission(publicId: string): Promise<SubmissionDetail> {
+    return request<SubmissionDetail>(`/api/submissions/${publicId}/restore`, {
+      method: "POST",
+      auth: true,
+    });
+  },
+
+  // ★ ADMIN ONLY, and irreversible — the one submission action that cannot be
+  // walked back, which is why it is not in the same role list as archive and
+  // restore above.
+  //
+  // The server refuses with 409 unless the submission is ALREADY archived, and
+  // that rule lives in the DELETE's own WHERE clause rather than in a read-then-
+  // delete here (two concurrent clicks must not both report success). So a caller
+  // should only ever offer this for a row it has seen archived — but it must
+  // still surface the 409, because the row the viewer is looking at may be stale.
+  //
+  // 204 on success, so there is nothing to return and nothing to show: the caller
+  // owns what happens next (reload the list, or leave the detail page).
+  async deleteSubmission(publicId: string): Promise<void> {
+    return request<void>(`/api/submissions/${publicId}`, { method: "DELETE", auth: true });
   },
 
   async updateSubmissionStatus(

@@ -7,7 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { Pencil } from "lucide-react";
+import { Pencil, Trash2 } from "lucide-react";
 import type { ExportColumn, FormField, SubmissionRow } from "../types";
 import { StatusBadge } from "./layout";
 import { renderEditor, toStr, displayValue, type AnswerValue } from "./FieldValue";
@@ -137,6 +137,18 @@ export default function SubmissionsGrid({
   hiddenBase = NO_HIDDEN,
   /** Overrides the empty-state wording; the admin view is the default. */
   emptyMessage = "No submissions for the selected filters.",
+  /**
+   * Supplying this adds a destructive Delete action to every row. Omitted means
+   * no Delete control is rendered at all — which is how the Active view and the
+   * staff queue stay free of a button their user cannot use, rather than showing
+   * a disabled one that has to explain itself.
+   *
+   * The owner decides when to supply it (the admin Archive view only); this file
+   * does not check the role, because it does not know which queue it is drawing.
+   * It also does not confirm — the owner owns the confirmation step, so the
+   * wording can name what is being deleted.
+   */
+  onDelete,
 }: {
   rows: SubmissionRow[];
   columns: ExportColumn[];
@@ -149,6 +161,8 @@ export default function SubmissionsGrid({
   /** Standard columns (`base_*` keys) this user turned off. */
   hiddenBase?: Set<string>;
   emptyMessage?: string;
+  /** Adds a permanent-delete action to each row when supplied. */
+  onDelete?: (publicId: string) => void;
 }) {
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const topScrollRef = useRef<HTMLDivElement | null>(null);
@@ -206,7 +220,16 @@ export default function SubmissionsGrid({
                   {c.label}
                 </th>
               ))}
-              {!hiddenBase.has(BASE_KEYS.actions) && <th style={{ width: 120 }}>Actions</th>}
+              {!hiddenBase.has(BASE_KEYS.actions) && (
+                /* The width follows the number of buttons in the cell. A
+                   destructive action makes it two, and a declared width that is
+                   narrower than nowrap content does not shrink it — the column
+                   wins and the grid just scrolls further, so the header would
+                   stop describing the cell it heads. 178 leaves the ~164px of
+                   real content slack rather than a zero-slack box, where
+                   sub-pixel rounding pushes a button out of its own cell. */
+                <th style={{ width: onDelete ? 178 : 120 }}>Actions</th>
+              )}
             </tr>
           </thead>
           <tbody>
@@ -270,10 +293,26 @@ export default function SubmissionsGrid({
                   })}
 
                   {!hiddenBase.has(BASE_KEYS.actions) && (
-                    <td data-label="Actions">
-                      <button className="badge-button" onClick={() => onOpen(s.public_id)}>
-                        Review
-                      </button>
+                    <td data-label="Actions" style={{ whiteSpace: "nowrap" }}>
+                      <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                        <button className="badge-button" onClick={() => onOpen(s.public_id)}>
+                          Review
+                        </button>
+                        {/* Only in a view that supplied the handler — i.e. only the
+                            admin Archive view. Deliberately not disabled elsewhere:
+                            a disabled Delete on a live row invites the question
+                            "why can't I?" at every row, forever. */}
+                        {onDelete && (
+                          <button
+                            className="badge-button danger"
+                            onClick={() => onDelete(s.public_id)}
+                            title="Delete this archived submission permanently"
+                          >
+                            <Trash2 size={13} aria-hidden="true" />
+                            Delete
+                          </button>
+                        )}
+                      </span>
                     </td>
                   )}
                 </tr>

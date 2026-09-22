@@ -5,6 +5,7 @@ import { ChevronDown, Check, Copy, KeyRound, Webhook, X } from "lucide-react";
 import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, type MenuItemKey } from "../../lib/settings";
 import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, School, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
+import { Toggle } from "../../components/Toggle";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
 
@@ -38,22 +39,8 @@ function Field({
   );
 }
 
-// A toggle switch component built from a styled checkbox.
-function Toggle({ checked, onChange, disabled }: { checked: boolean; onChange: (v: boolean) => void; disabled?: boolean }) {
-  return (
-    <label className="toggle">
-      <input
-        type="checkbox"
-        checked={checked}
-        disabled={disabled}
-        onChange={(e) => onChange(e.target.checked)}
-      />
-      <span className="track">
-        <span className="thumb" />
-      </span>
-    </label>
-  );
-}
+// A toggle switch component built from a styled checkbox — now shared (see
+// components/Toggle.tsx) so the filter toolbars do not grow a second copy.
 
 function roleBadge(role: Role): { cls: string; label: string } {
   if (role === "admin") return { cls: "badge-orange", label: "Admin" };

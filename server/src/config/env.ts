@@ -146,7 +146,12 @@ export const env = {
 
   rateLimit: {
     windowMs: int("RATE_LIMIT_WINDOW_MS", 900000),
-    max: int("RATE_LIMIT_MAX", 300),
+    // Per IP, per window. The SPA issues several reads per page load and every
+    // office behind one NAT shares a single bucket, so 300/15min was reachable
+    // by ordinary use — and exhausting it used to silently downgrade the login
+    // form. Bootstrap reads are now exempt in index.ts, so this budget is spent
+    // on real API calls only.
+    max: int("RATE_LIMIT_MAX", 1000),
   },
 
   // Google Docs generation (staff "Generate document" feature).

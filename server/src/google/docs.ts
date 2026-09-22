@@ -438,6 +438,15 @@ function buildDocumentName(
  * Idempotent guard used by the staff-save route. Locates a staff-only "Generate
  * document" checkbox in the submission's form and, if it's checked, triggers
  * generation after the values are saved. Fire-and-forget: never throws.
+ *
+ * ★ Fire-and-forget is what makes this race the admin permanent delete: the job
+ * holds no handle the delete can observe, so if a `documents` INSERT from here
+ * lands between that delete's child removes and its parent remove, the delete
+ * fails with a 500 instead of a 204. Deliberately documented rather than guarded
+ * — closing it needs a cascade change on a database this app does not own, or a
+ * lock shared across app instances, and a per-process guard would guarantee
+ * nothing under scale-out. See `deleteSubmission` in db/queries.ts and the
+ * Swagger description on DELETE /api/submissions/{publicId}.
  */
 export async function maybeGenerateDocument(
   submissionId: number,

@@ -137,11 +137,18 @@ export const sqlserverDialect: Dialect = {
     // one matches; `scs.id` breaks a tie between duplicate names the same way
     // for both dialects, and matching on LOWER() keeps that true on libSQL,
     // whose comparison operators are case-sensitive.
+    //
+    // The answer is TRIMMED before comparison because every other site that
+    // resolves this answer trims first: `resolveSubmissionSchoolId` writes
+    // `a.value.trim()` into the lookup, `schoolFieldPredicate` trims the label,
+    // and the backfill script trims its lookup key. Comparing untrimmed here
+    // would let an answer typed with a trailing space resolve at insert time
+    // and then fail to resolve for display.
     return (
       `(SELECT TOP 1 COALESCE(scs.name, sv.value)\n` +
       `       FROM dbo.submission_values sv\n` +
       `       JOIN dbo.form_fields ff ON ff.id = sv.field_id\n` +
-      `       LEFT JOIN dbo.schools scs ON LOWER(scs.name) = LOWER(sv.value)\n` +
+      `       LEFT JOIN dbo.schools scs ON LOWER(scs.name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
       `      WHERE sv.submission_id = s.id\n` +
       `        AND ${schoolFieldPredicate()}\n` +
       `        AND sv.value IS NOT NULL\n` +

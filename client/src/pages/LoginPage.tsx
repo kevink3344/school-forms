@@ -19,6 +19,28 @@ const MODE_LABELS: Record<LoginMode, string> = {
 const MAINTENANCE_DEFAULT =
   "We are performing scheduled maintenance. Please try again shortly.";
 
+const LOGIN_MODES: readonly LoginMode[] = ["select", "password", "maintenance"];
+
+// Normalise whatever the settings endpoint sends into a known mode. The stored
+// value is a free-text column, so "Password" or " password " must still resolve
+// rather than missing every render branch and leaving a card with no form in it.
+function parseLoginMode(raw: unknown): LoginMode | null {
+  const v = typeof raw === "string" ? raw.trim().toLowerCase() : "";
+  return (LOGIN_MODES as readonly string[]).includes(v) ? (v as LoginMode) : null;
+}
+
+// Describe a failed bootstrap read. Deliberately never names a mode: the whole
+// point is that a failure must not be reported as one.
+function describeSettingsFailure(err: unknown): string {
+  if (err instanceof ApiError) {
+    if (err.status === 429) {
+      return "Too many requests from this address — the server is rate-limiting sign-in lookups.";
+    }
+    return `The server could not report the sign-in mode (HTTP ${err.status}).`;
+  }
+  return "Could not reach the server to determine the sign-in mode.";
+}
+
 export default function LoginPage() {
   const { login, loginSelect, user } = useAuth();
   const navigate = useNavigate();
@@ -31,6 +53,16 @@ export default function LoginPage() {
   const [loginMode, setLoginMode] = useState<LoginMode | null>(null);
   const [loginModeOverride, setLoginModeOverride] = useState<LoginMode | null>(null);
   const [maintenanceMessage, setMaintenanceMessage] = useState(MAINTENANCE_DEFAULT);
+
+  // Outcome of the login-mode lookup. On "error" the page renders an error +
+  // retry card and NO form — it must not pick a mode on the client's behalf,
+  // because the only safe guess (password) may not be what the operator chose
+  // and the only legible one (the stored default) is the password-free test
+  // screen. See the effect below.
+  const [settingsState, setSettingsState] = useState<"loading" | "ready" | "error">("loading");
+  const [settingsError, setSettingsError] = useState("");
+  // Bumped by the retry button to re-run the bootstrap effect.
+  const [settingsAttempt, setSettingsAttempt] = useState(0);
 
   // Select-mode state.
   const [orgSlug, setOrgSlug] = useState("academics");
@@ -55,17 +87,41 @@ export default function LoginPage() {
   useEffect(() => {
     let cancelled = false;
     async function load() {
+      setSettingsState("loading");
+      setSettingsError("");
       try {
+        // Promise.all: EITHER read failing means the mode is unknown, so the
+        // pair is treated as one lookup.
         const [mode, info] = await Promise.all([
           api.getPublicSetting("login_mode"),
           api.getInfo(),
         ]);
-        if (!cancelled) {
-          setLoginMode((mode.value as LoginMode) || "select");
-          setLoginModeOverride(info.loginModeOverride);
+        if (cancelled) return;
+        const parsed = parseLoginMode(mode.value);
+        if (!parsed) {
+          // A value outside the three known modes is not a mode. Guessing here
+          // is how a production site ends up rendering the test screen.
+          setLoginMode(null);
+          setLoginModeOverride(null);
+          setSettingsError(
+            `The server reported an unrecognised sign-in mode (${JSON.stringify(mode.value)}).`
+          );
+          setSettingsState("error");
+          return;
         }
-      } catch {
-        if (!cancelled) setLoginMode("select");
+        setLoginMode(parsed);
+        setLoginModeOverride(info.loginModeOverride);
+        setSettingsState("ready");
+      } catch (err) {
+        if (cancelled) return;
+        // Deliberately NOT falling back to a mode. This catch previously set
+        // "select", so a rate-limited lookup silently turned the login page
+        // into the password-free test form on a "password"-mode site.
+        setLoginMode(null);
+        setLoginModeOverride(null);
+        setSettingsError(describeSettingsFailure(err));
+        setSettingsState("error");
+        return;
       }
       try {
         const m = await api.getPublicSetting("maintenance_message");
@@ -78,7 +134,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [settingsAttempt]);
 
   // Effective mode: admin local preview > env override > DB setting.
   const effectiveMode: LoginMode | null =
@@ -160,6 +216,51 @@ export default function LoginPage() {
       setBusy(false);
     }
   };
+
+  // ----- Bootstrap failed -----
+  // An error card, not a form. `?admin=1` is the one exception: it is an
+  // explicit, per-URL opt-in to previewing a chosen mode, so it cannot arrive by
+  // accident — but nothing else may infer a mode from a failure.
+  if (settingsState === "error" && !adminMode) {
+    return (
+      <Centered>
+        <div className="card" style={{ width: "100%", maxWidth: 460, padding: 32 }}>
+          <p
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              textTransform: "uppercase",
+              letterSpacing: "0.08em",
+              color: "var(--text-muted)",
+              margin: "0 0 4px",
+            }}
+          >
+            Authentication
+          </p>
+          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Sign-in unavailable</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "8px 0 0" }}>
+            {settingsError}
+          </p>
+          {/* Says out loud what the page is doing, because silently showing the
+              test form is exactly what this replaced. */}
+          <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "10px 0 0" }}>
+            No sign-in form is shown until the mode is known, so a failed lookup can never
+            present the wrong one.
+          </p>
+          <div style={{ display: "flex", gap: 10, marginTop: 20, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="primary-button"
+              onClick={() => setSettingsAttempt((n) => n + 1)}
+              style={{ justifyContent: "center" }}
+            >
+              Try again
+            </button>
+          </div>
+        </div>
+      </Centered>
+    );
+  }
 
   // ----- Loading state -----
   if (effectiveMode === null) {

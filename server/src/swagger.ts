@@ -177,6 +177,15 @@ export function buildSwaggerSpec(req?: Request) {
             staff_fields_updated_by: { type: "integer", nullable: true },
             staff_fields_updated_at: { type: "string", format: "date-time", nullable: true },
             staff_fields_updated_by_name: { type: "string", nullable: true },
+            archived_at: {
+              type: "string",
+              format: "date-time",
+              nullable: true,
+              description:
+                "When this submission was archived, or `null` while it is in the views. Non-null means the submission is hidden from the dashboard, the staff queue, submission counts, exports, reports and the Documents list — but NOT from `GET /api/submissions/{publicId}`, which returns archived submissions on purpose so their own page still resolves.",
+            },
+            archived_by: { type: "integer", nullable: true, description: "id of the admin who archived it. Cleared by restore." },
+            archived_by_name: { type: "string", nullable: true, description: "Display name for `archived_by`, resolved from `users`. Present on list and detail responses; only meaningful when `archived_at` is set." },
             values: { type: "array", items: { $ref: "#/components/schemas/SubmissionValue" } },
             adhocFields: { type: "array", items: { $ref: "#/components/schemas/AdhocField" }, description: "Staff-only fields added ad-hoc to this submission." },
             staffOnlyFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's own staff-only field definitions." },
@@ -1124,6 +1133,13 @@ export function buildSwaggerSpec(req?: Request) {
         get: {
           tags: ["Submissions"],
           summary: "List submissions (admin: all, staff: own school)",
+          description:
+            "**Archived submissions are excluded unless `archived` is set.** Archiving is the non-destructive counterpart to a delete: the row, its answers, its staff-only and ad-hoc fields and its generated documents all stay exactly where they are, but it is hidden from every listing, count, export and report in the app — including this one.\n\n" +
+            "`archived` is not a filter you combine with the others; it selects WHICH of the two lists you are asking for:\n\n" +
+            "- omitted / `0` — the normal view. Archived rows are excluded, i.e. the only rows you get back are `archived_at IS NULL`.\n" +
+            "- `1` / `true` — the Archive view. ONLY rows with `archived_at` set are returned, narrowed by the same `school_id` / `form_id` / `status` / date filters.\n\n" +
+            "There is no mode that returns both. A merged list could not answer \"which of these is put away?\", so every row would carry a doubt that the count totals, the export and the row actions would each have to inherit.\n\n" +
+            "Archived submissions are still readable **by public id** — `GET /api/submissions/{publicId}` deliberately returns them, so a bookmarked link, a Webhook Log link or browser Back lands somewhere that explains itself and offers Restore. Archiving hides a submission from *views*, not from its own URL.",
           security: [{ [bearerScheme]: [] }],
           parameters: [
             { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
@@ -1131,6 +1147,14 @@ export function buildSwaggerSpec(req?: Request) {
             { name: "status", in: "query", schema: { type: "string" }, required: false },
             { name: "from", in: "query", schema: { type: "string" }, required: false },
             { name: "to", in: "query", schema: { type: "string" }, required: false },
+            {
+              name: "archived",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["0", "1", "true", "false"] },
+              description:
+                "Which list to read. `1` or `true` returns only archived submissions; anything else (or omitting it) returns only unarchived ones. See the description above.",
+            },
           ],
           responses: {
             "200": {
@@ -1637,6 +1661,107 @@ export function buildSwaggerSpec(req?: Request) {
               content: { "application/json": { schema: { $ref: "#/components/schemas/Submission" } } },
             },
             "404": { description: "Submission not found" },
+          },
+        },
+        delete: {
+          tags: ["Submissions"],
+          summary: "Delete an archived submission permanently — admin, irreversible",
+          description:
+            "Removes the submission and everything hanging off it: its answers (`submission_values`), its ad-hoc fields (`submission_adhoc_fields`) and its generated-document rows (`documents`). Those three are removed by this call itself, in one transaction, and not by the database's `ON DELETE CASCADE` — `schema.ts` declares the cascade, but every `CREATE TABLE` there is guarded by `IF OBJECT_ID(…) IS NULL`, so a database created by an earlier revision of that DDL carries the same three foreign keys with `NO ACTION` and a delete that leaned on the cascade would answer 500 on it.\n\n" +
+            "**The submission must already be archived.** The archive-first rule is part of the DELETE's own `WHERE` clause, so it cannot be bypassed by racing a restore: a row that is not archived matches nothing, the child removes are unwound, and the call answers **409** — the same status archiving and restoring use for a no-op. This is why the app's every control asks for the reversible action before offering the irreversible one.\n\n" +
+            "**What is NOT deleted:** the generated Google Doc file itself, and any files the answers reference. Nothing in this app has ever had a path that deletes from the organization's Drive folder. The `documents` row that pointed at the file goes with the submission, so the file becomes unreachable from here — but it still exists in Drive, and it is the caller's business to know that. `webhook_events` rows also survive: that table has no foreign key to `submissions` on purpose, because the intake log is a record of what arrived and keeps its `submission_id` as evidence.\n\n" +
+            "**A background document generation can race this call — one known, deliberately unclosed window.** Generation is fire-and-forget: a staff save that ticks the staff-only \"Generate document\" checkbox calls `maybeGenerateDocument`, and `POST /api/documents/{id}/retry` does the same, both ending in `void generateDocument(…).catch(() => undefined)`. If one is in flight as this delete commits, the outcome depends on where its `documents` INSERT lands. After the whole transaction: the insert fails on the now-missing parent, the error is swallowed, and nothing is written. *Between* this call's child removes and its parent remove: the new child re-blocks the parent delete, so this call answers **500** instead of 204 — retry it and it will succeed, no row is left behind. In the last case — a retry row that existed before the transaction and is being regenerated while the delete commits — a Google Doc can be created for a submission that no longer exists, leaving a file in the organization's Drive folder that nothing here points at. Closing the window would need either `ON DELETE CASCADE` on the live database's three child keys (a schema change this app is forbidden from imposing on a database it did not create) or a lock shared across app instances (there is none — a per-process guard would serialize nothing under App Service scale-out, so it would *look* like a fix while guaranteeing nothing). Documented rather than half-guarded. See `maybeGenerateDocument` in `google/docs.ts`.\n\n" +
+            "Fails with **404** for an unknown public id and **403** for a submission in another school — checked before the delete, so a row the caller cannot see never gets the 409 that would imply it exists.\n\n" +
+            "**Admin-only**, unlike archive and restore, because this one cannot be walked back. 204 with no body: there is no row left to describe.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "204": { description: "Deleted" },
+            "401": { description: "Not authenticated" },
+            "403": { description: "Forbidden — admin required, or the submission belongs to another school" },
+            "404": { description: "Submission not found" },
+            "409": { description: "This submission must be archived before it can be deleted" },
+          },
+        },
+      },
+      "/api/submissions/archive/counts": {
+        get: {
+          tags: ["Submissions"],
+          summary: "How many submissions the current filter has on each side of the archive line",
+          description:
+            "Returns `{ active, archived }` for the SAME filters `GET /api/submissions` accepts, so a grid can state out loud what it is not showing (\"4 archived hidden\") instead of silently dropping rows.\n\n" +
+            "`active` is the count the unarchived list would return and `archived` the count the Archive view would return; together they are every submission the filter matches. Both are computed in ONE statement, so the pair cannot disagree with itself — a row archived between two separate counts would otherwise be counted on neither side (or twice).\n\n" +
+            "A side with no rows reports a real `0`, never `null` and never a missing key.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "school_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "form_id", in: "query", schema: { type: "integer" }, required: false },
+            { name: "status", in: "query", schema: { type: "string" }, required: false },
+            { name: "from", in: "query", schema: { type: "string" }, required: false },
+            { name: "to", in: "query", schema: { type: "string" }, required: false },
+          ],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    required: ["active", "archived"],
+                    properties: {
+                      active: { type: "integer", description: "Matching submissions that are in the views." },
+                      archived: { type: "integer", description: "Matching submissions that are archived." },
+                    },
+                  },
+                },
+              },
+            },
+            "401": { description: "Not authenticated" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/archive": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Archive a submission (staff/admin)",
+          description:
+            "Hides a submission from every view: the admin dashboard, the staff queue, the login-page stat box, form submission counts, CSV/JSON exports, report previews and the Documents list. The row itself is untouched — answers, staff-only fields, ad-hoc fields and generated Google documents all remain, which is what makes this the non-destructive step that `DELETE /api/submissions/{publicId}` (admin-only, irreversible) requires first.\n\n" +
+            "Archiving is orthogonal to `status`: the workflow state (`submitted` / `in_review` / `flagged` / `completed`) is not changed, so restoring returns the submission to exactly the state it left. A `status` of `archived` does not exist and is rejected.\n\n" +
+            "Returns the updated submission, including `archived_at` and `archived_by` (with `archived_by_name` resolved) and the `documents` array.\n\n" +
+            "Available to staff and school contacts as well as admins, like the rest of this resource: the row is resolved by public id (organization-scoped) and then gated on the actor's school, so the reach is the actor's own schools either way. No-op when already archived — see the 409.\n\n" +
+            "The row is still readable by public id afterwards; `GET /api/submissions/{publicId}` returns it with `archived_at` set so the detail page can render an Archived banner with a Restore button.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK — the updated submission, now archived",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Submission" } } },
+            },
+            "401": { description: "Not authenticated" },
+            "403": { description: "Forbidden — the submission belongs to another school" },
+            "404": { description: "Submission not found" },
+            "409": { description: "This submission is already archived" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/restore": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Restore an archived submission (staff/admin)",
+          description:
+            "Returns an archived submission to every view. This only clears the archive marker (`archived_at` and `archived_by`), so the submission reappears under the workflow status it held when it was archived — nothing about the answers, documents or staff-only fields is rebuilt.\n\n" +
+            "Same guards as archiving: whoever can put a row away can take it back out. Returns the updated submission. Fails with 409 if the submission is not archived, so a double-click cannot report a change that did not happen.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK — the updated submission, no longer archived",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Submission" } } },
+            },
+            "401": { description: "Not authenticated" },
+            "403": { description: "Forbidden — the submission belongs to another school" },
+            "404": { description: "Submission not found" },
+            "409": { description: "This submission is not archived" },
           },
         },
       },

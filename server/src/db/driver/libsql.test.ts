@@ -565,7 +565,11 @@ describe("dialect submissionSchoolNameSubquery", () => {
     for (const dialect of [sqlserverDialect, tursoDialect]) {
       const sql = dialect.submissionSchoolNameSubquery();
       expect(sql).toMatch(/COALESCE\(scs\.name, sv\.value\)/);
-      expect(sql).toMatch(/LEFT JOIN [\w.]*schools scs ON LOWER\(scs\.name\) = LOWER\(sv\.value\)/);
+      // The compared answer is trimmed, matching the insert-time resolver and
+      // the backfill script — all three must classify one answer the same way.
+      expect(sql).toMatch(
+        /LEFT JOIN [\w.]*schools scs ON LOWER\(scs\.name\) = LOWER\(LTRIM\(RTRIM\(sv\.value\)\)\)/
+      );
       // A blank field is not an answer: without this the first school-labelled
       // field, left empty, would COALESCE to '' and out-rank the real join.
       expect(sql).toMatch(/LTRIM\(RTRIM\(sv\.value\)\) <> ''/);

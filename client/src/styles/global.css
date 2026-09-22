@@ -250,6 +250,17 @@ p { margin: 0; }
   font-size: 12px; font-weight: 600; transition: background-color .13s ease, border-color .13s ease, color .13s ease;
 }
 .badge-button:hover:not(:disabled) { background: var(--tint); border-color: var(--accent); color: var(--accent-strong); }
+/* A destructive row action (Delete on an archived submission). The plain
+   .badge-button hover turns the label accent-blue, which reads as "safe" on the
+   one control in this app that cannot be undone — so the destructive variant has
+   to keep its own colour in the hover state too, not just at rest.
+   `--danger` is not declared as a token anywhere in this file; the fallback is
+   the same value every existing danger rule uses (see .icon-btn.danger:hover), so
+   the two cannot disagree about what danger looks like. */
+.badge-button.danger { color: var(--danger, #b93040); border-color: var(--danger-line, #eec6cb); }
+.badge-button.danger:hover:not(:disabled) {
+  background: var(--danger-tint, #fdeef0); border-color: var(--danger, #b93040); color: var(--danger, #b93040);
+}
 .icon-button {
   color: var(--text-muted); background: transparent; border: none; justify-content: center;
   align-items: center; width: 36px; height: 36px; display: inline-flex; border-radius: var(--radius);
@@ -372,6 +383,11 @@ input.edit-input {
 .toggle input:checked + .track { background: var(--accent); }
 .toggle input:checked + .track .thumb { transform: translateX(16px); }
 .toggle input:disabled + .track { opacity: 0.5; cursor: not-allowed; }
+/* The switch's own label, rendered inside the same <label> so the words are the
+   checkbox's accessible name. */
+.toggle .toggle-label {
+  margin-left: 8px; font-size: 13px; color: var(--text); white-space: nowrap;
+}
 
 @media (max-width: 768px) {
   .form-grid { grid-template-columns: 1fr; }
@@ -390,6 +406,7 @@ input.edit-input {
   display: inline-flex; align-items: center; padding: 4px 10px; border-radius: var(--radius);
   border: 1px solid transparent; font-size: 12px; font-weight: 600; white-space: nowrap;
 }
+
 .badge-blue   { color: var(--filled-fg);   background: var(--filled-bg); border-color: var(--tint-line); }
 .badge-green  { color: var(--filled-fg);   background: var(--filled-bg); border-color: var(--tint-line); }
 .badge-amber  { color: var(--vacant-fg);   background: var(--orange-tint); border-color: var(--orange-tint-line); }
@@ -398,6 +415,41 @@ input.edit-input {
 .badge-orange { color: var(--vacant-fg);   background: var(--orange-tint); border-color: var(--orange-tint-line); }
 .badge-teal   { color: var(--filled-fg);   background: var(--filled-bg); border-color: var(--tint-line); }
 .badge-gray   { color: var(--text-muted);  background: var(--panel-bg); border-color: var(--border); }
+
+/* Archived-submission notice (submission detail page).
+   Its own class on purpose — `.banner` is this app's top navigation bar, so
+   reusing it would restyle the header from a page body.
+   Explanatory only: the Archive/Restore control lives in the page's head
+   actions, so there is deliberately no action slot in here. */
+.archived-notice {
+  display: flex; align-items: flex-start; gap: 10px; flex-wrap: wrap;
+  padding: 12px 14px; margin-bottom: 18px;
+  border: 1px solid var(--orange-tint-line); border-radius: var(--radius);
+  background: var(--orange-tint); color: var(--vacant-fg); font-size: 13px;
+}
+.archived-notice .an-icon { display: flex; flex-shrink: 0; padding-top: 1px; }
+/* The prose must be its own flex ITEM. A bare text node beside the icon becomes
+   a sibling item, so the container's `gap` lands between the fragments and the
+   paragraph renders ragged even though every word in it is correct. */
+.archived-notice .an-text { flex: 1 1 auto; min-width: 0; }
+
+/* "What this filter is hiding" strip, rendered under a grid's toolbar.
+   It exists because a filtered list CANNOT report what it does not contain: with
+   archived rows hidden they are absent by construction, so "4 of these were
+   archived" is a number only the server can give. Two lists and one count is the
+   whole design — never a merged list, which could not say which rows are put
+   away. */
+.archive-note {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 8px 12px; margin-bottom: 16px;
+  border: 1px solid var(--border); border-radius: var(--radius);
+  background: var(--panel-bg); color: var(--text-muted); font-size: 12.5px;
+}
+/* Same trap as .archived-notice: a bare text node beside the icon becomes its own
+   flex item and the gap lands between the fragments. */
+.archive-note .an-text { flex: 1 1 auto; min-width: 0; }
+.archive-note strong { color: var(--text); }
+
 
 /* Filter toolbar */
 .filter-bar {

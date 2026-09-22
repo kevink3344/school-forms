@@ -54,6 +54,16 @@ export const ROUTES: RouteEntry[] = [
   { method: "put", path: "/api/forms/{id}/columns", auth: "staff", tags: "Forms" },
   { method: "post", path: "/api/submissions", auth: "none", tags: "Submissions" },
   { method: "get", path: "/api/submissions", auth: "staff", tags: "Submissions" },
+  // Archive line. `counts` is two-segment on purpose so it cannot be captured by
+  // the single-segment `{publicId}` route. `archive`/`restore` are staff-scoped
+  // like the rest of this router — the row is org- and school-gated at the
+  // handler, so "staff" here means "staff or admin".
+  { method: "get", path: "/api/submissions/archive/counts", auth: "staff", tags: "Submissions" },
+  { method: "post", path: "/api/submissions/{publicId}/archive", auth: "staff", tags: "Submissions" },
+  { method: "post", path: "/api/submissions/{publicId}/restore", auth: "staff", tags: "Submissions" },
+  // The one admin-only submission action: DELETE destroys the row, and it will
+  // only do so once `archive` above has already been applied to it.
+  { method: "delete", path: "/api/submissions/{publicId}", auth: "admin", tags: "Submissions" },
   { method: "get", path: "/api/submissions/{publicId}/public", auth: "none", tags: "Submissions" },
   { method: "get", path: "/api/submissions/{publicId}", auth: "staff", tags: "Submissions" },
   { method: "patch", path: "/api/submissions/{publicId}/status", auth: "staff", tags: "Submissions" },

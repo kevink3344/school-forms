@@ -181,6 +181,12 @@ export interface Submission {
   // staff-only fields, and when. NULL until a staff-only save happens.
   staff_fields_updated_by: number | null;
   staff_fields_updated_at: Date | null;
+  // Archive state. `archived_at` NULL means "in the views"; non-NULL means the
+  // submission is hidden from every list, count, export and report, and is only
+  // reachable by its own URL (which says so). `archived_by` is who archived it.
+  // Orthogonal to `status` on purpose — see the DDL note in this file.
+  archived_at: Date | null;
+  archived_by: number | null;
 }
 
 export interface SubmissionValue {
@@ -771,6 +777,8 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
                   CHECK (status IN ('submitted','in_review','flagged','completed')),
      submitted_at DATETIME2 NOT NULL CONSTRAINT DF_submissions_submitted_at DEFAULT SYSUTCDATETIME(),
      updated_at   DATETIME2 NOT NULL CONSTRAINT DF_submissions_updated_at DEFAULT SYSUTCDATETIME(),
+     archived_at  DATETIME2 NULL,
+     archived_by  INT NULL,
      CONSTRAINT FK_submissions_form FOREIGN KEY (form_id) REFERENCES dbo.forms(id) ON DELETE CASCADE,
      CONSTRAINT FK_submissions_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id) ON DELETE NO ACTION
    );
@@ -810,6 +818,34 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      ALTER TABLE dbo.submissions ADD staff_fields_updated_by INT NULL;
    IF COL_LENGTH('dbo.submissions', 'staff_fields_updated_at') IS NULL
      ALTER TABLE dbo.submissions ADD staff_fields_updated_at DATETIME2 NULL;`,
+
+  // ---------------------------------------------------------------------
+  // Archive ("hidden from every view").
+  //
+  // A submission is archived by stamping `archived_at`; NULL means "in the
+  // views". Two reasons this is a timestamp rather than another value of
+  // `status` (which is how forms are archived):
+  //
+  //   1. `status` is the WORKFLOW state, and it is carried into grid filters,
+  //      saved report views' `filters` JSON and every export. Folding archive
+  //      into it would mean every status filter and every saved view has to
+  //      learn a value that means "not work", and PATCH /status would become an
+  //      archive endpoint by accident.
+  //   2. Restore is then exactly "clear the column". No `pre_archive_status`
+  //      twin to keep in step and no invariant to enforce — the workflow state
+  //      was never touched, so there is nothing to remember.
+  //
+  // Deliberately NOT part of CK_submissions_status: archiving does not change
+  // what work state a submission is in.
+  //
+  // `archived_by` is the audit trail (who put it away). No FK, matching the
+  // other actor columns on this ladder: an INT rather than a reference keeps a
+  // user delete from touching submission history.
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.submissions', 'archived_at') IS NULL
+     ALTER TABLE dbo.submissions ADD archived_at DATETIME2 NULL;
+   IF COL_LENGTH('dbo.submissions', 'archived_by') IS NULL
+     ALTER TABLE dbo.submissions ADD archived_by INT NULL;`,
 
   `IF OBJECT_ID('dbo.submission_values', 'U') IS NULL
    CREATE TABLE dbo.submission_values (

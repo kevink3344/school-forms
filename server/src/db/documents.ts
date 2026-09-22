@@ -1,6 +1,7 @@
 import { execute } from "./queries.js";
 import { getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
+import { notArchived } from "./dialect/shared.js";
 import type { Document, ListDocumentRow } from "./schema.js";
 
 /** Statement builders for the active dialect (see db/dialect/). */
@@ -135,7 +136,13 @@ export async function listDocuments(params: {
   organizationId?: number | null;
   submissionId?: number | null;
 }): Promise<ListDocumentRow[]> {
-  const clauses: string[] = [];
+  // Archived submissions are hidden from every view, and the Documents list is a
+  // view of them organised by their generated PDFs — so their documents go with
+  // them. Done HERE rather than left to the caller: the endpoint's school/org
+  // filter is optional, so a bare `GET /api/documents` (the admin Documents
+  // page) would otherwise list the documents of every archived submission in
+  // the database.
+  const clauses: string[] = [notArchived("s")];
   const p: Record<string, unknown> = {};
   if (params.schoolId !== undefined && params.schoolId !== null) {
     clauses.push("s.school_id = @schoolId");
@@ -149,8 +156,21 @@ export async function listDocuments(params: {
     clauses.push("d.submission_id = @submissionId");
     p.submissionId = params.submissionId;
   }
-  const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
+  return queryDocuments(clauses, p);
+}
 
+/**
+ * The document SELECT, shared by every caller so the three projected answer
+ * columns cannot drift apart. Takes the WHERE clauses already built — the
+ * archive rule is the caller's decision, see `listDocumentsBySubmission`.
+ *
+ * The caller must supply the `s.`-qualified clauses; the joins to submissions and
+ * schools are part of this statement, not optional.
+ */
+function queryDocuments(
+  clauses: string[],
+  p: Record<string, unknown>
+): Promise<ListDocumentRow[]> {
   return execute<ListDocumentRow>(
     `SELECT d.id, d.submission_id, d.document_id, d.status, d.created_by,
             d.created_at, d.updated_at, d.error,
@@ -162,7 +182,7 @@ export async function listDocuments(params: {
      FROM dbo.documents d
      JOIN dbo.submissions s ON s.id = d.submission_id
      LEFT JOIN dbo.schools sc ON sc.id = s.school_id
-     ${where}
+     WHERE ${clauses.join(" AND ")}
      ORDER BY d.created_at DESC`,
     p
   );
@@ -172,6 +192,12 @@ export async function listDocuments(params: {
  * Fetch a single document row by its DB id, along with the submission public id
  * (used by the retry endpoint to scope/report). Scoped the same way as
  * listDocuments so a user cannot touch a document outside their org/school.
+ *
+ * Deliberately NOT filtered by archive state: this is a by-identity read, and
+ * the only way to reach a document id is from a list or panel that already had
+ * it. A retry on an archived submission's failed document must still work —
+ * archiving hides a submission from views, it does not invalidate the work in
+ * flight against it.
  */
 export async function getDocumentById(
   dbId: number,
@@ -210,11 +236,15 @@ export async function getDocumentById(
 }
 
 /**
- * Convenience for the detail page: one submission's documents. Delegates to
- * listDocuments with the submission filter.
+ * One submission's documents — the detail page's document panel, and the re-read
+ * after a retry. Deliberately does NOT exclude archived submissions: the detail
+ * page opens an archived submission on purpose (with a banner saying so), and a
+ * panel that silently showed nothing while the documents exist would make the
+ * page read as broken rather than as archived. The rule is "hidden from LISTS",
+ * not "hidden from its own page" — `listDocuments` is where that is enforced.
  */
 export async function listDocumentsBySubmission(
   submissionId: number
 ): Promise<ListDocumentRow[]> {
-  return listDocuments({ submissionId });
+  return queryDocuments(["d.submission_id = @submissionId"], { submissionId });
 }

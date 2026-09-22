@@ -181,6 +181,13 @@ export interface Submission {
   // Staff-only fields audit trail (null until a staff-only save happens).
   staff_fields_updated_by: number | null;
   staff_fields_updated_at: string | null;
+  // Archive trail. Archiving is its OWN axis, deliberately not a `status` value:
+  // an archived row keeps its workflow status (submitted / in_review / …), so
+  // restoring it returns it exactly as it was. Null on every active row.
+  archived_at: string | null;
+  archived_by: number | null;
+  // Display name of the admin who archived it (detail endpoint only).
+  archived_by_name?: string | null;
 }
 
 export interface SubmissionValue {

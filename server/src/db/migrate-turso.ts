@@ -37,6 +37,10 @@
  */
 import { createClient, type Client as LibsqlClient, type InValue } from "@libsql/client";
 import { env } from "../config/env.js";
+import {
+  BOOLEAN_COLUMNS as CANONICAL_BOOLEAN_COLUMNS,
+  TIMESTAMP_COLUMNS as CANONICAL_TIMESTAMP_COLUMNS,
+} from "./client.js";
 import { mssqlClient } from "./driver/mssql.js";
 import { libsqlClient } from "./driver/libsql.js";
 import { tursoDialect } from "./dialect/turso.js";
@@ -70,11 +74,22 @@ const WIPE_ORDER = [...TABLES].reverse();
 /** Rows per batch. libSQL has no bulk COPY; each batch is one round trip. */
 const BATCH_ROWS = 200;
 
-/** Columns whose stored TEXT must read back as a real boolean. */
-const BOOLEAN_COLUMNS = ["active", "required", "staff_only", "is_default", "show_on_test_screen"] as const;
-
-/** Timestamp columns that must round-trip as ISO-8601 `...Z`. */
-const TIMESTAMP_COLUMNS = ["created_at", "updated_at", "submitted_at", "last_used_at", "staff_fields_updated_at"];
+/**
+ * Columns whose stored TEXT must read back as a real boolean, and timestamp
+ * columns that must round-trip as ISO-8601 `...Z` — both taken from
+ * `./client.js` rather than restated here.
+ *
+ * They used to be restated here, and both copies had drifted: the timestamp
+ * list was missing `received_at` and `archived_at`, and the boolean list was a
+ * third hand-copy of a set `client.ts` already owns. This script is a
+ * VERIFY-ONLY consumer of both — the sets only decide which target columns 3c
+ * and 3d probe — so a stale copy silently shrinks the verification rather than
+ * failing: an omitted column is simply never checked for the epoch-shaped value
+ * a raw libSQL `Date` bind produces. `client.ts` imports nothing, so sharing
+ * these costs no side effects and cannot create a cycle.
+ */
+const BOOLEAN_COLUMNS = CANONICAL_BOOLEAN_COLUMNS;
+const TIMESTAMP_COLUMNS = CANONICAL_TIMESTAMP_COLUMNS;
 
 const args = process.argv.slice(2);
 const CONFIRM = args.includes("--confirm");

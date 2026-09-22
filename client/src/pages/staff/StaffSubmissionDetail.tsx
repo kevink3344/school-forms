@@ -1,6 +1,6 @@
-import { useEffect, useState, type FormEvent } from "react";
+import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Lock } from "lucide-react";
+import { Lock, Archive, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
 import type { SubmissionDetail, SubmissionStatus, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
@@ -13,6 +13,17 @@ import { FieldValue, valuesToDraft } from "../../components/FieldValue";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "completed"];
 
+// Inline styles for the delete confirmation, matching the dispatch on the admin
+// dashboard and the form-delete dialog on the Forms page.
+const BODY_TEXT: CSSProperties = { margin: 0, fontSize: 14, lineHeight: 1.5 };
+const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" };
+// Inline rather than a class, deliberately: `.secondary-button:hover` re-colours
+// the label to the brand accent, and an inline `color` is what survives that
+// hover — a danger control that turns "safe blue" when you reach for it is worse
+// than no colour coding at all. Same value as `.icon-btn.danger:hover`.
+const DANGER = "var(--danger, #b93040)";
+const DANGER_LINE = "var(--danger-line, #eec6cb)";
+
 export default function StaffSubmissionDetail() {
   const { publicId } = useParams<{ publicId: string }>();
   const navigate = useNavigate();
@@ -21,6 +32,16 @@ export default function StaffSubmissionDetail() {
   // Admins land here via /admin/submissions/:publicId; back should return there.
   // Staff use /staff/:publicId; back returns to the staff queue.
   const isAdmin = user?.role === "admin";
+  // Archive and restore are available to every role that can reach this page.
+  // The server guard takes exactly this list, and it is written out rather than
+  // dropped (i.e. always true) so that a future role able to VIEW a submission —
+  // a parent, a read-only auditor — does not silently gain a write path here.
+  const canArchive =
+    user?.role === "admin" || user?.role === "staff" || user?.role === "cdm_contact";
+  // Permanent delete stays admin-only: it is the one submission action with no
+  // way back, so unlike the toggle above it is worth the asymmetry with the
+  // server (which is the authority — this only decides whether to render it).
+  const canDelete = user?.role === "admin";
   // The generated-document line below (document link, status badge, View PDF) is
   // part of the Documents feature, so it follows the `documents_link` setting
   // rather than a hardcoded role — a role with Documents turned off (e.g. the
@@ -32,6 +53,22 @@ export default function StaffSubmissionDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [savingStatus, setSavingStatus] = useState(false);
+
+  // Archive/restore is a POST whose outcome depends on the row's state ON THE
+  // SERVER, which this viewer may be looking at a stale copy of — so its error
+  // is kept in its own slot. `.error` above is the LOAD error, and the page
+  // renders it as a full replacement ("Submission not found"), so putting a 409
+  // there would blank the very page the message is about.
+  const [archiving, setArchiving] = useState(false);
+  const [archiveError, setArchiveError] = useState("");
+
+  // Permanent delete has its own confirm step and its own error slot, for the
+  // same reason: a 409 here says the row was restored elsewhere while this page
+  // still showed it as archived, and that message has to render INSIDE the
+  // dialog that asked the question rather than on the page behind it.
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -93,6 +130,62 @@ export default function StaffSubmissionDetail() {
       setError(err instanceof ApiError ? err.message : "Could not update status");
     } finally {
       setSavingStatus(false);
+    }
+  };
+
+  // Archive or restore this submission. Both endpoints accept staff, school
+  // contacts and admins — the same people who can see the queue — because an
+  // archive only one role could reverse meant whoever put a row away could not
+  // get it back. The reach is unchanged either way: the row is resolved by public
+  // id (organization-scoped) and then gated on the actor's school.
+  //
+  // The button's LABEL is read from the row this viewer loaded, so it can be
+  // stale — two people on the same submission both see "Archive". The server
+  // resolves the race in the WHERE clause and answers 409 to the loser, which is
+  // why a 409 reloads rather than just showing a message: the label is provably
+  // wrong at that point, and re-reading is what makes the page agree with it.
+  const handleArchiveToggle = async () => {
+    if (!publicId || !detail) return;
+    const archivingNow = !detail.archived_at;
+    setArchiving(true);
+    setArchiveError("");
+    try {
+      const updated = archivingNow
+        ? await api.archiveSubmission(publicId)
+        : await api.restoreSubmission(publicId);
+      setDetail(updated);
+      setDraft(valuesToDraft(updated.values));
+      setStaffDraft(valuesToDraft(updated.values));
+    } catch (err) {
+      setArchiveError(
+        err instanceof ApiError ? err.message : "Could not update the archive state"
+      );
+      if (err instanceof ApiError && err.status === 409) load();
+    } finally {
+      setArchiving(false);
+    }
+  };
+
+  // Permanent delete. Admin-only, and the server enforces archive-first with a
+  // 409 — this handler never assumes the dialog's premise still holds, because
+  // the row may have been restored from another tab since the page loaded. That
+  // is also why a 409 reloads: the page is showing a state the server disagrees
+  // with, and it should not keep offering the button.
+  const handleDelete = async () => {
+    if (!publicId) return;
+    setDeleting(true);
+    setDeleteError("");
+    try {
+      await api.deleteSubmission(publicId);
+      // The page has lost its subject. Leaving it here would render either a
+      // stale copy (if the load failed) or "Submission not found"; the list, which
+      // re-reads on mount, is the only view that can still be right.
+      navigate(isAdmin ? "/admin" : "/staff");
+    } catch (err) {
+      setDeleteError(err instanceof ApiError ? err.message : "Could not delete the submission");
+      if (err instanceof ApiError && err.status === 409) load();
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -246,6 +339,38 @@ export default function StaffSubmissionDetail() {
               </option>
             ))}
           </select>
+          {canArchive && (
+            <button
+              className="secondary-button"
+              onClick={handleArchiveToggle}
+              disabled={archiving}
+            >
+              {archiving
+                ? detail.archived_at
+                  ? "Restoring..."
+                  : "Archiving..."
+                : detail.archived_at
+                  ? "Restore"
+                  : "Archive"}
+            </button>
+          )}
+          {/* Offered only once the row IS archived, which is the one condition the
+              server also insists on. A disabled button on the active state would
+              have to explain itself in a tooltip nobody hovers, and it would make
+              "delete" look like a normal first move rather than the last one. */}
+          {canDelete && detail.archived_at && (
+            <button
+              className="secondary-button"
+              onClick={() => {
+                setDeleteError("");
+                setConfirmDelete(true);
+              }}
+              style={{ color: DANGER, borderColor: DANGER_LINE }}
+              title="Delete this archived submission permanently"
+            >
+              Delete permanently
+            </button>
+          )}
           {!editing && (
             <button className="secondary-button" onClick={startEdit}>
               Edit
@@ -259,6 +384,52 @@ export default function StaffSubmissionDetail() {
           </button>
         </div>
       </div>
+
+      {/* Archived notice. Its own class — NOT `.banner`, which is this app's top
+          navigation bar. An archived submission still opens here on purpose (the
+          row was hidden, not deleted), so an arrival from a bookmark, a Webhook
+          Log link or browser Back must explain itself rather than look broken.
+          The lists named below are the ones that actually filter archived rows;
+          the form's submission count deliberately does NOT, because the form
+          delete guard has to agree with the count printed beside it.
+          This block explains; it does not act. The Restore control exists once,
+          in the head actions above, where it is the very button that read
+          "Archive" a moment earlier — a second Restore here would be the same
+          word, the same handler and the same state, two lines apart. Delete lives
+          there for the same reason. */}
+      {detail.archived_at && (
+        <div className="archived-notice">
+          <span className="an-icon" aria-hidden="true">
+            <Archive size={16} />
+          </span>
+          <span className="an-text">
+            <strong>Archived.</strong> This submission is hidden from the submissions
+            list, the staff queue, exports and reports, the documents list and the login
+            summary. It still appears in this form&rsquo;s submission count — archiving
+            ends the row&rsquo;s life in the views, not in the database.{" "}
+            {/* The claim is scoped to THIS action, and its second half is shown
+                only to the person who can act on it. "Nothing was deleted" is a
+                true statement about archiving; leaving it to stand alone in front
+                of an admin who has a Delete button two lines up would read as a
+                promise the app does not make. And telling a staff member about a
+                button they are not offered is worse than saying nothing. */}
+            {canDelete
+              ? " Archiving deletes nothing; deleting permanently is a separate, " +
+                "irreversible step, and it has to be taken from this page."
+              : " Nothing was deleted."}
+            {detail.archived_by_name || detail.archived_at ? (
+              <>
+                {" "}
+                Archived
+                {detail.archived_by_name ? ` by ${detail.archived_by_name}` : ""} on{" "}
+                {new Date(detail.archived_at).toLocaleString()}.
+              </>
+            ) : null}
+          </span>
+        </div>
+      )}
+
+      {archiveError && <div className="alert-error">{archiveError}</div>}
 
       <div className="detail-layout">
         <section>
@@ -447,6 +618,68 @@ export default function StaffSubmissionDetail() {
           refreshKey={previewRefreshKey}
           onClose={() => setPreviewDoc(null)}
         />
+      )}
+
+      {/* Permanent-delete confirmation. The page's head button only ARMS this; the
+          dialog is what names the submission and states what is left behind, so
+          the press that cannot be undone is never the first press. Nothing in this
+          app used `window.confirm`, and using one here would be the only prompt in
+          the product that could not name its subject. */}
+      {confirmDelete && detail && (
+        <div
+          className="modal-overlay open"
+          onClick={() => !deleting && setConfirmDelete(false)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Delete submission permanently?</h2>
+              <button
+                className="icon-button close"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={BODY_TEXT}>
+                <strong>{detail.student_name || "This submission"}</strong> and every answer it holds
+                will be removed from this database. This cannot be undone — there is no archive to
+                restore it from, and no copy of the answers is kept.
+              </p>
+              <p style={BODY_HINT}>
+                Its answers, any ad-hoc fields added to it, and its generated-document record all go
+                with it. The generated Google Doc file itself is <strong>not</strong> deleted — it
+                stays in the organization&rsquo;s Drive folder, and this app simply loses its link to
+                it.
+              </p>
+              {deleteError && (
+                <div className="alert-error" style={{ marginTop: 12 }}>
+                  {deleteError}
+                </div>
+              )}
+            </div>
+            <div className="modal-foot">
+              <span className="spacer" />
+              <button
+                className="secondary-button"
+                onClick={() => setConfirmDelete(false)}
+                disabled={deleting}
+              >
+                Cancel
+              </button>
+              <button
+                className="primary-button"
+                onClick={handleDelete}
+                disabled={deleting}
+                style={{ background: DANGER, borderColor: DANGER }}
+              >
+                {deleting ? "Deleting..." : "Delete permanently"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -140,6 +140,8 @@ const TURSO_DDL: string[] = [
      school_year             TEXT,
      staff_fields_updated_by INTEGER,
      staff_fields_updated_at TEXT,
+     archived_at             TEXT,
+     archived_by             INTEGER,
      submitted_at            TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
      updated_at              TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
@@ -337,6 +339,21 @@ export const tursoDialect: Dialect = {
       column: "organization_id",
       definition: "INTEGER",
     },
+    {
+      // Archive. Both columns are in `TURSO_DDL` as well, so a fresh database
+      // gets them from CREATE TABLE; this is for databases created before the
+      // feature. `archived_at` must ALSO be listed in TIMESTAMP_COLUMNS
+      // (db/client.ts) or it reads back as a string on Turso and a Date on SQL
+      // Server — the libsql.test.ts honesty guard enforces that pairing.
+      table: "submissions",
+      column: "archived_at",
+      definition: "TEXT",
+    },
+    {
+      table: "submissions",
+      column: "archived_by",
+      definition: "INTEGER",
+    },
   ],
 
   insertReturning({ table, columns, returning, values }) {
@@ -441,12 +458,14 @@ export const tursoDialect: Dialect = {
   submissionSchoolNameSubquery() {
     // Same limit relocation as `submissionValueSubquery`, and the same shared
     // predicate — including the LOWER() match, which matters more here than on
-    // SQL Server because libSQL's `=` is case-sensitive.
+    // SQL Server because libSQL's `=` is case-sensitive. The answer is trimmed
+    // before comparison to agree with the insert-time resolver and the backfill
+    // script; see the SQL Server variant for the full reasoning.
     return (
       `(SELECT COALESCE(scs.name, sv.value)\n` +
       `       FROM submission_values sv\n` +
       `       JOIN form_fields ff ON ff.id = sv.field_id\n` +
-      `       LEFT JOIN schools scs ON LOWER(scs.name) = LOWER(sv.value)\n` +
+      `       LEFT JOIN schools scs ON LOWER(scs.name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
       `      WHERE sv.submission_id = s.id\n` +
       `        AND ${schoolFieldPredicate()}\n` +
       `        AND sv.value IS NOT NULL\n` +
