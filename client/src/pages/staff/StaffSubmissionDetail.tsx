@@ -513,7 +513,11 @@ export default function StaffSubmissionDetail() {
             {detail.staffOnlyFields.length === 0 ? (
               <div className="muted-note">This form has no staff-only fields defined.</div>
             ) : (
-              <div className="field-list">
+              // `field-list--roomy` gives these textareas a taller default box and
+              // `expandable` adds the Expand button. Both are scoped to THIS list:
+              // the parent-answer list above holds the parent's own words and is
+              // not the list being filled in on this page.
+              <div className="field-list field-list--roomy">
                 {detail.staffOnlyFields.map((f) => {
                   const existing = detail.values.find((v) => v.field_id === f.id);
                   return (
@@ -526,6 +530,7 @@ export default function StaffSubmissionDetail() {
                         options: f.options,
                       }}
                       editing={true}
+                      expandable
                       value={staffDraft[f.id] ?? existing?.value ?? null}
                       onChange={(val) => setStaffDraftValue(f.id, val)}
                     />
