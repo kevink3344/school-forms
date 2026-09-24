@@ -7,9 +7,16 @@ import { ROLES, FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES, REPORT_FORMATS } fr
 // Public self-registration. Deliberately narrow: the only thing a caller gets to
 // choose is their own identity (email/password/name) and their school. The
 // organization comes from `DEFAULT_ORG_REGISTRATION` on the server and the role
-// is fixed to `staff` by the route, so an anonymous caller can neither pick a
-// tenant nor grant themselves `admin` (see POST /api/auth/seed-admin for the
-// deliberate, controlled way to create an administrator).
+// is fixed to `cdm_contact` (School Contact) by the route, so an anonymous
+// caller can neither pick a tenant nor grant themselves `admin` (see
+// POST /api/auth/seed-admin for the deliberate, controlled way to create an
+// administrator).
+//
+// There is no `role` field here on purpose: Zod strips unknown keys, so a body
+// carrying `role: "admin"` is discarded rather than honoured. The role is a
+// server-side constant in the route, not a default the caller can override —
+// which is also why `register.test.ts` asserts the route's `createUser` call
+// does not read the role from the request.
 export const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),

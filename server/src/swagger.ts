@@ -648,10 +648,12 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/auth/register": {
         post: {
           tags: ["Auth"],
-          summary: "Register a staff user",
+          summary: "Register a School Contact user",
           description:
-            "Self-service STAFF registration. Creates a `staff` account only — the request cannot " +
-            "set a role (use `POST /api/auth/seed-admin` for administrators). The organization the " +
+            "Self-service registration. Creates a `cdm_contact` (School Contact) account only — " +
+            "the request cannot set a role (use `POST /api/auth/seed-admin` for administrators). " +
+            "A School Contact is confined to the `school_id` they register under, so this account " +
+            "can see only that school's submissions. The organization the " +
             "account is saved into is resolved server-side from the `DEFAULT_ORG_REGISTRATION` " +
             "environment variable (falling back to `academics`), so the request cannot specify an " +
             "organization either. Unknown body fields such as `role` or `slug` are ignored.",

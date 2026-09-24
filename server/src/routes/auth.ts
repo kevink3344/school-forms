@@ -125,8 +125,16 @@ authRouter.post("/register", async (req, res, next) => {
     // Role is fixed, never taken from the body: this endpoint is public, so
     // honouring a caller-supplied role would let anyone self-register as an
     // admin. Administrators are created through POST /api/auth/seed-admin.
+    //
+    // Self-registration creates a SCHOOL CONTACT (`cdm_contact`), not `staff`.
+    // A School Contact is confined to the school they register under (see
+    // scopedSchoolId in auth.ts), which is the behaviour we want from a public
+    // sign-up: `staff` is NOT school-scoped, so a self-registered `staff`
+    // account could read and archive submissions from every school in the
+    // district. `staff` remains a valid role for accounts an administrator
+    // creates deliberately (POST /api/auth/seed-staff).
     const passwordHash = await bcrypt.hash(password, 12);
-    const user = await createUser(email, passwordHash, "staff", school_id, display_name, true, targetOrg.id);
+    const user = await createUser(email, passwordHash, "cdm_contact", school_id, display_name, true, targetOrg.id);
 
     const accessToken = signAccessToken(user);
     const refreshToken = signRefreshToken(user.id);

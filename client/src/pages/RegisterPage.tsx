@@ -73,9 +73,9 @@ export default function RegisterPage() {
         style={{ width: "100%", maxWidth: 440, padding: 32, boxShadow: "var(--shadow-card)" }}
       >
         <div style={{ marginBottom: 8 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700 }}>Staff Registration</h1>
+          <h1 style={{ fontSize: 22, fontWeight: 700 }}>School Contact Registration</h1>
           <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
-            Create a staff account for your school
+            Create a School Contact account for your school
           </p>
         </div>
 
