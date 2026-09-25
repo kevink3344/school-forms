@@ -1465,15 +1465,35 @@ export async function resolveSubmissionSchoolId(
   // set is shared with the SQL that displays the school, so the two cannot
   // disagree about which field answers the question.
   const fields = await listFormFields(form.id);
+  // `form_fields.id` reaches this function as a STRING (the driver returns SQL
+  // Server numeric columns as strings — see db/driver/client.ts) while
+  // `a.field_id` has already been coerced to a NUMBER by `submissionAnswerSchema`
+  // (`z.coerce.number()`). `Set.has` compares with SameValueZero, so a Set holding
+  // "11" can never match the number 11: every answer was skipped, the loop fell
+  // through, and the function silently returned the form's fallback school (the
+  // district placeholder) for EVERY submission. Nothing threw, so the defect was
+  // invisible to typecheck, tests and logs.
+  //
+  // The COALESCE display subquery is unaffected because it joins on
+  // `ff.id = sv.field_id` inside SQL, which is how the grid came to show the
+  // correct school name while the school FILTER and `canAccessSchool` — both of
+  // which read the stored `submissions.school_id` — disagreed with it.
+  //
+  // Normalise both sides to a number. Do not "simplify" this back to a bare
+  // `has(a.field_id)`; the two sides are typed the same but are not the same
+  // runtime value.
   const schoolFieldIds = new Set<number>();
   for (const f of fields) {
+    const id = Number(f.id);
+    if (!Number.isFinite(id)) continue;
     const label = f.label.trim().toLowerCase();
-    if ((SCHOOL_FIELD_LABELS as readonly string[]).includes(label)) schoolFieldIds.add(f.id);
+    if ((SCHOOL_FIELD_LABELS as readonly string[]).includes(label)) schoolFieldIds.add(id);
   }
   if (schoolFieldIds.size === 0) return fallback;
 
   for (const a of answers) {
-    if (!schoolFieldIds.has(a.field_id)) continue;
+    const fieldId = Number(a.field_id);
+    if (!Number.isFinite(fieldId) || !schoolFieldIds.has(fieldId)) continue;
     if (typeof a.value !== "string" || !a.value.trim()) continue;
     const name = a.value.trim();
     // Match case-insensitively in the QUERY rather than relying on the
@@ -1484,7 +1504,14 @@ export async function resolveSubmissionSchoolId(
       "SELECT id FROM dbo.schools WHERE LOWER(name) = LOWER(@name) ORDER BY id",
       { name }
     );
-    if (rows[0]?.id) return rows[0].id;
+    // `rows[0].id` is a string too (same driver behaviour as above). Convert it
+    // so the declared `Promise<number | null>` is a fact rather than a claim —
+    // this value is written to `submissions.school_id` and then compared with
+    // `===` by `canAccessSchool`.
+    if (rows[0]?.id !== undefined && rows[0].id !== null) {
+      const resolved = Number(rows[0].id);
+      if (Number.isFinite(resolved)) return resolved;
+    }
   }
   return fallback;
 }
