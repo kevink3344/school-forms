@@ -3,11 +3,14 @@ import { ChevronDown, ChevronRight, Download, Save, Star, Trash2, X } from "luci
 import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
 import ColumnsPicker, { cellText } from "../../components/ColumnsPicker";
+import { fieldIdFromKey, StaffCell } from "../../components/SubmissionsGrid";
+import { useCellEdit } from "../../lib/useCellEdit";
 import { useAuth } from "../../context/AuthContext";
 import { formLabel, selectableForms } from "../../lib/forms";
 import type {
   ExportColumn,
   Form,
+  FormField,
   ReportFormat,
   ReportPreview,
   ReportQuery,
@@ -262,6 +265,52 @@ export default function ReportsPage() {
   );
   const emptySelection = selectedKeys.length === 0 && availableColumns.length > 0;
 
+  // --- Inline staff-only editing -------------------------------------------
+  // A staff-only cell on this page is the same thing it is on the Submissions
+  // grid: a value a School Contact is expected to fill in, shown next to the
+  // submission it belongs to instead of one row at a time. The preview carries
+  // each column's `type` and `options` (see routes/reports.ts), so the cell can
+  // choose its own editor from this one response — the alternative source,
+  // GET /api/forms/:id, is admin-only, and School Contacts are exactly the users
+  // who need to edit here.
+  //
+  // The gate is `c.staff_only`, NOT the viewer's role: the server has already
+  // decided which staff-only columns this role may see, and the same role set
+  // guards PUT /values. Re-testing the role on the client would be a second
+  // authorization decision to keep in step with the first for no gain.
+  const staffFields = useMemo(() => {
+    const map = new Map<number, Pick<FormField, "id" | "label" | "type" | "options">>();
+    for (const c of availableColumns) {
+      if (!c.staff_only) continue;
+      const id = fieldIdFromKey(c.key);
+      if (!id) continue;
+      map.set(id, { id, label: c.label, type: c.type, options: c.options });
+    }
+    return map;
+  }, [availableColumns]);
+
+  // Values edited on this page, by public id then by `field_N`. `preview` is server
+  // state and is never mutated: a save patches this overlay, and the effect below
+  // drops it when a refetch replaces the rows it referred to (a saved value then
+  // arrives from the server like any other).
+  const [cellOverrides, setCellOverrides] = useState<Map<string, Record<string, unknown>>>(
+    () => new Map()
+  );
+  useEffect(() => {
+    setCellOverrides(new Map());
+  }, [preview]);
+
+  const edit = useCellEdit({
+    onSaved: (publicId, fieldId, value) =>
+      setCellOverrides((prev) => {
+        const next = new Map(prev);
+        const row = { ...(next.get(publicId) ?? {}) };
+        row[`field_${fieldId}`] = value;
+        next.set(publicId, row);
+        return next;
+      }),
+  });
+
   const toggleColumn = (key: string) =>
     setChecked((prev) => {
       const next = new Set(prev);
@@ -457,16 +506,44 @@ export default function ReportsPage() {
 
   // A plain function rather than a component: it is called directly, so React
   // keeps the same row elements across a regroup instead of remounting them.
-  const renderRow = (r: Record<string, unknown>, i: number) => (
-    <tr key={String(r.submission_public_id ?? i)}>
-      <td className="cell-mono">{cellText(r.submitted_at)}</td>
-      {gridColumns.map((c) => (
-        <td key={c.key} className={c.staff_only ? "grid-col-staff" : undefined}>
-          {cellText(r[c.key])}
-        </td>
-      ))}
-    </tr>
-  );
+  //
+  // Staff-only columns render through the same `StaffCell` the Submissions grid
+  // uses, so "click the value, edit, save" behaves identically on both pages and
+  // there is one implementation of the affordance. Parent fields stay plain text:
+  // they belong to the parent, and saving one over this route would file it under
+  // the staff audit trail.
+  const renderRow = (r: Record<string, unknown>, i: number) => {
+    // A row without its public id has nothing to save against, so its cells stay
+    // read-only rather than opening an editor that cannot commit. `buildExportRows`
+    // always emits the id; this is the guard, not the expectation.
+    const publicId = typeof r.submission_public_id === "string" ? r.submission_public_id : "";
+    const overrides = cellOverrides.get(publicId);
+    return (
+      <tr key={publicId || i}>
+        <td className="cell-mono">{cellText(r.submitted_at)}</td>
+        {gridColumns.map((c) => {
+          const field = c.staff_only && publicId ? staffFields.get(fieldIdFromKey(c.key)) : undefined;
+          if (!field) {
+            return (
+              <td key={c.key} className={c.staff_only ? "grid-col-staff" : undefined}>
+                {cellText(r[c.key])}
+              </td>
+            );
+          }
+          return (
+            <StaffCell
+              key={c.key}
+              column={c}
+              publicId={publicId}
+              value={overrides?.[c.key] ?? r[c.key]}
+              field={field}
+              edit={edit}
+            />
+          );
+        })}
+      </tr>
+    );
+  };
 
   return (
     <div>

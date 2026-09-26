@@ -460,6 +460,35 @@ export function buildSwaggerSpec(req?: Request) {
             error: { type: "string", nullable: true },
           },
         },
+        SystemMessage: {
+          type: "object",
+          required: ["id", "organization_id", "title", "body", "active", "audience", "created_at"],
+          properties: {
+            id: { type: "integer" },
+            organization_id: { type: "integer" },
+            title: { type: "string", example: "Scheduled maintenance" },
+            body: {
+              type: "string",
+              description: "The description. Always a string, never null — an omitted description is stored as \"\".",
+            },
+            active: {
+              type: "boolean",
+              description: "Only active messages are served to users; inactive ones stay in the admin grid so they can be switched back on.",
+            },
+            audience: {
+              type: "array",
+              items: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
+              description:
+                "The roles that may be shown this message, resolved from the stored JSON array. " +
+                "A message with no audience set is returned as every role, which is what makes a " +
+                "message authored before audiences existed visible. An EMPTY array is a real value " +
+                "and means nobody.",
+            },
+            created_by: { type: "integer", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+            updated_at: { type: "string", format: "date-time" },
+          },
+        },
       },
     },
     paths: {
@@ -2358,6 +2387,176 @@ export function buildSwaggerSpec(req?: Request) {
             "400": { description: "Invalid document id" },
             "403": { description: "Forbidden (staff from another school)" },
             "404": { description: "Document not found" },
+          },
+        },
+      },
+      "/api/system-messages/active": {
+        get: {
+          tags: ["System Messages"],
+          summary: "The notices this user has not closed out yet (any signed-in role)",
+          description:
+            "At most three, newest first. Scoped to the caller's organization AND to the caller's " +
+            "role: a message whose audience does not include that role is filtered out inside the " +
+            "same query as the three-row cap, so the cap counts only messages this user may " +
+            "actually see. A message with no audience set is shown to every role.",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK — an array, empty when there is nothing to show",
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { $ref: "#/components/schemas/SystemMessage" } },
+                },
+              },
+            },
+            "403": { description: "The account belongs to no organization" },
+          },
+        },
+      },
+      "/api/system-messages": {
+        get: {
+          tags: ["System Messages"],
+          summary: "List every system message in the organization (admin)",
+          description:
+            "Newest first, active and inactive alike — an inactive message has to appear here so " +
+            "it can be switched back on. Scoped to the caller's organization.",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { $ref: "#/components/schemas/SystemMessage" } },
+                },
+              },
+            },
+            "403": { description: "The account belongs to no organization" },
+          },
+        },
+        post: {
+          tags: ["System Messages"],
+          summary: "Create a system message (admin)",
+          description:
+            "`created_by` comes from the session and cannot be set by the body. An omitted or null " +
+            "`audience` means every role; an empty array means nobody.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["title"],
+                  properties: {
+                    title: { type: "string", maxLength: 200 },
+                    body: { type: "string", maxLength: 4000, default: "" },
+                    active: { type: "boolean", default: false },
+                    audience: {
+                      type: "array",
+                      nullable: true,
+                      items: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/SystemMessage" } } },
+            },
+            "400": { description: "Validation failed (empty title, unknown role, over-long body)" },
+            "403": { description: "The account belongs to no organization" },
+          },
+        },
+      },
+      "/api/system-messages/{id}": {
+        put: {
+          tags: ["System Messages"],
+          summary: "Update a system message (admin)",
+          description:
+            "Partial: an omitted field is left alone. `audience` needs that distinction more than " +
+            "the others — an omitted key means \"leave the audience as it is\" while an explicit " +
+            "null means \"show this to everyone again\". An empty array still means nobody.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    title: { type: "string", maxLength: 200 },
+                    body: { type: "string", maxLength: 4000 },
+                    active: { type: "boolean" },
+                    audience: {
+                      type: "array",
+                      nullable: true,
+                      items: { type: "string", enum: ["admin", "staff", "cdm_contact"] },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/SystemMessage" } } },
+            },
+            "400": { description: "Empty body, or validation failed" },
+            "403": { description: "The account belongs to no organization" },
+            "404": { description: "Message not found (or not in your organization)" },
+          },
+        },
+        delete: {
+          tags: ["System Messages"],
+          summary: "Delete a system message (admin)",
+          description:
+            "Removes the message and every user's close-out row for it. 404 covers both \"no such " +
+            "message\" and \"not in your organization\" deliberately, so the response cannot be " +
+            "used to probe for another organization's messages.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { deleted: { type: "boolean" } } },
+                },
+              },
+            },
+            "400": { description: "Invalid message id" },
+            "403": { description: "The account belongs to no organization" },
+            "404": { description: "Message not found" },
+          },
+        },
+      },
+      "/api/system-messages/{id}/dismiss": {
+        post: {
+          tags: ["System Messages"],
+          summary: "Close a message out for this user (any signed-in role)",
+          description:
+            "Idempotent — dismissing the same message twice is a 200 both times, because the X " +
+            "button is small and users double click it. 404 when the id is not in the caller's " +
+            "organization, so a repeat is never silently mistaken for someone else's message.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: { type: "object", properties: { dismissed: { type: "boolean" } } },
+                },
+              },
+            },
+            "400": { description: "Invalid message id" },
+            "403": { description: "The account belongs to no organization" },
+            "404": { description: "Message not found" },
           },
         },
       },

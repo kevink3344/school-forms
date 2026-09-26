@@ -500,3 +500,40 @@ export interface WebhookEventQuery {
   limit?: number;
   offset?: number;
 }
+
+/**
+ * A System Message — an administrative banner shown to every user in an
+ * organization until each one closes it out (Settings → System Messages).
+ *
+ * Mirrors `SystemMessage` in server/src/db/schema.ts, with the two timestamps
+ * as the ISO strings JSON actually carries (the server-side interface calls
+ * them `Date` because that is what the query layer parses them into before
+ * serializing).
+ *
+ * `audience` is the API contract; the DB column behind it is a JSON string.
+ * It is ALWAYS an array on the wire — never null. All four server readers go
+ * through `toSystemMessage`, which runs the stored value through
+ * `messageAudienceRoles()`, and that maps a NULL/absent/corrupt column to
+ * every current role. So the three states are:
+ *   - all roles (`["admin","staff","cdm_contact"]`) → everyone sees it. This is
+ *     what a message authored before audiences existed reads back as, and it is
+ *     deliberately indistinguishable from an admin explicitly selecting all
+ *     three chips.
+ *   - `[]` → nobody sees it. The only way to write a message that is authored
+ *     but not delivered.
+ *   - a subset → those roles, and only those.
+ * `audience.length` is therefore the only thing that separates these states:
+ * empty means nobody, and a full list means everyone — never treat a non-empty
+ * array as "targeted", because "all roles" arrives that way too.
+ */
+export interface SystemMessage {
+  id: number;
+  organization_id: number;
+  title: string;
+  body: string;
+  active: boolean;
+  audience: string[];
+  created_by: number | null;
+  created_at: string;
+  updated_at: string;
+}

@@ -1,11 +1,12 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
-import { ChevronDown, Check, Copy, KeyRound, Webhook, X } from "lucide-react";
-import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, type MenuItemKey } from "../../lib/settings";
-import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, School, WebhookEventSummary } from "../../types";
+import { ChevronDown, Check, Copy, KeyRound, Plus, Webhook, X } from "lucide-react";
+import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, audienceLabel, type MenuItemKey } from "../../lib/settings";
+import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, School, SystemMessage, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
+import { refreshSystemMessages } from "../../components/SystemMessageBar";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
 
@@ -47,6 +48,130 @@ function roleBadge(role: Role): { cls: string; label: string } {
   if (role === "cdm_contact") return { cls: "badge-teal", label: "School Contact" };
   return { cls: "badge-blue", label: "Staff" };
 }
+
+// ---------------------------------------------------------------------------
+// System Messages (Settings → System Messages)
+// ---------------------------------------------------------------------------
+interface SysMsgFormState {
+  id: number | null; // null → create
+  title: string;
+  body: string;
+  active: boolean;
+  audience: string[]; // the roles that may see it
+}
+
+// A factory rather than a shared constant: the audience is an array, and a
+// module-level constant would be handed to every new form, so a later edit to one
+// form's chips could mutate the template the next form starts from.
+function emptySysMsgForm(): SysMsgFormState {
+  return {
+    id: null,
+    title: "",
+    body: "",
+    // New messages start Active. The toggle sits in the drawer next to the Save
+    // button, so the admin sees the state they are about to save — whereas
+    // saving a message Inactive produces a message that is stored and invisible,
+    // which reads as "saving did nothing". The server's own default is the
+    // opposite (`active` defaults to false on create); this form always sends
+    // the field explicitly, so that default is never reached from the UI.
+    active: true,
+    // Every role, which is the same thing a message authored before audiences
+    // existed reads back as.
+    audience: [...ROLES],
+  };
+}
+
+/**
+ * The Target Audience control: one chip per role, plus a bulk "+ Add all" chip
+ * that appears only while a role is still unselected.
+ *
+ * There are only two states a role can be in — in the audience or not — so the
+ * control is exactly the roster. That matters because the server distinguishes
+ * three stored values: a NULL column (every role), an explicit list, and `[]`
+ * (nobody). "No chip selected" is the only way to author `[]`, which is why
+ * deselecting the last chip must send an empty ARRAY and never `null` — `null`
+ * broadcasts to everyone, the precise opposite of what the admin just asked for.
+ *
+ * There is deliberately no "unset" state in the UI: on the wire `null` and "all
+ * three roles" are indistinguishable (the server normalises a NULL column to the
+ * full roster before serialising), so offering both would be offering a choice
+ * that does not exist.
+ */
+function AudienceChips({
+  value,
+  onChange,
+}: {
+  value: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const allSelected = ROLES.every((r) => value.includes(r));
+  const chip = (has: boolean): React.CSSProperties => ({
+    cursor: "pointer",
+    fontSize: 13,
+    fontWeight: 700,
+    padding: "7px 14px",
+    borderRadius: "var(--radius)",
+    display: "inline-flex",
+    alignItems: "center",
+    gap: 6,
+    transition: "background-color .13s ease, border-color .13s ease, color .13s ease",
+    background: has ? "var(--accent)" : "var(--card-bg)",
+    color: has ? "#fff" : "var(--accent)",
+    border: "1px solid var(--accent)",
+  });
+
+  return (
+    <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+      {ROLES.map((role) => {
+        const has = value.includes(role);
+        const label = roleBadge(role).label;
+        return (
+          <button
+            key={role}
+            type="button"
+            aria-pressed={has}
+            title={has ? `Remove ${label} from this message` : `Show this message to ${label}`}
+            onClick={() =>
+              onChange(has ? value.filter((r) => r !== role) : [...value, role])
+            }
+            style={chip(has)}
+          >
+            {has ? <Check size={14} /> : <Plus size={14} />}
+            <span>{label}</span>
+          </button>
+        );
+      })}
+      {!allSelected && (
+        <button
+          type="button"
+          aria-pressed={false}
+          title="Show this message to every role"
+          onClick={() => onChange([...ROLES])}
+          style={chip(false)}
+        >
+          <Plus size={14} />
+          <span>Add all</span>
+        </button>
+      )}
+    </div>
+  );
+}
+
+// How a message's audience reads in the table and in the drawer's "Visible to …"
+// hint is `audienceLabel` from lib/settings, shared with the badge the notice
+// card renders. It lives there because this page and the card have to agree about
+// the same message, and one copy is the only way to guarantee that.
+
+// This stylesheet has no destructive button variant. Adding a class for the two
+// Delete buttons in the System Messages panel would be more change than it
+// warrants, so they borrow the secondary button's shape and take the colour the
+// app already uses to mean "this went wrong" (--vacant-fg, the foreground of
+// .alert-error). A destructive action should not look like the safe one next to
+// it.
+const DANGER_BUTTON: React.CSSProperties = {
+  borderColor: "var(--vacant-fg)",
+  color: "var(--vacant-fg)",
+};
 
 // ---------------------------------------------------------------------------
 // Collapsible card section (Settings) — clickable header toggles the body
@@ -196,6 +321,19 @@ export default function AdminSettings() {
   const [orgSaving, setOrgSaving] = useState(false);
   const [orgSaveError, setOrgSaveError] = useState("");
 
+  // System Messages — the list is the AUTHORING view (every message, active or
+  // not), which is why it can hold rows no user is currently being shown.
+  const [sysMsgs, setSysMsgs] = useState<SystemMessage[]>([]);
+  const [sysMsgOpen, setSysMsgOpen] = useState(false);
+  const [sysMsgForm, setSysMsgForm] = useState<SysMsgFormState>(emptySysMsgForm);
+  const [sysMsgSaving, setSysMsgSaving] = useState(false);
+  const [sysMsgSaveError, setSysMsgSaveError] = useState("");
+  // Which row's Delete has been clicked once. Deleting a message also drops every
+  // per-user dismissal record for it, so it is irreversible for every user at
+  // once — worth one confirmation, and an inline one rather than a native dialog
+  // so the confirmation appears in the row it applies to.
+  const [sysMsgDeleteId, setSysMsgDeleteId] = useState<number | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -251,6 +389,24 @@ export default function AdminSettings() {
       cancelled = true;
     };
   }, []);
+
+  // The authoring list of System Messages. Its own try/catch for the same reason
+  // the webhook counters have one — a failure here must not blank the account and
+  // organization panels — but it also carries the one call that tells the message
+  // strip its cached list is stale, so every path that changes a message goes
+  // through here instead of each mutation having to remember.
+  const loadSysMsgs = useCallback(async () => {
+    try {
+      setSysMsgs(await api.listSystemMessages());
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not load system messages");
+    }
+    refreshSystemMessages();
+  }, []);
+
+  useEffect(() => {
+    void loadSysMsgs();
+  }, [loadSysMsgs]);
 
   const openCreate = () => {
     setForm(EMPTY);
@@ -539,6 +695,97 @@ export default function AdminSettings() {
     } catch (err) {
       setOrgs(prev);
       setError(err instanceof ApiError ? err.message : "Could not update organization");
+    }
+  };
+
+  // -------------------------------------------------------------------------
+  // System Messages handlers
+  // -------------------------------------------------------------------------
+  const openSysMsgCreate = () => {
+    setSysMsgForm(emptySysMsgForm());
+    setSysMsgOpen(true);
+    setSysMsgSaveError("");
+    setSysMsgDeleteId(null);
+  };
+
+  const openSysMsgEdit = (m: SystemMessage) => {
+    setSysMsgForm({
+      id: m.id,
+      title: m.title,
+      body: m.body,
+      active: m.active,
+      // A copy, so editing a message cannot mutate the row it was opened from.
+      audience: [...m.audience],
+    });
+    setSysMsgOpen(true);
+    setSysMsgSaveError("");
+    setSysMsgDeleteId(null);
+  };
+
+  const closeSysMsg = () => {
+    if (sysMsgSaving) return;
+    setSysMsgOpen(false);
+    setSysMsgSaveError("");
+    setSysMsgForm(emptySysMsgForm());
+  };
+
+  const handleSysMsgSave = async () => {
+    setSysMsgSaving(true);
+    setSysMsgSaveError("");
+    try {
+      const payload = {
+        title: sysMsgForm.title.trim(),
+        // Not trimmed: the description is multi-line and the reader sees the
+        // line breaks as typed, so leading indentation in a pasted list is
+        // meaningful.
+        body: sysMsgForm.body,
+        active: sysMsgForm.active,
+        audience: sysMsgForm.audience,
+      };
+      if (sysMsgForm.id === null) {
+        await api.createSystemMessage(payload);
+        setMessage("System message created.");
+      } else {
+        await api.updateSystemMessage(sysMsgForm.id, payload);
+        setMessage("System message updated.");
+      }
+      await loadSysMsgs();
+      closeSysMsg();
+    } catch (err) {
+      setSysMsgSaveError(err instanceof ApiError ? err.message : "Could not save the message");
+    } finally {
+      setSysMsgSaving(false);
+    }
+  };
+
+  // Toggle a message active/inactive from the table, without opening the drawer.
+  // Optimistic with rollback, matching the organization toggle above.
+  const toggleSysMsgActive = async (m: SystemMessage) => {
+    setError("");
+    const next = !m.active;
+    const prev = sysMsgs;
+    setSysMsgs((cur) => cur.map((x) => (x.id === m.id ? { ...x, active: next } : x)));
+    try {
+      await api.updateSystemMessage(m.id, { active: next });
+      setMessage(`Message "${m.title}" ${next ? "activated" : "deactivated"}.`);
+    } catch (err) {
+      setSysMsgs(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update the message");
+    }
+    // Even on the rollback path the strip's cached list may be wrong, so the
+    // refresh runs either way.
+    refreshSystemMessages();
+  };
+
+  const deleteSysMsg = async (m: SystemMessage) => {
+    setError("");
+    setSysMsgDeleteId(null);
+    try {
+      await api.deleteSystemMessage(m.id);
+      setMessage(`Message "${m.title}" deleted.`);
+      await loadSysMsgs();
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not delete the message");
     }
   };
 
@@ -960,6 +1207,130 @@ export default function AdminSettings() {
         </Link>
       </CollapsibleSection>
 
+      {/* System Messages — the banners shown at the top of every page until each
+          user closes them out. This list is the AUTHORING view: it holds every
+          message, Active or Inactive, because that is what an admin has to
+          manage. What a given user is shown is decided by the strip in
+          components/SystemMessageBar.tsx, from a different endpoint that applies
+          the active flag, the audience and the per-user dismissals in SQL. */}
+      <CollapsibleSection
+        title="System Messages"
+        subtitle="Banners shown at the top of every page until each user closes them out"
+        bodyStyle={{ padding: 0 }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "flex-end",
+            gap: 8,
+            padding: "10px 14px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          <button className="primary-button" onClick={openSysMsgCreate}>
+            + Add Message
+          </button>
+        </div>
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Message</th>
+              <th>Status</th>
+              <th>Audience</th>
+              <th style={{ textAlign: "right" }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {sysMsgs.length === 0 ? (
+              <tr>
+                <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
+                  No messages yet.
+                </td>
+              </tr>
+            ) : (
+              sysMsgs.map((m) => {
+                // The first line of the description, as a preview. Deliberately
+                // not a CSS line-clamp on the whole text: a clipped element
+                // measures correctly and renders sliced, so the truncation is
+                // done in the data and marked with an ellipsis the reader can
+                // see.
+                const preview = m.body.split("\n")[0].trim();
+                const more = m.body.trim() !== preview;
+                return (
+                  <tr key={m.id}>
+                    <td data-label="Message">
+                      <div style={{ fontWeight: 600 }}>{m.title}</div>
+                      {preview !== "" && (
+                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                          {preview}
+                          {more ? " …" : ""}
+                        </div>
+                      )}
+                    </td>
+                    <td data-label="Status">
+                      <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                        <Toggle
+                          checked={m.active}
+                          onChange={() => void toggleSysMsgActive(m)}
+                        />
+                        <span className={`badge ${m.active ? "badge-green" : "badge-gray"}`}>
+                          {m.active ? "Active" : "Inactive"}
+                        </span>
+                      </div>
+                    </td>
+                    <td data-label="Audience">{audienceLabel(m.audience)}</td>
+                    <td
+                      data-label="Actions"
+                      style={{ textAlign: "right", whiteSpace: "nowrap" }}
+                    >
+                      {sysMsgDeleteId === m.id ? (
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                            Delete for every user?
+                          </span>
+                          <button
+                            className="secondary-button"
+                            onClick={() => setSysMsgDeleteId(null)}
+                          >
+                            Cancel
+                          </button>
+                          <button
+                            className="secondary-button"
+                            style={DANGER_BUTTON}
+                            onClick={() => void deleteSysMsg(m)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      ) : (
+                        <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
+                          <button className="secondary-button" onClick={() => openSysMsgEdit(m)}>
+                            Edit
+                          </button>
+                          <button
+                            className="secondary-button"
+                            style={DANGER_BUTTON}
+                            onClick={() => setSysMsgDeleteId(m.id)}
+                          >
+                            Delete
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0, padding: "12px 14px" }}>
+          Closing a message is recorded against the one user who closed it, and cannot be undone
+          for them — post a new message to say it again. A message whose audience is{" "}
+          <strong>No one</strong> is stored but delivered to nobody; switching one to{" "}
+          <strong>Inactive</strong> withdraws it from everyone who has not already closed it.
+        </p>
+      </CollapsibleSection>
+
       {/* Organizations panel */}
       <CollapsibleSection
         title="Organizations"
@@ -1092,6 +1463,103 @@ export default function AdminSettings() {
               disabled={orgSaving || !orgForm.name.trim()}
             >
               {orgSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
+        </div>
+      </div>
+
+      {/* Create / edit system message — right slide-out drawer */}
+      <div className={`drawer-overlay ${sysMsgOpen ? "open" : ""}`} onClick={closeSysMsg}>
+        <div className="drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="drawer-head">
+            <h2>{sysMsgForm.id === null ? "Add Message" : "Edit Message"}</h2>
+            <button className="icon-button close" onClick={closeSysMsg} title="Close">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="drawer-body">
+            {sysMsgSaveError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {sysMsgSaveError}
+              </div>
+            )}
+            <div className="form-grid">
+              <Field label="Title" full>
+                <input
+                  className="edit-input"
+                  value={sysMsgForm.title}
+                  maxLength={200}
+                  onChange={(e) => setSysMsgForm((f) => ({ ...f, title: e.target.value }))}
+                  placeholder="Fall semester forms are open"
+                />
+              </Field>
+              <Field label="Description" full>
+                <textarea
+                  className="edit-input"
+                  value={sysMsgForm.body}
+                  maxLength={4000}
+                  onChange={(e) => setSysMsgForm((f) => ({ ...f, body: e.target.value }))}
+                  placeholder="Anything the reader needs to know. Line breaks are kept."
+                  rows={6}
+                />
+              </Field>
+              {/* Not a <Field>: Field renders a <label>, and a <label> containing
+                  buttons hands every chip click to the first control inside it —
+                  so clicking "Staff" would also toggle "Admin". The caption is a
+                  plain span for the same reason. */}
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span
+                  style={{
+                    display: "block",
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: "var(--text-muted)",
+                    textTransform: "uppercase",
+                    letterSpacing: "0.04em",
+                    marginBottom: 6,
+                  }}
+                >
+                  Target Audience
+                </span>
+                <AudienceChips
+                  value={sysMsgForm.audience}
+                  onChange={(next) => setSysMsgForm((f) => ({ ...f, audience: next }))}
+                />
+                <span
+                  style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}
+                >
+                  {sysMsgForm.audience.length === 0
+                    ? "No role selected — this message is stored but delivered to nobody."
+                    : `Visible to ${audienceLabel(sysMsgForm.audience)}.`}
+                </span>
+              </div>
+              <Field label="Active" full>
+                <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                  <Toggle
+                    checked={sysMsgForm.active}
+                    onChange={(v) => setSysMsgForm((f) => ({ ...f, active: v }))}
+                  />
+                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    {sysMsgForm.active ? "Active" : "Inactive"}
+                    {!sysMsgForm.active && " — stored, but no user is shown it"}
+                  </span>
+                </div>
+              </Field>
+            </div>
+          </div>
+          <div className="drawer-foot">
+            <span className="muted-note">
+              {sysMsgForm.id === null ? "New message" : "Editing message"}
+            </span>
+            <button className="secondary-button" onClick={closeSysMsg} disabled={sysMsgSaving}>
+              Cancel
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => void handleSysMsgSave()}
+              disabled={sysMsgSaving || !sysMsgForm.title.trim()}
+            >
+              {sysMsgSaving ? "Saving…" : "Save"}
             </button>
           </div>
         </div>

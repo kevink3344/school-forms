@@ -4,6 +4,45 @@ import type { Role } from "../types";
 // `ROLES`. Extend both to add a future role; the toggle badges render from it.
 export const ROLES: Role[] = ["admin", "staff", "cdm_contact"];
 
+/**
+ * How a role reads when it is one of several an audience is addressed to.
+ *
+ * Deliberately NOT the labels used by `roleBadge()` in the Settings page. A role
+ * badge names the role one account holds ("Admin"), while an audience names a set
+ * of people the notice is addressed to ("Administrators"). Same role, two
+ * sentences — which is why this is a separate map rather than a reuse of that one.
+ */
+export const ROLE_AUDIENCE_LABELS: Record<Role, string> = {
+  admin: "Administrators",
+  staff: "Staff",
+  cdm_contact: "School Contacts",
+};
+
+/**
+ * How a message's audience reads wherever it is summarised — the Settings table's
+ * Audience column, the drawer's "Visible to …" hint and the badge on the notice
+ * card itself. One function so those three can never disagree about the same
+ * message.
+ *
+ * The three states mirror `SystemMessage.audience` exactly, and the distinction
+ * has to survive the wording:
+ *   - an empty array is a real, deliverable-nothing state, and it has to SAY so.
+ *     An empty label would look like missing data rather than a choice.
+ *   - a full roster is "Everyone". That is also what a message authored before
+ *     audiences existed reads back as, and the server makes those two
+ *     deliberately indistinguishable, so collapsing them here is correct rather
+ *     than lossy.
+ *   - anything else is the roles it names. The `?? r` fallback is not decoration:
+ *     the server passes an unrecognised role name through unvalidated (the
+ *     boundary that rejects one is Zod, at the API edge), so without it a bad
+ *     stored value would render as the literal word `undefined`.
+ */
+export function audienceLabel(audience: string[]): string {
+  if (audience.length === 0) return "No one";
+  if (ROLES.every((r) => audience.includes(r))) return "Everyone";
+  return audience.map((r) => ROLE_AUDIENCE_LABELS[r as Role] ?? r).join(", ");
+}
+
 // Parse a stored documents_link value (a JSON role array) into a Role[]. A null
 // / undefined / blank / unparsable value defaults to every current role so legacy
 // rows behave as before. An explicitly empty array means "hidden for everyone"

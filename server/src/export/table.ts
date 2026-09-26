@@ -10,16 +10,19 @@
 // routes/export.ts — moving it must not change the CSV output by a single byte.
 // -----------------------------------------------------------------------------
 import { fieldAccessRoles, type Role } from "../db/schema.js";
-import { listSubmissionValuesBatch } from "../db/queries.js";
+import { listSubmissionValuesBatch, type ExportColumn } from "../db/queries.js";
 import { parseTimestamp } from "../db/client.js";
 
 // A column plus the numeric field id resolved from its `field_N` key. The field
 // id is what submission values are matched on.
-export interface ExportColumnWithFieldId {
-  key: string;
-  label: string;
-  staff_only: boolean;
-  roles: string[] | null;
+//
+// Derived from the real column shape rather than re-declared: an earlier revision
+// repeated the fields by hand and left out `type` and `options`, so
+// `/api/reports/preview` could not type-check sending them even though the value
+// it held had carried them all along (getExportColumns always sets both). A
+// subset re-declaration does not fail — it just quietly makes part of the value
+// unreachable to everything downstream.
+export interface ExportColumnWithFieldId extends ExportColumn {
   field_id: number;
 }
 

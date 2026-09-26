@@ -80,6 +80,11 @@ export const TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   "staff_fields_updated_at",
   "received_at",
   "archived_at",
+  // Added with dbo.system_message_dismissals (docs/plans/system-messages.md).
+  // The table and this entry ship on the same commit: a timestamp column left
+  // outside this set is served in each engine's raw shape, and the two engines
+  // disagree about it.
+  "dismissed_at",
 ]);
 
 /**

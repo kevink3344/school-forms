@@ -321,3 +321,40 @@ export const updateReportViewSchema = z
     is_default: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+// -----------------------------------------------------------------------------
+// System Messages
+// -----------------------------------------------------------------------------
+// The audience list. `.max(ROLES.length)` is a pure abuse guard, not a business
+// rule: it is deliberately LOOSER than the set of roles that exist, so that a
+// payload naming an unknown role is rejected by `z.enum(ROLES)` — which names the
+// offending value in its message — rather than by a length check that would fire
+// first on a three-item array and say something useless.
+const audienceSchema = z.array(z.enum(ROLES)).max(ROLES.length);
+
+// Create. `body` defaults to "" because the column is NOT NULL and the UI makes
+// the description optional; the read path in `queries.ts` relies on that "" being
+// a real string and never null.
+export const systemMessageSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  body: z.string().max(4000).default(""),
+  active: z.boolean().default(false),
+  // null / omitted means "every role", which is the same stored form a message
+  // authored before audiences existed carries (see schema.messageAudienceRoles).
+  // An empty array is a VALID and meaningful value here — it means nobody — so
+  // this must accept `[]` and must never coerce it to null.
+  audience: audienceSchema.nullable().optional(),
+});
+
+// Update. Every field optional, plus the same non-empty guard the other update
+// schemas use so a `{}` body is a 400 rather than a no-op that reads as success.
+export const updateSystemMessageSchema = z
+  .object({
+    title: z.string().trim().min(1).max(200).optional(),
+    body: z.string().max(4000).optional(),
+    active: z.boolean().optional(),
+    audience: audienceSchema.nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+export type SystemMessageInput = z.infer<typeof systemMessageSchema>;

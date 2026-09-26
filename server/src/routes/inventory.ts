@@ -96,4 +96,16 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/submissions/{publicId}/documents", auth: "staff", tags: "Documents" },
   { method: "post", path: "/api/documents/{id}/retry", auth: "staff", tags: "Documents" },
   { method: "post", path: "/api/documents/{id}/regenerate", auth: "staff", tags: "Documents" },
+  // System Messages. The two reader routes are `staff` in this vocabulary's
+  // PERMISSIVE sense ("a valid bearer token with any role"), which is the same
+  // label the submissions router uses for its staff-or-admin routes — there is no
+  // "any signed-in user" value, and `none` would be wrong because a token is
+  // required. The other four are admin-only: authoring a notice is an
+  // administrative function.
+  { method: "get", path: "/api/system-messages/active", auth: "staff", tags: "System Messages" },
+  { method: "post", path: "/api/system-messages/{id}/dismiss", auth: "staff", tags: "System Messages" },
+  { method: "get", path: "/api/system-messages", auth: "admin", tags: "System Messages" },
+  { method: "post", path: "/api/system-messages", auth: "admin", tags: "System Messages" },
+  { method: "put", path: "/api/system-messages/{id}", auth: "admin", tags: "System Messages" },
+  { method: "delete", path: "/api/system-messages/{id}", auth: "admin", tags: "System Messages" },
 ];

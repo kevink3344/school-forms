@@ -280,6 +280,45 @@ const TURSO_DDL: string[] = [
   `CREATE INDEX IF NOT EXISTS IX_webhook_events_org ON webhook_events(organization_id, received_at DESC)`,
   `CREATE INDEX IF NOT EXISTS IX_webhook_events_replay_of ON webhook_events(replay_of)`,
 
+  // --- system messages -------------------------------------------------------
+  // Admin-authored notices (docs/plans/system-messages.md). Two NEW tables, so
+  // no `addColumns` entry is needed — that list is only for columns added to a
+  // table an earlier revision already created.
+  //
+  // No foreign keys, same reasoning as webhook_events above: a deleted message
+  // must not be blocked by its dismissals, and the dismissals for a message are
+  // removed explicitly by deleteSystemMessage in the same transaction.
+  //
+  // `dismissed_at` MUST be listed in TIMESTAMP_COLUMNS (db/client.ts) — it reads
+  // back as a string here and a Date on SQL Server, and that set is what unifies
+  // the two.
+  //
+  // `audience` holds a JSON array of roles (`'["admin","staff"]'`), the same
+  // storage form as form_fields.roles; NULL means "every role". It is NOT a
+  // boolean or a timestamp, so it must not appear in BOOLEAN_COLUMNS or
+  // TIMESTAMP_COLUMNS.
+  `CREATE TABLE IF NOT EXISTS system_messages (
+     id              INTEGER PRIMARY KEY AUTOINCREMENT,
+     organization_id INTEGER NOT NULL,
+     title           TEXT NOT NULL,
+     body            TEXT NOT NULL DEFAULT '',
+     active          INTEGER NOT NULL DEFAULT 0,
+     audience        TEXT,
+     created_by      INTEGER,
+     created_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     updated_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE INDEX IF NOT EXISTS IX_system_messages_org_active
+     ON system_messages(organization_id, active, created_at DESC)`,
+  // PK (message_id, user_id) is both the idempotency mechanism and the index the
+  // active-list query reads by, so no second index is declared.
+  `CREATE TABLE IF NOT EXISTS system_message_dismissals (
+     message_id   INTEGER NOT NULL,
+     user_id      INTEGER NOT NULL,
+     dismissed_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     PRIMARY KEY (message_id, user_id)
+   )`,
+
   // --- reference data --------------------------------------------------------
   // The two known organizations, seeded idempotently exactly as the SQL Server
   // ladder does.
@@ -353,6 +392,17 @@ export const tursoDialect: Dialect = {
       table: "submissions",
       column: "archived_by",
       definition: "INTEGER",
+    },
+    {
+      // System Messages. The table itself is new on this revision, so a database
+      // that only ever ran the FINAL schema gets `audience` from its CREATE
+      // TABLE — but a database that booted an earlier revision of the same
+      // branch already has the table without the column, and SQLite has no
+      // `ADD COLUMN IF NOT EXISTS`. Listed for exactly that window. Must match
+      // TURSO_DDL and schema.ts; NULL means "every role".
+      table: "system_messages",
+      column: "audience",
+      definition: "TEXT",
     },
   ],
 

@@ -75,6 +75,8 @@ describe("buildExportRows", () => {
     staff_only: false,
     roles: null,
     field_id: 9,
+    type: "text",
+    options: null,
   };
 
   it("renders a row whose submitted_at is the Z-less text form", async () => {

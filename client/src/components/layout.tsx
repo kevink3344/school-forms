@@ -22,6 +22,7 @@ import {
   type MenuItemKey,
 } from "../lib/settings";
 import { useDocumentsEnabled } from "../lib/useDocumentsEnabled";
+import { SystemMessageBar } from "./SystemMessageBar";
 import type { Role } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -340,7 +341,18 @@ export function AppShell({ children }: { children: ReactNode }) {
             </>
           )}
         </nav>
-        <main className="main">{children}</main>
+        {/* System Messages — admin-authored notices, above the page content and
+            below the banner, on every authenticated page. It is inside <main>
+            rather than between the banner and .body-flex because .sidebar and
+            .sidebar-overlay are `position: fixed` from --banner-h downwards, so
+            flow content above the body row would be overlapped by the open
+            drawer instead of pushing it down. The component itself decides
+            whether anything renders: it returns null when this user has no open
+            messages, so there is no empty wrapper taking up space. */}
+        <main className="main">
+          <SystemMessageBar />
+          {children}
+        </main>
       </div>
     </div>
   );

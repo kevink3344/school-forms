@@ -80,7 +80,10 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
   const schoolId =
     scopedSchoolId(user) ??
     (q.school_id ? Number(q.school_id) : undefined);
-  // Staff-only columns can only ever be exposed to admins, and only on request.
+  // Opting into staff-only columns is an ADMIN gesture; staff-like roles are not
+  // asked, because for them those columns are not optional — filterColumnsForRole
+  // grants a staff-only column whose access roles include the caller's own role,
+  // which is how School Contacts see the fields they are expected to fill in.
   const includeStaffOnly = !isStaff && q.include_staff_only === "1";
 
   const form = await getForm(q.form_id, user.organization_id);
@@ -176,6 +179,16 @@ reportsRouter.get("/preview", requireAuth, requireRoles(...REPORT_ROLES), async 
         label: c.label,
         staff_only: c.staff_only,
         roles: c.roles,
+        // Carried for the same reason as in routes/export.ts: the preview grid
+        // renders the cell AND picks its editor from this one response. Without
+        // them the Reports grid could still *draw* a staff-only value but could
+        // not edit one — the only other source is GET /api/forms/:id, which is
+        // admin-only, while School Contacts are exactly the users who need to
+        // edit these. Their omission was also invisible to the client's types:
+        // `ExportColumn` declares `type` and `options` as required, so the
+        // editor would have been built from `undefined`.
+        type: c.type,
+        options: c.options,
       })),
       rows: report.rows,
       total: report.rows.length,

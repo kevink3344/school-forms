@@ -1,7 +1,7 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
-import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles } from "./schema.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { env } from "../config/env.js";
 import type {
@@ -15,6 +15,7 @@ import type {
   Role,
   Organization,
   ListDocumentRow,
+  SystemMessage,
 } from "./schema.js";
 
 // -----------------------------------------------------------------------------
@@ -2495,5 +2496,325 @@ export async function touchReportView(id: number, userId: number): Promise<void>
   await execute(
     `UPDATE dbo.report_views SET last_used_at = SYSUTCDATETIME() WHERE id = @id AND user_id = @userId`,
     { id, userId }
+  );
+}
+
+// -----------------------------------------------------------------------------
+// System Messages
+//
+// Admin-authored notices shown to everyone in one organization until each person
+// closes them out. See docs/plans/system-messages.md.
+//
+// Two rules apply to every read below and are not repeated in each comment:
+//
+//   1. Every `system_messages` read is scoped by `organization_id`. A message is
+//      one organization's prose; the two tenants share the `schools` table, so a
+//      typo'd WHERE here would show Academics' notice to Technology Services.
+//   2. Every `system_message_dismissals` read or write is scoped by `user_id`.
+//      "Closed" is per person, never per organization — a dismissal written
+//      against the wrong user silently hides a notice somebody has not read.
+//
+// `system_message_dismissals` deliberately has NO foreign key to
+// `system_messages`, so nothing here can rely on a cascade; the rows for a
+// deleted message are removed explicitly in `deleteSystemMessage`.
+// -----------------------------------------------------------------------------
+
+/** The projected columns for every read. Kept in one place so a new column cannot
+ *  be added to the table and missed by one of the four readers. */
+const SYSTEM_MESSAGE_COLUMNS =
+  "id, organization_id, title, body, active, audience, created_by, created_at, updated_at";
+
+/** The same list qualified with the `m` alias, for the joined/aliased reads. */
+const SYSTEM_MESSAGE_COLUMNS_M =
+  "m.id, m.organization_id, m.title, m.body, m.active, m.audience, m.created_by, m.created_at, m.updated_at";
+
+/** A row as the DATABASE hands it back: `audience` is a JSON string, not an array. */
+interface RawSystemMessage extends Omit<SystemMessage, "audience"> {
+  audience: string | null;
+}
+
+/** Turn a raw row into the API shape. The ONLY place `audience` is parsed, so no
+ *  caller can forget to and no caller can parse it a second, different way. */
+function toSystemMessage(row: RawSystemMessage): SystemMessage {
+  return { ...row, audience: messageAudienceRoles(row.audience) };
+}
+
+/**
+ * The LIKE pattern that matches one role inside a stored JSON array.
+ *
+ * The stored form is `["admin","staff"]`, so the quoted token `"staff"` cannot
+ * be confused with a role whose name merely CONTAINS it — the closing quote has
+ * to follow immediately. The three LIKE metacharacters are still escaped rather
+ * than left to luck, because `cdm_contact` contains an underscore, which in LIKE
+ * matches any single character. `role` always comes from the `ROLES` enum (it is
+ * validated by Zod before it ever reaches here), so this is belt-and-braces, not
+ * the actual safety mechanism — the enum is.
+ *
+ * `ESCAPE '\'` is written in the SQL as a single backslash; in this template
+ * literal it has to be doubled, which is a JavaScript detail, not a SQL one.
+ *
+ * Exported so `system-messages.test.ts` can assert the escaping rather than
+ * describe it. The claim it carries — that `cdm_contact`'s underscore is
+ * escaped, and that the surrounding quotes stop `staff` matching a role that
+ * merely ends in it — is not visible from any other layer: a wrong pattern
+ * returns a PLAUSIBLE row set, so nothing else in the app fails.
+ */
+export function audienceLikePattern(role: string): string {
+  const escaped = role.replace(/[\\%_]/g, (c) => `\\${c}`);
+  return `%"${escaped}"%`;
+}
+
+/**
+ * Every message in one organization, newest first — the admin grid.
+ *
+ * Deliberately unfiltered by `active`: the admin panel has to show an inactive
+ * message in order to switch it back on, and "everything that exists" is the only
+ * list that can be reconciled against the table.
+ */
+export async function listSystemMessages(organizationId: number): Promise<SystemMessage[]> {
+  const rows = await execute<RawSystemMessage>(
+    `SELECT ${SYSTEM_MESSAGE_COLUMNS}
+       FROM dbo.system_messages
+      WHERE organization_id = @organizationId
+      ORDER BY created_at DESC, id DESC`,
+    { organizationId }
+  );
+  return rows.map(toSystemMessage);
+}
+
+/**
+ * The messages one user has NOT closed out yet, newest first, capped at three.
+ *
+ * The cap is applied HERE, in the query, and not in the client. Slicing in the
+ * client (`rows.slice(0, 3)`) is a correctness bug rather than a layout choice:
+ * the API would answer "here are all your messages" and the caller would quietly
+ * deny the existence of the ones past the third, which is the same shape as
+ * `list.slice(0, N).filter(pred)` filtering a capped list.
+ *
+ * `SELECT TOP 3` is SQL Server-only and `driver/libsql.test.ts` bans `TOP n` from
+ * shared files, so the row window goes through the `selectPage` dialect builder
+ * — the one place that already knows the two spellings
+ * (`OFFSET/FETCH` vs `LIMIT/OFFSET`).
+ *
+ * `created_at DESC, id DESC` is a TOTAL order: an admin can add two messages
+ * inside the same millisecond, and without the tie-breaker the database is free
+ * to return them in a different sequence for the page than for the count.
+ *
+ * `NOT EXISTS` rather than `NOT IN`: `NOT IN (SELECT user_id ...)` over a column
+ * that could ever hold NULL evaluates to UNKNOWN and returns no rows at all.
+ *
+ * The audience filter is in this WHERE and NOT applied to the returned rows. The
+ * cap is three, so filtering afterwards would mean a staff user is shown fewer
+ * than three notices while a fourth they are entitled to see sits unreturned
+ * behind the cap — the `list.slice(0, N).filter(pred)` bug, one layer down. The
+ * predicate therefore has to be part of the same statement the cap applies to,
+ * and the route must hand it the viewer's role.
+ *
+ * NULL `audience` is "everyone" (see schema.messageAudienceRoles), so the NULL
+ * arm is what keeps a message created before audiences existed visible. An
+ * explicit '[]' matches neither arm — correctly, because it means nobody.
+ */
+export async function listActiveSystemMessagesForUser(
+  organizationId: number,
+  userId: number,
+  viewerRole: string
+): Promise<SystemMessage[]> {
+  const rows = await execute<RawSystemMessage>(
+    dialect().selectPage({
+      select: SYSTEM_MESSAGE_COLUMNS_M,
+      from: "dbo.system_messages m",
+      where: `WHERE m.organization_id = @organizationId
+        AND m.active = 1
+        AND NOT EXISTS (SELECT 1 FROM dbo.system_message_dismissals d
+                         WHERE d.message_id = m.id AND d.user_id = @userId)
+        AND (m.audience IS NULL OR m.audience LIKE @audiencePattern ESCAPE '\\')`,
+      orderBy: "m.created_at DESC, m.id DESC",
+    }),
+    // pageSize is the cap. It is a constant, not a parameter, so it cannot be
+    // widened by a caller and cannot drift between the two dialects.
+    { organizationId, userId, pageSize: 3, offset: 0, audiencePattern: audienceLikePattern(viewerRole) }
+  );
+  return rows.map(toSystemMessage);
+}
+
+/**
+ * One message, scoped to its organization.
+ *
+ * Returns `null` when the message does not exist OR belongs to another
+ * organization — the two are deliberately indistinguishable, because "that id
+ * exists but is not yours" is itself a disclosure.
+ */
+export async function getSystemMessage(
+  id: number,
+  organizationId: number
+): Promise<SystemMessage | null> {
+  const rows = await execute<RawSystemMessage>(
+    `SELECT ${SYSTEM_MESSAGE_COLUMNS}
+       FROM dbo.system_messages
+      WHERE id = @id AND organization_id = @organizationId`,
+    { id, organizationId }
+  );
+  return rows[0] ? toSystemMessage(rows[0]) : null;
+}
+
+/**
+ * Serialize an audience for storage.
+ *
+ * `null` stays NULL — that is the stored meaning of "every role", and collapsing
+ * it to a string would make it indistinguishable from a real selection. An empty
+ * array is stored as the literal '[]' and must NOT be collapsed to NULL, because
+ * '[]' means nobody; the difference is one row an admin can still act on versus
+ * a notice that silently becomes public to every role.
+ */
+function serializeAudience(audience: string[] | null): string | null {
+  return audience === null ? null : JSON.stringify(audience);
+}
+
+/**
+ * Create a message in the caller's organization.
+ *
+ * `active` is taken as given rather than defaulted here: the DB default is 0 and
+ * the schema layer supplies the default, so a caller that omits it and a caller
+ * that passes `false` produce the same row.
+ */
+export async function createSystemMessage(input: {
+  organizationId: number;
+  title: string;
+  body: string;
+  active: boolean;
+  audience: string[] | null;
+  createdBy: number | null;
+}): Promise<SystemMessage> {
+  const rows = await execute<RawSystemMessage>(
+    dialect().insertReturning({
+      table: "system_messages",
+      columns: ["organization_id", "title", "body", "active", "audience", "created_by"],
+      values: "@organizationId, @title, @body, @active, @audience, @createdBy",
+      returning: SYSTEM_MESSAGE_COLUMNS.split(", "),
+    }),
+    {
+      organizationId: input.organizationId,
+      title: input.title,
+      body: input.body,
+      active: input.active,
+      audience: serializeAudience(input.audience),
+      createdBy: input.createdBy ?? null,
+    }
+  );
+  return toSystemMessage(rows[0]);
+}
+
+/**
+ * Update a message, scoped to its organization. Returns the updated row, or
+ * `null` when no such message exists in that organization.
+ *
+ * `title`, `body` and `active` are all non-nullable, so `??` is the right test for
+ * every one of them: `??` falls back only on `null`/`undefined`, which means an
+ * absent key leaves the value alone while an explicit `""` clears the body
+ * (`"" ?? x` is `""`). An EARLIER revision of this function used a
+ * `hasOwnProperty` presence check for `body` on the theory that `??` would mistake
+ * `""` for "absent" — that theory was wrong, and it 500'd the PUT route: the route
+ * (following the same idiom as `updateForm`) passes `body: parsed.data.body`, so a
+ * title-only request carries the key with the value `undefined`. `hasOwnProperty`
+ * answered "present" and the driver was handed `undefined` to bind. `??` handles
+ * exactly that case.
+ *
+ * `audience` is the one field that genuinely needs value-presence rather than
+ * `??`: it is nullable, so an absent key ("change only the title") and an explicit
+ * `null` ("show this to everyone again") are two different instructions. Note the
+ * check treats an explicit `undefined` as ABSENT, not as null: `undefined` can
+ * only mean "the caller did not supply this", and letting it reach
+ * `serializeAudience` would silently widen the message to every role. An empty
+ * array still has to survive as '[]'.
+ */
+export async function updateSystemMessage(
+  id: number,
+  organizationId: number,
+  data: { title?: string; body?: string; active?: boolean; audience?: string[] | null }
+): Promise<SystemMessage | null> {
+  const existing = await getSystemMessage(id, organizationId);
+  if (!existing) return null;
+
+  const title = data.title ?? existing.title;
+  const body = data.body ?? existing.body;
+  const active = data.active ?? existing.active;
+  const audience = data.audience === undefined
+    ? serializeAudience(existing.audience)
+    : serializeAudience(data.audience);
+
+  // Written inline rather than through `dialect().updateReturning` because this
+  // UPDATE also stamps `updated_at = SYSUTCDATETIME()`, which that builder has no
+  // way to emit (it takes a literal SET body, but the other callers all leave the
+  // timestamp column alone). Dropping the stamp would make an edited notice look
+  // unedited in the ORDER BY that puts the newest message at the top.
+  await execute(
+    `UPDATE dbo.system_messages
+        SET title = @title, body = @body, active = @active, audience = @audience,
+            updated_at = SYSUTCDATETIME()
+      WHERE id = @id AND organization_id = @organizationId`,
+    { id, organizationId, title, body, active, audience }
+  );
+  return getSystemMessage(id, organizationId);
+}
+
+/**
+ * Delete a message and everyone's close-outs for it. Returns true when a message
+ * was deleted, false when none matched (including another organization's).
+ *
+ * The message is deleted FIRST: if the org-scoped delete matches nothing, this
+ * returns `false` without touching a single dismissal row, so a refused delete
+ * cannot leave the group of tables half-changed. Removing the dismissals after is
+ * housekeeping, not correctness — they are keyed by message id and nothing reads
+ * a dismissal whose message is gone.
+ */
+export async function deleteSystemMessage(id: number, organizationId: number): Promise<boolean> {
+  const deleted = await execute<{ id: number }>(
+    dialect().deleteReturning({
+      table: "system_messages",
+      where: "id = @id AND organization_id = @organizationId",
+      returning: ["id"],
+    }),
+    { id, organizationId }
+  );
+  if (deleted.length === 0) return false;
+
+  await execute(
+    "DELETE FROM dbo.system_message_dismissals WHERE message_id = @messageId",
+    { messageId: id }
+  );
+  return true;
+}
+
+/**
+ * Record that one user has closed one message. Idempotent.
+ *
+ * Written as one portable `INSERT ... SELECT ... WHERE` rather than a MERGE (the
+ * SQL Server dialect has MERGE, but `driver/libsql.test.ts` bans the keyword from
+ * shared files) or a read-then-write (which races two browsers into a duplicate
+ * key error the user would see as a failure to close a message).
+ *
+ * The `EXISTS` clause is the organization boundary, enforced in the same
+ * statement as the write so there is no window between checking and acting. The
+ * `NOT EXISTS` clause is what makes a double-clicked X a no-op: the composite
+ * primary key would otherwise raise a duplicate key error on the second request,
+ * which is not the user's fault and not theirs to retry.
+ *
+ * Both clauses go through `SELECT @a, @b WHERE ...` — a SELECT with no FROM,
+ * which SQL Server and SQLite both evaluate (this repo already relies on it for
+ * the reference-data inserts in `dialect/turso.ts`).
+ */
+export async function dismissSystemMessage(
+  messageId: number,
+  userId: number,
+  organizationId: number
+): Promise<void> {
+  await execute(
+    `INSERT INTO dbo.system_message_dismissals (message_id, user_id)
+     SELECT @messageId, @userId
+      WHERE EXISTS (SELECT 1 FROM dbo.system_messages m
+                     WHERE m.id = @messageId AND m.organization_id = @organizationId)
+        AND NOT EXISTS (SELECT 1 FROM dbo.system_message_dismissals d
+                         WHERE d.message_id = @messageId AND d.user_id = @userId)`,
+    { messageId, userId, organizationId }
   );
 }

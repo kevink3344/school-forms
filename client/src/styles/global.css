@@ -211,6 +211,78 @@ p { margin: 0; }
 /* Main */
 .main { flex: 1; padding: 20px 24px; min-width: 0; }
 
+/* ===== System Messages strip =====
+   Admin-authored notices (Settings → System Messages) shown at the top of the
+   main column on every authenticated page until each user closes them out.
+   They live inside .main rather than above .body-flex because .sidebar and
+   .sidebar-overlay are `position: fixed` from --banner-h down: flow content
+   placed above the body row would be overlapped by the open drawer.
+   The accent left edge is what separates a notice from the page's own content
+   at a glance; there is no shadow, because up to three of these stack and three
+   stacked card shadows read as three floating panels. */
+.sysmsg-stack { display: flex; flex-direction: column; gap: 10px; margin-bottom: 18px; }
+.sysmsg {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 12px 14px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius);
+}
+.sysmsg-icon { flex-shrink: 0; display: inline-flex; margin-top: 1px; color: var(--accent); }
+/* min-width:0 is required, not cosmetic: a flex item's automatic minimum size is
+   its content's, so a long unbroken token in an admin's description would widen
+   the item and push the close button out of the card instead of wrapping. */
+.sysmsg-text { flex: 1; min-width: 0; }
+.sysmsg-title { margin: 0; font-size: 14px; font-weight: 700; color: var(--text); }
+.sysmsg-body {
+  margin: 4px 0 0; font-size: 13px; line-height: 1.5; color: var(--text);
+  /* An admin-authored description keeps the line breaks it was typed with.
+     `pre-wrap` rather than `pre-line`: a pasted list should keep its indentation,
+     and `pre-line` would collapse it. `anywhere` is the wrap-safety net for a
+     long URL or an id with no spaces. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* An inline failure of the close action. There is no red token in this theme —
+   the established error treatment is --vacant-fg on --orange-tint (see
+   .alert-error), so the text uses the same foreground as the alert box does. */
+.sysmsg-error { margin: 6px 0 0; font-size: 12px; color: var(--vacant-fg); }
+.sysmsg-close { flex-shrink: 0; width: 28px; height: 28px; }
+/* The audience badge sits under the description, inside the card. Its own block
+   wrapper carries the top margin so the pill keeps `display: inline-flex` from
+   .badge — vertical margins on an inline-level box are the fussy kind, and the
+   space above a badge is not worth depending on that. */
+.sysmsg-meta { margin-top: 8px; }
+/* NOTE the compound selector — it is required, not stylistic. As a bare
+   `.sysmsg-audience` this rule has the same specificity as `.badge` (0,1,0 each),
+   so the winner would be decided by source order, and `.badge` sits ~200 lines
+   further down with `border: 1px solid transparent`. That shorthand would win and
+   reset the colour — leaving a 1px border that reserves its space and paints
+   nothing, which is exactly how this badge shipped borderless the first time.
+   `.badge.sysmsg-audience` is (0,2,0) and wins on specificity regardless of
+   order. Do not "simplify" this back to a single class.
+
+   It keeps .badge's shape so it reads as the same species of pill as the status
+   badges elsewhere, with three deliberate differences from .badge-gray:
+
+   - the colour is --text, not --text-muted. At 11px, --text-muted on
+     --panel-bg measures about 3.5:1, under the 4.5:1 AA floor for text this
+     size. Fixing this one badge's colour is a local change; the pre-existing
+     muted captions elsewhere in the app are deliberately left alone.
+   - it is a step smaller and tighter than .badge, because it is metadata
+     inside a notice rather than a status the reader acts on.
+   - the border is written as the full shorthand so it does not depend on
+     another rule's order, and it is --border rather than --card-bg: the card is
+     the badge's own backdrop, so a border in that colour would be invisible. */
+.badge.sysmsg-audience {
+  font-size: 11px;
+  padding: 2px 8px;
+  color: var(--text);
+  background: var(--panel-bg);
+  border: 1px solid var(--border);
+}
+
 /* Page header */
 .page-head { display: flex; align-items: flex-start; gap: 16px; margin-bottom: 18px; flex-wrap: wrap; }
 .page-head .title-block h1 { margin: 0; font-size: 22px; font-weight: 700; }

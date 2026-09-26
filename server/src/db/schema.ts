@@ -1151,6 +1151,89 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      CREATE INDEX IX_webhook_events_org ON dbo.webhook_events(organization_id, received_at DESC);
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_webhook_events_replay_of')
      CREATE INDEX IX_webhook_events_replay_of ON dbo.webhook_events(replay_of);`,
+
+  // ---------------------------------------------------------------------
+  // System Messages — admin-authored notices (docs/plans/system-messages.md)
+  //
+  // Two new tables, so NO addColumns entries are needed for Turso (§5.3 of the
+  // plan): a new column would need three edits, a new table needs one per
+  // dialect.
+  //
+  // DELIBERATELY NO FOREIGN KEYS, for the same reason webhook_events has none:
+  // deleting a message must not fail, and a cascade from dbo.organizations would
+  // remove an audit trail silently. The one relation that genuinely needs
+  // cleaning up (a message's dismissals) is deleted explicitly, in the same
+  // transaction, in deleteSystemMessage — visible in the query rather than
+  // hidden in DDL.
+  //
+  // `organization_id` is NOT NULL on purpose: `active = 1` on a row nobody owns
+  // would be a notice every admin's prose is shown to every other tenant.
+  //
+  // `created_at`/`updated_at` are already in TIMESTAMP_COLUMNS (db/client.ts);
+  // `dismissed_at` is added there on this same commit — that set is what makes
+  // the value land as an ISO-8601 string on Turso and a Date on SQL Server
+  // without the API layer noticing.
+  // ---------------------------------------------------------------------
+  //
+  // `audience` is the JSON array of roles that may be SHOWN the message (the
+  // "Target Audience" toggles in the admin panel), stored exactly the way
+  // form_fields.roles is: a JSON string, NULL meaning "unset". The unset case
+  // resolves to every role, which is the convention fieldAccessRoles() already
+  // established for a staff-only field. An explicit '[]' means nobody and must
+  // NOT be collapsed back to NULL — that distinction is the whole reason the
+  // column is nullable.
+  `IF OBJECT_ID('dbo.system_messages', 'U') IS NULL
+   CREATE TABLE dbo.system_messages (
+     id              INT IDENTITY(1,1) PRIMARY KEY,
+     organization_id INT NOT NULL,
+     title           NVARCHAR(200) NOT NULL,
+     body            NVARCHAR(MAX) NOT NULL CONSTRAINT DF_system_messages_body DEFAULT (''),
+     active          BIT NOT NULL CONSTRAINT DF_system_messages_active DEFAULT (0),
+     audience        NVARCHAR(200) NULL,
+     created_by      INT NULL,
+     created_at      DATETIME2 NOT NULL CONSTRAINT DF_system_messages_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at      DATETIME2 NOT NULL CONSTRAINT DF_system_messages_updated_at DEFAULT SYSUTCDATETIME()
+   );`,
+
+  // Self-healing add for `audience`, for the same reason webhook_events
+  // .organization_id needs one: `initDb()` runs this ladder at every boot, and a
+  // database that already ran an earlier revision of THIS branch has the table
+  // (so the CREATE above is skipped) but not the column. Without this the
+  // audience filter would fail at runtime with "Invalid column name 'audience'"
+  // on the developer's own machine and nowhere else.
+  //
+  // NULL stays the meaning of "every role", so no backfill is needed or wanted:
+  // a pre-existing message is deliberately shown to everyone, and writing an
+  // explicit role array here would freeze today's role list into old rows.
+  `IF COL_LENGTH('dbo.system_messages', 'audience') IS NULL
+     ALTER TABLE dbo.system_messages ADD audience NVARCHAR(200) NULL;`,
+
+  // One row per (message, user) that has closed it out. The composite PK is the
+  // idempotency mechanism: a double-clicked X cannot write a second row, and the
+  // portable `INSERT ... SELECT ... WHERE NOT EXISTS` upsert this repo already
+  // uses elsewhere becomes a genuine no-op rather than a duplicate key error.
+  //
+  // PK (message_id, user_id) also IS the index the active-list query needs — it
+  // looks dismissals up by exactly that pair — so no second index is declared.
+  `IF OBJECT_ID('dbo.system_message_dismissals', 'U') IS NULL
+   CREATE TABLE dbo.system_message_dismissals (
+     message_id   INT NOT NULL,
+     user_id      INT NOT NULL,
+     dismissed_at DATETIME2 NOT NULL CONSTRAINT DF_smd_dismissed_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT PK_system_message_dismissals PRIMARY KEY (message_id, user_id)
+   );`,
+
+  // Indexes in their own batch — a CREATE INDEX must not share a batch with the
+  // CREATE TABLE that defines its columns (error 207: SQL Server compiles a
+  // batch before running it).
+  //
+  // Declared through indexGuard so expectedIndexNames() (below) sees it and the
+  // boot-time "N indexes MISSING" warning stays honest — a bare name check would
+  // be satisfied by an index on the wrong columns, and a CREATE INDEX against a
+  // column this foreign database declares as nvarchar(max) would fail and abort
+  // every later batch, leaving dbReady false.
+  `${indexGuard("IX_system_messages_org_active", "system_messages", ["organization_id", "active", "created_at"])}
+     CREATE INDEX IX_system_messages_org_active ON dbo.system_messages(organization_id, active, created_at DESC);`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB
@@ -1172,6 +1255,58 @@ export interface ReportView {
 
 export const REPORT_FORMATS = ["csv", "xlsx", "pdf"] as const;
 export type ReportFormat = (typeof REPORT_FORMATS)[number];
+
+// An admin-authored notice shown to everyone in one organization until each
+// person closes it out. `body` is optional in the UI but NOT NULL in the DB, so
+// it is always a string here and never `string | null` — the write path
+// defaulting it to "" is the only thing keeping that honest.
+//
+// There is deliberately no `closed_count` / `audience_count` field: the feature
+// reports no close-out figures (see docs/plans/system-messages.md §3 decision 11).
+//
+// `audience` is typed as an array because that is the API contract, but the value
+// read straight out of the database is a JSON STRING (NVARCHAR/TEXT), exactly
+// like `FormField.roles` above. `toSystemMessage` in queries.ts is the only thing
+// that turns one into the other, so every reader that goes through it sees a real
+// array and nothing downstream re-parses.
+export interface SystemMessage {
+  id: number;
+  organization_id: number;
+  title: string;
+  body: string;
+  active: boolean;
+  audience: string[];
+  created_by: number | null;
+  created_at: Date;
+  updated_at: Date;
+}
+
+// Resolve the roles that may be SHOWN a system message.
+//
+// Deliberately the same shape as `fieldAccessRoles`, because the admin picks the
+// audience with the same control the form designer uses for a staff-only field's
+// access, and two controls that look identical must not mean subtly different
+// things. NULL/undefined = unset, which resolves to every current role (so a
+// message authored before audiences existed is shown to everybody, and a role
+// added later is included rather than silently excluded). An explicitly EMPTY
+// array means the admin granted nobody access and must resolve to [] — never back
+// to all roles.
+//
+// Exported because the routes need the resolved list, not just the storage layer.
+export function messageAudienceRoles(raw: string[] | string | null | undefined): string[] {
+  if (raw === null || raw === undefined) return [...ROLES];
+  if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
+  if (typeof raw !== "string" || raw.trim() === "") return [...ROLES];
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
+  } catch {
+    // A corrupt blob degrades to "everyone" rather than to "nobody": the failure
+    // a reader can act on is a notice they did not expect to see, not a notice
+    // that silently exists and is shown to no one.
+  }
+  return [...ROLES];
+}
 
 // -----------------------------------------------------------------------------
 // Helpers

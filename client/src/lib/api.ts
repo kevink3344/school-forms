@@ -25,6 +25,7 @@ import type {
   SubmissionDetail,
   SubmissionRow,
   SubmissionStatus,
+  SystemMessage,
   User,
   ViewColumnsConfig,
   WebhookBulkReplayResult,
@@ -1127,6 +1128,111 @@ export const api = {
       method: "POST",
       auth: true,
       body: input,
+    });
+  },
+
+  // ---------------------------------------------------------------------------
+  // System Messages
+  //
+  // Two different readers over one table, and they must not be confused:
+  //   - `listActiveSystemMessages` is the DELIVERY view — active messages this
+  //     user has not closed out, filtered by their role, capped at three by the
+  //     server.
+  //   - `listSystemMessages` is the AUTHORING view for admins — everything in
+  //     the organization, active or not, because an inactive message has to be
+  //     visible in the panel in order to be switched back on.
+  // The admin list is NOT a superset of the active one: a message can be active
+  // and still be absent from a given user's active feed (wrong audience, or
+  // already dismissed).
+  // ---------------------------------------------------------------------------
+
+  /** The authoring view: every message in the caller's organization, newest
+   *  first. Admin-only — the server answers 403 to anyone else. */
+  async listSystemMessages(): Promise<SystemMessage[]> {
+    return request<SystemMessage[]>("/api/system-messages", { auth: true });
+  },
+
+  /**
+   * The delivery view: active messages for the signed-in user that they have
+   * not closed out, filtered by the user's role and capped at three.
+   *
+   * The cap is applied by the server as part of the same statement as the role
+   * filter, so this list is already the complete set to render. Do NOT slice it
+   * client-side: a client slice would look identical here and would quietly
+   * deny the existence of anything past the third row.
+   */
+  async listActiveSystemMessages(): Promise<SystemMessage[]> {
+    return request<SystemMessage[]>("/api/system-messages/active", { auth: true });
+  },
+
+  /**
+   * Author a new message. `active` defaults to false server-side, so a message
+   * created without it is stored but not delivered — the panel has to switch it
+   * on. An omitted `audience` means every role; `[]` means nobody.
+   */
+  async createSystemMessage(input: {
+    title: string;
+    body?: string;
+    active?: boolean;
+    audience?: string[] | null;
+  }): Promise<SystemMessage> {
+    return request<SystemMessage>("/api/system-messages", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  /**
+   * Edit a message. Only the keys present in `input` are changed — an absent key
+   * means "leave it alone", NOT "clear it", so a title-only save preserves the
+   * body and the audience. To re-broadcast an edit that narrowed the audience,
+   * pass `audience: null` explicitly (which the server stores as "every role");
+   * to narrow it to nobody, pass `audience: []`. Those two are different
+   * requests and the server treats them differently.
+   */
+  async updateSystemMessage(
+    id: number,
+    input: {
+      title?: string;
+      body?: string;
+      active?: boolean;
+      audience?: string[] | null;
+    }
+  ): Promise<SystemMessage> {
+    return request<SystemMessage>(`/api/system-messages/${id}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
+  },
+
+  /**
+   * Delete a message outright. This is the hard delete, not a deactivation: the
+   * server deletes the message row and then everyone's per-user close-out rows
+   * for it, so a user who had dismissed it is not left holding a dismissal for a
+   * message that no longer exists. (That second delete is an explicit statement
+   * in `deleteSystemMessage` — there is no foreign key on the dismissals table,
+   * so nothing cascades.) Prefer `updateSystemMessage(id, { active: false })` to
+   * stop delivery while keeping the wording — that one is reversible.
+   */
+  async deleteSystemMessage(id: number): Promise<{ deleted: boolean }> {
+    return request<{ deleted: boolean }>(`/api/system-messages/${id}`, {
+      method: "DELETE",
+      auth: true,
+    });
+  },
+
+  /**
+   * Close a message out for the CURRENT user only. Idempotent: a second call for
+   * the same message is a success, not a conflict, so a double-click or a
+   * retried request cannot fail. The dismissal is per user, so it does not hide
+   * the message from anyone else.
+   */
+  async dismissSystemMessage(id: number): Promise<{ dismissed: boolean }> {
+    return request<{ dismissed: boolean }>(`/api/system-messages/${id}/dismiss`, {
+      method: "POST",
+      auth: true,
     });
   },
 };

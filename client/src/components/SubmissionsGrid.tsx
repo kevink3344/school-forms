@@ -65,8 +65,6 @@ function cellKey(publicId: string, fieldId: number): string {
   return `${publicId}|${fieldId}`;
 }
 
-export { cellKey };
-
 // The standard columns that can be turned off, in render order. The keys are
 // `base_*`, deliberately distinct from `field_N`: a field is owned by the server
 // and validated against the form's real fields, while these are a purely
@@ -105,6 +103,12 @@ function fieldIdFromKey(key: string): number {
   const m = key.match(/^field_(\d+)$/);
   return m ? Number(m[1]) : 0;
 }
+
+// Shared with the Reports grid, which edits the same staff-only fields over its
+// own rows. The `field_N` key format is the contract with the server (see
+// `withFieldId` in server/src/export/table.ts); a second copy of this regex on
+// another page would be one edit away from disagreeing with this one.
+export { cellKey, fieldIdFromKey };
 
 // Multi-option fields get a portalled option menu instead of an inline control:
 // the labels are long, and the cell is one column wide. Everything else edits in
@@ -409,8 +413,14 @@ function useGridScrollMirror({
 
 // ---------------------------------------------------------------------------
 // One field cell. Read-only for parent fields; click-to-edit for staff-only ones.
+//
+// Exported because the Reports preview renders staff-only columns too: a School
+// Contact can export those columns and can see them in the report grid, and the
+// server authorizes the same roles for the save. Rendering them through this same
+// cell is what makes "click the value, type, save" behave identically on both
+// pages, including the pencil, the saved flash and the error line.
 // ---------------------------------------------------------------------------
-function StaffCell({
+export function StaffCell({
   column,
   publicId,
   value,

@@ -1038,6 +1038,97 @@ would be a copy free to drift from the grid. An unknown `base_*` key is stored a
 by the client: harmless, and strictly better than a 400. This is the opposite of `field_N`, which
 the server *does* own and *does* validate against the form's real fields.
 
+---
+
+## 12. Post-implementation change — staff-only fields are editable on the *Reports* page (2026-09-26)
+
+**Asked for as:** *"On the Reports page, for School Contacts, 'Staff Only' fields that they can
+see should be editable on the page. There is no pencil that appears when hovering."*
+
+### 12.1 The pencil CSS was never missing — the Reports grid never used it
+
+This is worth stating first because it is the part that would be misdiagnosed: `.cell-edit-hint`
+(`opacity: 0` → `1` on `.grid-editable:hover`), `.grid-editable`, `.grid-col-staff`,
+`.grid-editor` and `.grid-cell-saving/-saved/-error` were **already in `global.css`** and working on
+the dashboard grid. The Reports page rendered its cells as plain `<td>`s, so there was no
+`.grid-editable` ancestor for the hover rule to hang off and no pencil element to reveal. Nothing
+about the stylesheet needed to change (and none of it did). The fix was to give the Reports grid
+the same cell component the dashboard grid uses.
+
+### 12.2 The cell-edit state machine moved into a shared hook
+
+`useCellEdit.ts` (new) holds what used to be inline in `useSubmissionGrid.ts`: `editing` / `draft` /
+`menuAnchor` / `saving` / `saveError` / `savedKeys`, the viewport-clamped `menuPosition(rect)`
+(240 px box, flips above on overflow) and the 1400 ms saved-flash. `useSubmissionGrid.ts` lost ~136
+lines and now passes `onSaved` to write the value back into its own row state; the Reports page
+passes its own `onSaved` to write into `cellOverrides`.
+
+Two behaviours carried over deliberately, both of which a fresh implementation gets wrong the other
+way:
+
+- **The removal is NOT optimistic.** On a failed save the draft stays, the error is shown, and no
+  value is written into the row — *"the X did not work"* is a better failure than a value that
+  silently reverts on the next load.
+- **Staff-only detection is a property of the COLUMN, not of the viewer's role.** The Reports
+  `staffFields` memo is gated on `c.staff_only`; it does not ask whether the signed-in user is a
+  staff-like role. Whether the caller may see the column at all was already decided server-side
+  (§13), and re-deciding it here would be a second, divergent copy of that rule.
+
+### 12.3 The save goes through the existing endpoint
+
+`PUT /api/submissions/:publicId/values` with `staff_only: true` — the same route the dashboard grid
+already uses (guard `requireAuth, requireRoles("staff","cdm_contact","admin")`, body key `answers`).
+A bespoke "patch one staff field" endpoint was considered and rejected: it would bypass the staff
+audit trail the existing path writes and the document-generation trigger it fires when
+`Generate document` is set. The `staff_only` flag is what tells the server this write is a
+staff-field edit.
+
+### 12.4 The typecheck blocker was a hand-copied narrowing
+
+`server/src/export/table.ts` declared `ExportColumnWithFieldId` by **re-listing 5 of `ExportColumn`'s
+7 fields**. A structural type that names a subset silently makes the rest unreachable, so
+`reports.ts` could not forward a column's `type` or `options` — and because the *client's* own type
+declares both as required, a hypothetical missing `options` would have been typed as real and
+rendered as `undefined`. The fix is one line:
+
+```ts
+export interface ExportColumnWithFieldId extends ExportColumn { field_id: number; }
+```
+
+A narrowing written by hand is a claim, not a check. Extending the real shape is what makes it one.
+
+### 12.5 Files touched
+
+| File | Change |
+| --- | --- |
+| `client/src/lib/useCellEdit.ts` | **new** — the cell-edit state machine, extracted from `useSubmissionGrid` |
+| `client/src/lib/useSubmissionGrid.ts` | Drops the inline editing + local `menuPosition`; uses `useCellEdit({ onSaved })` |
+| `client/src/components/SubmissionsGrid.tsx` | Exports `cellKey`, `fieldIdFromKey`, `StaffCell`; `StaffCell` carries `role="button" tabIndex={0}` + `aria-label` + the pencil |
+| `client/src/pages/reports/ReportsPage.tsx` | `staffFields` memo, `cellOverrides` state (reset on `[preview]`), `renderRow` returns `<StaffCell>` for staff-only columns with a resolved field |
+| `server/src/routes/reports.ts` | `/preview` columns forward `key, label, staff_only, roles, type, options` |
+| `server/src/export/table.ts` | `ExportColumnWithFieldId extends ExportColumn` (§12.4) |
+| `server/src/export/table.test.ts` | Guards the extended interface |
+
+### 12.6 Verified (form 2 "CDM Non-Traditional")
+
+19 columns, **6 staff-only**, 50 rows. The six are `field_16` Next Course in Sequence `text`,
+`field_37` Counseling Completed? `select`, `field_30` Counseling Notes `textarea`, `field_31`
+Distribution of Phase I Letters `text`, `field_35` Did Student meet criteria? `select`, `field_36`
+Generate document `checkbox`. Every column carries its `key` and `type` (and `options` where the
+type has them), and **50 of 50 rows carry a `submission_public_id`** — which is what the save path
+needs, and would have been the quiet failure if it were absent.
+
+In the browser: 3 rows × 3 staff-only columns = 9 `grid-col-staff grid-editable` cells, all 9 with a
+`.cell-edit-hint` pencil at `opacity: 0`; hovering one reveals it on that cell only
+(`opacity 0 → 1`, background `#faf0c6` = `--staff-tint-hover`, `cursor: pointer`).
+
+> **Accessibility note, because the pencil is the whole affordance.** A `<tr onClick>` is never
+> keyboard-reachable, so the cell value is a real `role="button" tabIndex={0}` with
+> `aria-label="Edit <column>"`, and the row handler is only a mouse convenience. Relatedly: a
+> dispatched click does **not** focus an element, so a focus-restoration test driven by
+> `dispatchEvent('click')` reports `BODY` and is indistinguishable from a real bug — drive focus
+> paths through `locator.focus()` + `Enter` instead.
+
 The two arrays also carry **opposite polarity** — a field key means "show", a base key means
 "hide" — which the route comment spells out, because it is exactly the kind of thing the next
 person to touch it reverses.

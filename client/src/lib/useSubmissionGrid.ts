@@ -1,15 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { api, ApiError } from "./api";
+import { api } from "./api";
 import type { ExportColumn, ExportPreview, FormField } from "../types";
-import type { AnswerValue } from "../components/FieldValue";
 import type { PickerColumn } from "../components/ColumnsPicker";
 import {
-  cellKey,
   GRID_BASE_COLUMNS,
   GRID_PINNED_COLUMN,
   type CellEditApi,
-  type EditingCell,
 } from "../components/SubmissionsGrid";
+import { useCellEdit } from "./useCellEdit";
 
 // ---------------------------------------------------------------------------
 // Shared Submissions-grid behaviour: which columns the grid shows, the column
@@ -37,16 +35,6 @@ const STATIC_KEYS = new Set<string>([
   GRID_PINNED_COLUMN.key,
   ...GRID_BASE_COLUMNS.map((c) => c.key),
 ]);
-
-/** Where an option menu of this size should sit so it stays on screen. */
-export function menuPosition(rect: DOMRect): { left: number; top: number } {
-  const W = 240;
-  const H = 240;
-  const left = Math.max(8, Math.min(rect.left, window.innerWidth - W - 12));
-  const top =
-    rect.bottom + 6 + H > window.innerHeight ? Math.max(8, rect.top - H - 6) : rect.bottom + 6;
-  return { left, top };
-}
 
 export interface SubmissionGridOptions {
   /** The selected form, or 0 for "all forms". */
@@ -295,120 +283,20 @@ export function useSubmissionGrid({
   // ---------------------------------------------------------------------------
   // Inline staff-only editing.
   //
-  // Refs shadow the editing state because one gesture can reach `commit` twice (a
-  // select commits on change, then blurs as it unmounts) and because we must not
-  // act on a stale closure mid-flight. The refs are authoritative; the state below
-  // exists only to render.
+  // The state machine lives in `useCellEdit`, shared with the Reports grid, which
+  // edits these same staff-only fields over its own rows. What stays here is the
+  // one part that page cannot share: where an accepted value is written.
   // ---------------------------------------------------------------------------
-  const [editing, setEditing] = useState<EditingCell | null>(null);
-  const [draft, setDraft] = useState<AnswerValue>(null);
-  const [menuAnchor, setMenuAnchor] = useState<{ left: number; top: number } | null>(null);
-  const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [savedKeys, setSavedKeys] = useState<Set<string>>(new Set());
-
-  const editingRef = useRef<EditingCell | null>(null);
-  const draftRef = useRef<AnswerValue>(null);
-  const savingRef = useRef(false);
-  const closedRef = useRef(true);
-  const flashTimers = useRef<number[]>([]);
-
-  useEffect(
-    () => () => {
-      for (const t of flashTimers.current) window.clearTimeout(t);
-    },
-    []
-  );
-
-  const beginEdit = (cell: EditingCell, rect: DOMRect, initial: AnswerValue) => {
-    editingRef.current = cell;
-    draftRef.current = initial;
-    savingRef.current = false;
-    closedRef.current = false;
-    setEditing(cell);
-    setDraft(initial);
-    setSaveError(null);
-    setMenuAnchor(menuPosition(rect));
-  };
-
-  const changeDraft = (val: AnswerValue) => {
-    draftRef.current = val;
-    setDraft(val);
-  };
-
-  const closeEditor = () => {
-    editingRef.current = null;
-    draftRef.current = null;
-    closedRef.current = true;
-    setEditing(null);
-    setDraft(null);
-    setMenuAnchor(null);
-  };
-
-  const cancelEdit = () => {
-    closeEditor();
-    setSaveError(null);
-  };
-
-  const commitEdit = async (override?: AnswerValue) => {
-    if (savingRef.current || closedRef.current) return;
-    const cell = editingRef.current;
-    if (!cell) return;
-    const value = override === undefined ? draftRef.current : override;
-    // Keep the attempted value visible so a failed save leaves the user looking
-    // at what they typed rather than at what is still on the server.
-    draftRef.current = value;
-    savingRef.current = true;
-    setSaving(true);
-    setSaveError(null);
-    try {
-      // MUST go through PUT /values with staff_only: true. That is what records
-      // the staff audit trail (staff_fields_updated_by / _at) and what triggers
-      // the staff-only "Generate document" workflow — a bespoke per-cell endpoint
-      // would silently skip both.
-      await api.updateSubmissionValues(cell.publicId, [{ field_id: cell.fieldId, value }], {
-        staffOnly: true,
-      });
-      const key = cellKey(cell.publicId, cell.fieldId);
+  const edit = useCellEdit({
+    onSaved: (publicId, fieldId, value) =>
       setValuesByPublicId((prev) => {
         const next = new Map(prev);
-        const row = { ...(next.get(cell.publicId) ?? {}) };
-        row[`field_${cell.fieldId}`] = value;
-        next.set(cell.publicId, row);
+        const row = { ...(next.get(publicId) ?? {}) };
+        row[`field_${fieldId}`] = value;
+        next.set(publicId, row);
         return next;
-      });
-      closeEditor();
-      setSavedKeys((prev) => new Set(prev).add(key));
-      const t = window.setTimeout(() => {
-        setSavedKeys((prev) => {
-          const next = new Set(prev);
-          next.delete(key);
-          return next;
-        });
-      }, 1400);
-      flashTimers.current.push(t);
-    } catch (err) {
-      // No optimistic write: the editor stays open with an inline error so the
-      // grid never shows a value the server rejected.
-      setSaveError(err instanceof ApiError ? err.message : "Could not save this value.");
-    } finally {
-      savingRef.current = false;
-      setSaving(false);
-    }
-  };
-
-  const edit: CellEditApi = {
-    editing,
-    draft,
-    saving,
-    error: saveError,
-    savedKeys,
-    anchor: menuAnchor,
-    begin: beginEdit,
-    change: changeDraft,
-    commit: (value) => void commitEdit(value),
-    cancel: cancelEdit,
-  };
+      }),
+  });
 
   return {
     availableColumns,

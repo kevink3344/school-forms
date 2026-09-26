@@ -19,6 +19,7 @@ import { reportsRouter } from "./routes/reports.js";
 import { webhookRouter } from "./routes/webhook.js";
 import { webhookEventsRouter } from "./routes/webhookEvents.js";
 import { documentsRouter } from "./routes/documents.js";
+import { systemMessagesRouter } from "./routes/systemMessages.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
 import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
@@ -125,6 +126,7 @@ app.use("/api/reports", reportsRouter);
 app.use("/api/webhook/events", webhookEventsRouter);
 app.use("/api/webhook", webhookRouter);
 app.use("/api/documents", documentsRouter);
+app.use("/api/system-messages", systemMessagesRouter);
 
 // -----------------------------------------------------------------------------
 // Serve the built client (SPA) so a single URL hosts BOTH the API and the app.
