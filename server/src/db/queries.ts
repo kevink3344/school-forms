@@ -256,17 +256,82 @@ export async function getSchool(id: number): Promise<School | null> {
   return rows[0] ?? null;
 }
 
-export async function createSchool(name: string, district: string | null): Promise<School> {
+// Exact-name lookup, used to answer 409 before an insert/rename reaches the
+// unique index on schools.name. The comparison lowercases both sides on purpose:
+// SQL Server's default collation is already case-insensitive there, but libSQL's
+// `=` is not, and this way both databases refuse the same duplicates. It mirrors
+// the resolution site (resolveSubmissionSchoolId) rather than inventing a second
+// notion of "the same school".
+export async function getSchoolByName(name: string): Promise<School | null> {
+  const rows = await execute<School>(
+    "SELECT id, source_id, name, grade_level, calendar, district, created_at FROM dbo.schools WHERE LOWER(name) = LOWER(@name)",
+    { name: name.trim() }
+  );
+  return rows[0] ?? null;
+}
+
+export async function createSchool(
+  name: string,
+  district: string | null,
+  gradeLevel: string | null = null,
+  calendar: string | null = null
+): Promise<School> {
   const rows = await execute<School>(
     dialect().insertReturning({
       table: "schools",
-      columns: ["name", "district"],
+      columns: ["name", "district", "grade_level", "calendar"],
       returning: ["id", "source_id", "name", "grade_level", "calendar", "district", "created_at"],
-      values: "@name, @district",
+      values: "@name, @district, @gradeLevel, @calendar",
     }),
-    { name, district }
+    { name, district, gradeLevel, calendar }
   );
   return rows[0];
+}
+
+// Partial update for the admin Schools drawer. Only the keys the caller actually
+// supplied are written, which is what lets a rename leave the district feed's
+// `district` value alone. Note `schools` has NO updated_at column — unlike
+// updateReportView below, there is no timestamp to bump, so the SET list is
+// exactly the supplied fields and an empty patch is a read rather than a write.
+export async function updateSchool(
+  id: number,
+  patch: {
+    name?: string;
+    grade_level?: string | null;
+    calendar?: string | null;
+    district?: string | null;
+  }
+): Promise<School | null> {
+  const sets: string[] = [];
+  const p: Record<string, unknown> = { id };
+  if (patch.name !== undefined) {
+    sets.push("name = @name");
+    p.name = patch.name;
+  }
+  if (patch.grade_level !== undefined) {
+    sets.push("grade_level = @gradeLevel");
+    p.gradeLevel = patch.grade_level;
+  }
+  if (patch.calendar !== undefined) {
+    sets.push("calendar = @calendar");
+    p.calendar = patch.calendar;
+  }
+  if (patch.district !== undefined) {
+    sets.push("district = @district");
+    p.district = patch.district;
+  }
+  if (sets.length === 0) return getSchool(id);
+
+  const updated = await execute<School>(
+    dialect().updateReturning({
+      table: "schools",
+      set: sets.join(", "),
+      where: "id = @id",
+      returning: ["id", "source_id", "name", "grade_level", "calendar", "district", "created_at"],
+    }),
+    p
+  );
+  return updated[0] ?? null;
 }
 
 // Paginated listing for the admin Schools page. Supports an optional search

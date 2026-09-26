@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronLeft, ChevronRight } from "lucide-react";
+import { ChevronLeft, ChevronRight, Pencil, Plus } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
+import { SchoolDrawer } from "../../components/SchoolDrawer";
 import type { School, SchoolFacets, SchoolPage } from "../../types";
 
 const PAGE_SIZE = 50;
@@ -41,9 +42,14 @@ export default function SchoolsPanel() {
   const [page, setPage] = useState<SchoolPage | null>(null);
   const [currentPage, setCurrentPage] = useState(1);
   const [loading, setLoading] = useState(true);
-  const [importing, setImporting] = useState(false);
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
+
+  // The Add/Edit drawer. `editing === null` with the drawer open means "add";
+  // keeping the school object (rather than a bare id) avoids a second lookup and
+  // lets the drawer show the stored values while the user types over them.
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [editing, setEditing] = useState<School | null>(null);
 
   // Filter state (search text + two dropdowns). The dropdown options are the
   // distinct values from the DB, fetched once via /api/schools/facets.
@@ -106,18 +112,38 @@ export default function SchoolsPanel() {
     setCalendar("");
   };
 
-  const handleImport = async () => {
-    setImporting(true);
+  const openAdd = () => {
+    setEditing(null);
     setMessage("");
     setError("");
-    try {
-      const { total } = await api.importSchools();
-      setMessage(`Imported ${total} schools.`);
+    setDrawerOpen(true);
+  };
+
+  const openEdit = (school: School) => {
+    setEditing(school);
+    setMessage("");
+    setError("");
+    setDrawerOpen(true);
+  };
+
+  const handleSaved = async (saved: School) => {
+    const wasEdit = editing !== null;
+    setDrawerOpen(false);
+    setEditing(null);
+    setError("");
+    setMessage(wasEdit ? `Saved "${saved.name}".` : `Added "${saved.name}".`);
+    if (wasEdit) {
+      // An edit can move the row (a rename re-sorts it) or push it out of the
+      // active filter, so reload the page the reader is already on rather than
+      // jumping them somewhere else.
+      await load(currentPage);
+    } else {
+      // A new school lands in name order, which is not necessarily a page the
+      // reader is looking at. Drop the filters and show page 1 — the debounced
+      // filter effect re-runs off the cleared values, so this settles on the
+      // unfiltered first page even though this call still sees the old filters.
+      clearFilters();
       await load(1);
-    } catch (err) {
-      setError(err instanceof ApiError ? err.message : "Import failed");
-    } finally {
-      setImporting(false);
     }
   };
 
@@ -197,8 +223,13 @@ export default function SchoolsPanel() {
             Clear
           </button>
         )}
-        <button className="primary-button" onClick={handleImport} disabled={importing}>
-          {importing ? "Importing..." : "Import Schools"}
+        {/* The district feed was imported once, so the toolbar's job is now to
+            add the few schools the feed does not carry — the ones a Google Form
+            names but the list is missing. The server route for the feed import
+            is untouched; only this button is gone. */}
+        <button className="primary-button" onClick={openAdd} type="button">
+          <Plus size={16} />
+          <span>Add School</span>
         </button>
       </div>
 
@@ -208,19 +239,20 @@ export default function SchoolsPanel() {
             {(columns.length ? columns : ["Name"]).map((label) => (
               <th key={label}>{label}</th>
             ))}
+            <th>Actions</th>
           </tr>
         </thead>
         <tbody>
           {loading ? (
             <tr>
-              <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
+              <td colSpan={(columns.length || 1) + 1} style={{ textAlign: "center", padding: 24 }}>
                 Loading…
               </td>
             </tr>
           ) : rows.length === 0 ? (
             <tr>
-              <td colSpan={columns.length || 1} style={{ textAlign: "center", padding: 24 }}>
-                No schools yet. Click <strong>Import Schools</strong> to load data.
+              <td colSpan={(columns.length || 1) + 1} style={{ textAlign: "center", padding: 24 }}>
+                No schools match. Click <strong>Add School</strong> to create one.
               </td>
             </tr>
           ) : (
@@ -229,6 +261,16 @@ export default function SchoolsPanel() {
                 {(columns.length ? columns : ["Name"]).map((label) => (
                   <td key={label} data-label={label}>{valueFor(school, label)}</td>
                 ))}
+                <td data-label="Actions">
+                  <button
+                    className="badge-button"
+                    onClick={() => openEdit(school)}
+                    title={`Edit ${school.name}`}
+                  >
+                    <Pencil size={12} />
+                    <span>Edit</span>
+                  </button>
+                </td>
               </tr>
             ))
           )}
@@ -257,6 +299,17 @@ export default function SchoolsPanel() {
         </button>
         <span style={{ fontSize: 13, marginLeft: "auto" }}>{total} total</span>
       </div>
+
+      <SchoolDrawer
+        open={drawerOpen}
+        school={editing}
+        facets={facets}
+        onClose={() => {
+          setDrawerOpen(false);
+          setEditing(null);
+        }}
+        onSaved={(saved) => void handleSaved(saved)}
+      />
     </>
   );
 }

@@ -466,8 +466,46 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      name        NVARCHAR(200) NOT NULL,
      district    NVARCHAR(200) NULL,
      created_at  DATETIME2 NOT NULL CONSTRAINT DF_schools_created_at DEFAULT SYSUTCDATETIME()
-   );
-   ${indexGuard("UX_schools_name", "schools", ["name"])}
+   );`,
+
+  // UX_schools_name is its OWN batch, deliberately not part of the CREATE TABLE
+  // above.
+  //
+  // It used to ride that batch, and `IF OBJECT_ID('dbo.schools','U') IS NULL`
+  // skips the batch WHOLE — so on a database that already had the table the index
+  // was declared and never created. Moving it out is a genuine fix and this batch
+  // is what makes the declaration reachable on such a database.
+  //
+  // ★ MEASURED, and it corrects an earlier version of this comment: on the
+  //   tenant this app actually runs against the index is STILL absent, and the
+  //   operative cause is the COLUMN, not the batch.
+  //
+  //   `schools.name` there is `nvarchar(max)` — `sys.columns` reports
+  //   `max_length = -1, indexable = 0` — and a nonclustered key is capped at 1700
+  //   bytes, so no index can be built on it as it stands. `indexGuard`'s second
+  //   half (`isIndexable()`) therefore answers FALSE, the whole `IF` is false, and
+  //   this batch RUNS and creates nothing, raising no error at all. That is the
+  //   designed behaviour of the guard, working correctly.
+  //
+  //   `reportSkippedIndexes()` names this index at every boot and attributes it to
+  //   column indexability — and on this database that attribution is RIGHT. Do not
+  //   read that warning as a guard bug and do not go looking for a skipped batch:
+  //   the warning is the whole story.
+  //
+  //   Consequence while it stands: schools.name uniqueness is NOT enforced by the
+  //   database — including the protection against two schools sharing a name, and
+  //   so of one school's students resolving to another school's contact. The
+  //   route's read-then-write pre-check is the only guard, and two concurrent
+  //   creates can both pass it.
+  //
+  //   Fixing it is a DATA-SIDE step — narrow `schools.name` to the NVARCHAR(200)
+  //   declared in the CREATE TABLE above, after checking the existing rows fit —
+  //   and it is deliberately NOT done here: 41 columns across 8 tables on that
+  //   tenant are `nvarchar(max)` where this DDL declares a sized type, which also
+  //   means that database predates this DDL and the `IF OBJECT_ID(...) IS NULL`
+  //   guards can never correct it. The column must be narrowed before this batch
+  //   can do anything; there is no code change that substitutes for that.
+  `${indexGuard("UX_schools_name", "schools", ["name"])}
      CREATE UNIQUE INDEX UX_schools_name ON dbo.schools(name);`,
 
   // Idempotent migration for the school import feature — adds columns to the
@@ -481,8 +519,41 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      ALTER TABLE dbo.schools ADD calendar NVARCHAR(50) NULL;`,
 
   // The filtered unique index is a SEPARATE batch: SQL Server compiles each batch
-  // before execution, so the columns must already exist when this runs.
-  `IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='UX_schools_source_id')
+  // before execution, so the columns must already exist when this runs. It has to
+  // be its own batch for a second reason — it originally rode the ALTER batch
+  // above, which OPENS with `IF COL_LENGTH('dbo.schools','source_id') IS NULL`, and
+  // a batch-level `IF` scopes every statement that follows it. So on a database
+  // where `source_id` already existed (the tenant) the index was declared, never
+  // created, and no error was raised anywhere.
+  //
+  // The DROP is a third batch, and it is keyed on the index's SHAPE (`has_filter`)
+  // rather than on its name — because a name-keyed guard cannot repair a wrong
+  // DEFINITION. The two definitions are not equivalent: an unfiltered unique index
+  // over `source_id` permits exactly ONE NULL, and the seed's `Sample School` holds
+  // it — so EVERY school added by hand afterwards was refused with error 2601 "The
+  // duplicate key value is (<NULL>)". The route then read that 2601 as a duplicate
+  // NAME and answered `409 A school named "<the name just typed>" already exists`,
+  // a state that did not exist.
+  //
+  // ★ The unfiltered definition was NOT written by this repository. An earlier
+  //   version of this comment claimed "an earlier revision created this index
+  //   without the filter", and that is false: `git log -S "UX_schools_source_id"
+  //   -- server/src/db/schema.ts` returns exactly one commit (`05d1854`), whose
+  //   declaration already read `… (source_id) WHERE source_id IS NOT NULL`. So the
+  //   index the tenant carries was created OUTSIDE this app, which is consistent
+  //   with that database predating this DDL (see the guard-helper note above).
+  //   This changes nothing about the fix — a name-keyed guard cannot repair a wrong
+  //   definition no matter who wrote it — but the cause is "an index this app did
+  //   not create", not "a bug of ours from an older revision", and whoever reads
+  //   this next should not go hunting for a revision that does not exist.
+  `IF EXISTS (SELECT 1 FROM sys.indexes
+               WHERE object_id = OBJECT_ID('dbo.schools')
+                 AND name = 'UX_schools_source_id' AND has_filter = 0)
+     DROP INDEX UX_schools_source_id ON dbo.schools;`,
+
+  `IF NOT EXISTS (SELECT 1 FROM sys.indexes
+                   WHERE object_id = OBJECT_ID('dbo.schools')
+                     AND name = 'UX_schools_source_id')
      CREATE UNIQUE INDEX UX_schools_source_id ON dbo.schools(source_id) WHERE source_id IS NOT NULL;`,
 
   // ---------------------------------------------------------------------

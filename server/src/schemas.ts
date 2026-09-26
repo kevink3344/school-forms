@@ -91,10 +91,30 @@ export const updateUserSchema = z
 // -----------------------------------------------------------------------------
 // Schools
 // -----------------------------------------------------------------------------
+// `name` is the only column the database requires — it is the key that a
+// submission's typed answer is matched against (see resolveSubmissionSchoolId),
+// which is why it has a unique index. The other three are nullable, so a school
+// added by hand can leave them blank and be filled in later.
+//
+// max(50) on grade_level/calendar matches the NVARCHAR(50) columns beside them.
 export const createSchoolSchema = z.object({
   name: z.string().min(1).max(200),
+  grade_level: z.string().max(50).optional().nullable(),
+  calendar: z.string().max(50).optional().nullable(),
   district: z.string().max(200).optional().nullable(),
 });
+
+// Every field optional, but at least one must be present — the same shape as
+// updateUserSchema above, so a PATCH with `{}` is a 400 rather than a write that
+// changes nothing.
+export const updateSchoolSchema = z
+  .object({
+    name: z.string().min(1).max(200).optional(),
+    grade_level: z.string().max(50).nullable().optional(),
+    calendar: z.string().max(50).nullable().optional(),
+    district: z.string().max(200).nullable().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
 // -----------------------------------------------------------------------------
 // Organizations (admin add/edit)

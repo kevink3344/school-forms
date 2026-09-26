@@ -247,8 +247,10 @@ export const api = {
     display_name: string;
     school_id: number;
   }): Promise<AuthResponse> {
-    // The server fixes the role to `staff` and resolves the organization from
-    // its own configuration, so neither is sent from here.
+    // The server fixes the role to `cdm_contact` (School Contact) and resolves
+    // the organization from its own configuration, so neither is sent from
+    // here. The name is a misnomer kept for call-site compatibility: this is
+    // the School Contact sign-up, never a district-wide `staff` account.
     return request<AuthResponse>("/api/auth/register", {
       method: "POST",
       auth: false,
@@ -418,6 +420,35 @@ export const api = {
     return request<{ gradeLevels: string[]; calendars: string[] }>("/api/schools/facets", { auth: true });
   },
 
+  // Add a school by hand. The name must be spelled exactly as the Google Form
+  // spells it — submissions are matched to a school by name, so a near-miss
+  // leaves the submission unassigned. Duplicates answer 409.
+  async createSchool(input: {
+    name: string;
+    grade_level?: string | null;
+    calendar?: string | null;
+    district?: string | null;
+  }): Promise<School> {
+    return request<School>("/api/schools", { method: "POST", auth: true, body: input });
+  },
+
+  // Partial update — only the keys sent are written, so an omitted field keeps
+  // its stored value. A rename that collides with another school answers 409.
+  async updateSchool(
+    id: number,
+    input: {
+      name?: string;
+      grade_level?: string | null;
+      calendar?: string | null;
+      district?: string | null;
+    }
+  ): Promise<School> {
+    return request<School>(`/api/schools/${id}`, { method: "PATCH", auth: true, body: input });
+  },
+
+  // Retained for the server's feed import. The Settings UI no longer exposes it
+  // (the district list was imported once and is now maintained by hand), but the
+  // route is still the only way to re-sync from SCHOOL_JSON.
   async importSchools(): Promise<{ total: number }> {
     return request<{ total: number }>("/api/schools/import", { method: "POST", auth: true });
   },

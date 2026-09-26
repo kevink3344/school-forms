@@ -1018,7 +1018,7 @@ export default function AdminSettings() {
           padding is removed to keep it flush with the section. */}
       <CollapsibleSection
         title="Schools"
-        subtitle="Loaded from the district data source. Import is manual."
+        subtitle="The district list, maintained by hand. A submission is routed by matching its school answer to a name here."
         bodyStyle={{ padding: 0 }}
       >
         <SchoolsPanel />

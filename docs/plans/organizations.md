@@ -40,6 +40,14 @@ There is **no** tenant above school. We add a top-level boundary (`organization`
 
 ## 3. Design decision — one org per user (1:1)
 
+> **⚠️ SUPERSEDED 2026-09-16 by [workspaces.md](./workspaces.md).**
+> Membership becomes **many-to-many** (a user may belong to several workspaces), so the
+> "no join table" part of this decision no longer holds. What survives: the tenant *boundary*
+> itself, schools staying a shared list, org-scoped public URLs, and putting the tenant on the
+> token. `users.organization_id` also survives, reinterpreted as the user's **home** workspace.
+> Read this section for the reasoning behind the original single-tenant launch; read
+> `workspaces.md` §3–§4 for what replaced it.
+
 The user confirmed **exactly one org per user**. We model this with a **single nullable-then-NOT-NULL `users.organization_id` FK** — no join table.
 
 - A user's org = `users.organization_id` (a single value).

@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Columns3, Download, Archive } from "lucide-react";
-import { api } from "../../lib/api";
+import { api, ApiError } from "../../lib/api";
 import { useAuth } from "../../context/AuthContext";
 import type { Form, SubmissionRow } from "../../types";
 import { PageHead } from "../../components/layout";
@@ -51,6 +51,20 @@ export default function StaffQueue() {
   // omission.
   const [archiveCounts, setArchiveCounts] = useState<{ active: number; archived: number } | null>(null);
 
+  // ★ A FAILED LOAD IS NOT AN EMPTY LOAD, and this page used to conflate them.
+  // The list request's `.catch` set `rows` to `[]`, so a 500, a 403, an expired
+  // session or a dead connection rendered the grid's empty message — which is a
+  // claim about the DATA ("your school has no submissions"). The catch has no
+  // evidence for that claim: it never read anything. A School Contact chasing a
+  // missing submission would then be told, in the app's own words, that there is
+  // nothing there. So the failure gets its own state and its own branch below,
+  // and the empty message is reachable only from a request that actually
+  // succeeded and really returned nothing.
+  const [loadError, setLoadError] = useState<{ status: number | null; message: string } | null>(null);
+  // Bumped by "Try again". The error box REPLACES the grid, so there is nothing
+  // on screen to retry in place — the only way back is a fresh request.
+  const [reloadKey, setReloadKey] = useState(0);
+
   const formId = formFilter ? Number(formFilter) : 0;
 
   // Column choice, the picker selection and inline editing — identical to the
@@ -76,6 +90,9 @@ export default function StaffQueue() {
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
+    // Clear the previous failure on every run, so a retry that succeeds cannot
+    // leave a stale error box behind it.
+    setLoadError(null);
     api
       .listSubmissions({
         ...(statusFilter ? { status: statusFilter } : {}),
@@ -85,8 +102,17 @@ export default function StaffQueue() {
       .then((s) => {
         if (!cancelled) setRows(s);
       })
-      .catch(() => {
-        if (!cancelled) setRows([]);
+      .catch((err: unknown) => {
+        if (cancelled) return;
+        // Clear the rows as well: if a filter change failed, showing the
+        // previous filter's rows under the new filter would be a second false
+        // claim. The error branch hides the grid either way.
+        setRows([]);
+        setLoadError(
+          err instanceof ApiError
+            ? { status: err.status, message: err.message }
+            : { status: null, message: "The request did not reach the server." }
+        );
       })
       .finally(() => {
         if (!cancelled) setLoading(false);
@@ -94,7 +120,7 @@ export default function StaffQueue() {
     return () => {
       cancelled = true;
     };
-  }, [statusFilter, formFilter, showArchived]);
+  }, [statusFilter, formFilter, showArchived, reloadKey]);
 
   // What the list above cannot tell us — a filtered list is the wrong instrument
   // for reporting its own omissions, because with the archived rows hidden they
@@ -122,7 +148,7 @@ export default function StaffQueue() {
     return () => {
       cancelled = true;
     };
-  }, [statusFilter, formFilter]);
+  }, [statusFilter, formFilter, reloadKey]);
 
   // Load forms so the queue can be scoped to one form and the Export drawer
   // can present a form selector (both scoped to this school).
@@ -159,6 +185,10 @@ export default function StaffQueue() {
   };
 
   const openSubmission = (publicId: string) => navigate(`/staff/${publicId}`);
+
+  // Both loads re-run, because the error box replaces the grid and the archive
+  // strip together — one retry should restore the whole page, not half of it.
+  const retryLoad = () => setReloadKey((k) => k + 1);
 
   // Only a School Contact is tied to one school; staff work across the entire
   // organization, so their headline is the organization, not a school.
@@ -298,6 +328,24 @@ export default function StaffQueue() {
       {busy ? (
         <div className="loading-state">
           <div className="spinner" /> Loading submissions...
+        </div>
+      ) : loadError ? (
+        /* ★ Deliberately NOT the grid's `emptyMessage`. That string is a claim
+           about the data, and this branch has no data — the request failed. It
+           names what went wrong and offers the one thing that can fix it. */
+        <div className="alert-error" role="alert">
+          <div>
+            <strong>Could not load submissions.</strong>{" "}
+            {loadError.status !== null && `(HTTP ${loadError.status}) `}
+            {loadError.message}
+          </div>
+          <div style={{ marginTop: 6 }}>
+            This is a failed request, not an empty queue — nothing was read, so an
+            empty list here says nothing about your school's submissions.
+          </div>
+          <button className="secondary-button" style={{ marginTop: 10 }} onClick={retryLoad}>
+            Try again
+          </button>
         </div>
       ) : (
         <SubmissionsGrid

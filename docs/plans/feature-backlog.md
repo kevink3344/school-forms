@@ -291,8 +291,9 @@ Plan docs that exist and are waiting:
 | --- | --- | --- |
 | `docs/plans/password-recovery.md` | **Implemented** | **Written and built 2026-09-15.** Admin-issued temporary password + `must_change_password` forced change. Closes the "no password recovery path exists at all" gap that `change-password.md` §2 and §10 both recorded. Self-service **forgot password** (email + signed single-use token) is the deferred half — see §12.8. |
 | `docs/plans/delete-form.md` | **Implemented** | See §9.11. Shipped as planned, then **Archive** and **Restore** were added beside Delete and the five form selectors were unified on one helper. §4.5's "hard delete only" recommendation was **overruled**. The §6.1 cascade warning is still the point of the doc. |
-| `docs/plans/access-groups.md` | Draft for review | See §7.4. |
-| `docs/plans/organization-drive-folder.md` | Draft for review | Per-org `GOOGLE_DOC_FOLDER_ID`; today it is one global env value. Matters once there is more than one org. |
+| `docs/plans/workspaces.md` | **Draft for review** | **Written 2026-09-16.** Rebrand Organization → "Workspace", membership becomes **many-to-many**, a workspace switcher in the banner, and a **light/dark toggle** (greenfield — zero theme code exists today). Supersedes `organizations.md` §3. §14 of that doc holds 9 questions that gate all of it. |
+| `docs/plans/access-groups.md` | Draft for review | See §7.4. Coupled to `workspaces.md` §14.3 — per-workspace roles are the same question. |
+| `docs/plans/organization-drive-folder.md` | Draft for review | Per-org `GOOGLE_DOC_FOLDER_ID`; today it is one global env value. Matters once there is more than one org — which `workspaces.md` makes real. |
 | `docs/plans/mailjet-setup.md` | Reusable guide | See §5.3. |
 | `docs/plans/school-year.md` | — | Feeds §5.2. |
 | `docs/plans/view-designer.md` | **Implemented** | See §9.8 and §9.9. Dashboard column chooser, frozen first column, staff-only inline editing — for **every role** since 2026-09-16. `submission-view.md` decisions 1 and 3 were superseded by it. |
@@ -337,6 +338,17 @@ Reviewing this doc means answering these. Nothing proceeds until then.
 9. **§9.12 — should self-registration stay open**, and if so should the caller still pick their own
    `school_id`? This is the only place an anonymous request can choose data that scopes what a
    role later sees.
+10. **Workspaces — labels only, or a real rename?** [workspaces.md](./workspaces.md) §14.2. Renaming
+    the *UI copy* is ~91 matches in 13 client files; renaming the *database, API fields and
+    `/api/docs`* is 1,119 matches in 63 files plus a one-off migration against the live DB.
+11. **Workspaces — is `role` global or per-workspace, and is `school_id` global or per-workspace?**
+    `workspaces.md` §14.3 and §14.4. Both are single columns on `users` today, so a person who is
+    an admin at one school in one workspace and staff at another school in a second workspace
+    **cannot be represented** until these become per-membership. This is the sharpest limitation
+    of the multi-workspace change and is worth settling before any of it is built.
+12. **Workspaces — phase order.** `workspaces.md` §9 recommends labels → data/token → switcher →
+    theme, because the token change is the risky one. The **dark mode is independent** and can be
+    done first if it is the more interesting half.
 
 ---
 
@@ -348,3 +360,4 @@ Reviewing this doc means answering these. Nothing proceeds until then.
 | 2026-09-15 | **Password recovery shipped** — admin-issued temporary password + forced change. Added to §10 as implemented; §9.4 extended to cover it; §12.8 added (is admin-issued recovery enough, and is it blocked on §5.3?). |
 | 2026-09-15 | **§6.2 closed** — "deactivate a user" claimed no UI existed; the Active toggle has been there for a while. |
 | 2026-09-15 | Added **§9.12** (self-registration lets the caller pick any `school_id`) and **§9.13** (the login page's silent empty Test User dropdown on a failed fetch), both found while building password recovery. |
+| 2026-09-16 | **[workspaces.md](./workspaces.md) written** — Organization → "Workspace" rebrand, many-to-many membership with a banner switcher, and a light/dark toggle. Added to §10; §12.10–§12.12 added (rename boundary, per-workspace role/school, phase order). **Planning only — no code written.** Its reconnaissance also produced three reusable facts: the active-vs-home workspace trap (`/refresh` and `toUserDto` read the column when they mean the token), `LoginPage.tsx:139` never passes the chosen org to `loginSelect`, and the theming surface (0 theme symbols in `client/src`, 48 hardcoded hex in `global.css`, 273 inline style objects). |
