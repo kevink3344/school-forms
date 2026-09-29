@@ -500,11 +500,24 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   //
   //   Fixing it is a DATA-SIDE step — narrow `schools.name` to the NVARCHAR(200)
   //   declared in the CREATE TABLE above, after checking the existing rows fit —
-  //   and it is deliberately NOT done here: 41 columns across 8 tables on that
+  //   and it is deliberately NOT done here: 72 columns across 14 tables on that
   //   tenant are `nvarchar(max)` where this DDL declares a sized type, which also
   //   means that database predates this DDL and the `IF OBJECT_ID(...) IS NULL`
   //   guards can never correct it. The column must be narrowed before this batch
   //   can do anything; there is no code change that substitutes for that.
+  //
+  // ★ MEASURED, second pass: the narrowing is SAFE — the data already fits. The
+  //   longest `schools.name` is 69 chars against the declared 200 (and the same
+  //   holds for every other blocking column: `users.email` 35/320,
+  //   `submissions.public_id` 10/64, `forms.code` 8/20), no column holds a NULL,
+  //   and none of the 6 UNIQUE indexes has a single duplicate value — so the 7
+  //   `ALTER COLUMN` statements plus a re-run of this DDL would create 7 of the
+  //   10 missing indexes with no data cleanup. Nothing depends on those columns
+  //   either (no FK, computed column or full-text index), so the ALTER is not
+  //   blocked by the schema.
+  //
+  //   Still do NOT "fix" this by relaxing `isIndexable()`: forcing the CREATE
+  //   would create nothing and would fail less honestly. The fix is on the data.
   `${indexGuard("UX_schools_name", "schools", ["name"])}
      CREATE UNIQUE INDEX UX_schools_name ON dbo.schools(name);`,
 

@@ -75,6 +75,25 @@ async function runDdl(): Promise<void> {
 // The expected names are derived from the ladder itself, never listed here: a
 // hand-copied list of the same names drifts as soon as somebody adds an index,
 // and nothing reminds whoever added it that the copy exists.
+//
+// ★ MEASURED BLIND SPOT — this check matches on NAME ONLY, and a NAME IS NOT A
+//   GUARANTEE. On the tenant, 3 of the 18 indexes reported as present are
+//   pre-existing indexes that merely SHARE a name with the declaration while
+//   covering different key columns (measured via `sys.index_columns`):
+//
+//     IX_webhook_events_form      declared (form_id, received_at)  actual (form_id)
+//     IX_webhook_events_org       declared (organization_id, received_at)  actual (organization_id)
+//     UX_report_views_user_name   declared (user_id, name)  actual (user_id)  *** UNIQUE ***
+//
+//   Because the name is found, these are reported as satisfied FOREVER — a
+//   `sys.indexes` name lookup can never notice a wrong definition, so this
+//   warning's silence about them is not evidence they are right. The last one is
+//   the sharpest: declared as one view per user per name, it actually enforces
+//   one view per user, so a second view name for the same user cannot be saved.
+//   The first two cannot be corrected at all while `received_at` is `nvarchar(max)`.
+//   Closing this blind spot needs the key columns compared, not just the names
+//   (`sys.index_columns` with `is_included_column = 0`), which would start
+//   reporting these three as wrong — a deliberate change, not a bug fix.
 // -----------------------------------------------------------------------------
 async function reportSkippedIndexes(dialect: Dialect): Promise<void> {
   // SQL Server is the only dialect that can skip — its catalog is `sys.indexes`.

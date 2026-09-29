@@ -415,7 +415,10 @@ export default function LoginPage() {
             </div>
           )}
 
-          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
+          {/* flexWrap so the mode buttons drop under the "Create an account" link on a
+              narrow phone (below ~340px their combined min-content is wider than the
+              card, and .login-card's overflow:hidden would clip the last button). */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", rowGap: 10, marginTop: 18 }}>
             {effectiveMode === "password" ? (
               <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: 0 }}>
                 Staff?{" "}

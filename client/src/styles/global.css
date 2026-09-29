@@ -1466,8 +1466,13 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   color: rgba(255,255,255,0.72); font-size: 0.9375rem; line-height: 1.5;
   margin: 16px 0 40px; max-width: 420px;
 }
+/* minmax(0, 1fr) and NOT bare 1fr. `1fr` is shorthand for `minmax(auto, 1fr)`,
+   and that `auto` minimum is the track's min-content — so three tracks sized
+   themselves to their widest label ("SUBMISSIONS" needs 108px + 36px padding =
+   144px) and the row rendered 85/109/144 instead of three equal tiles, with a
+   370px floor that a phone cannot hold. 0 makes the tracks equal and honest. */
 .brand-stats {
-  display: grid; grid-template-columns: repeat(3, 1fr);
+  display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px; max-width: 520px;
 }
 .brand-stat {
@@ -1475,6 +1480,9 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   border: 1px solid rgba(255,255,255,0.12);
   border-radius: var(--radius);
   padding: 20px 18px;
+  /* A grid item's automatic minimum size is its min-content too, which would
+     let the tile overflow the (now equal) track it was given. */
+  min-width: 0;
 }
 .brand-stat .stat-num {
   font-size: 2rem; font-weight: 700; line-height: 1;
@@ -1492,12 +1500,44 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   width: 100%; max-width: 400px; padding: 0;
   border: none; background: transparent; box-shadow: none;
 }
+/* The sign-in card is capped at 400px, but a <select> renders its WIDEST OPTION
+   as its min-content — "Sammy Watkins · swatkins@gmail.com · School Contact"
+   measures 417px — and every flex ancestor takes an automatic minimum size from
+   it, so the card's min-content became 459px and the controls were laid out past
+   the right edge, where .login-card's overflow:hidden sliced them off. Allowing
+   the control and the boxes around it to shrink keeps the option text clipped
+   inside the select (the browser's normal behaviour) instead of breaking the
+   page layout. Desktop is unaffected: the column is wider than the control. */
+.login-auth .card,
+.login-auth form,
+.login-auth .filter-group,
+.login-auth .filter-group select,
+.login-auth .filter-group input {
+  min-width: 0;
+}
 
 @media (max-width: 900px) {
   .login-split { padding: 24px 16px; }
-  .login-card { grid-template-columns: 1fr; }
+  /* Same reason as .brand-stats above: a bare 1fr track is floored at the item's
+     min-content, so the single column grew to 418px inside a 341px card and
+     clipped both panels. */
+  .login-card { grid-template-columns: minmax(0, 1fr); }
   .login-brand { padding: 40px 24px; }
   .brand-stats { max-width: none; }
   .login-auth { padding: 32px 24px; }
+}
+
+/* Three tiles cannot hold the word "SUBMISSIONS" on a phone: that label's
+   min-content is ~108px and a tile adds 36px of padding, so the row needs
+   ~460px of card before it fits. Below that, one full-width row per stat —
+   number left, label right — which is compact and cannot overflow. */
+@media (max-width: 600px) {
+  .brand-stats { grid-template-columns: minmax(0, 1fr); gap: 10px; }
+  .brand-stat {
+    display: flex; align-items: baseline; justify-content: space-between;
+    gap: 12px; padding: 14px 16px;
+  }
+  .brand-stat .stat-num { font-size: 1.5rem; }
+  .brand-stat .stat-label { margin-top: 0; }
 }
 
