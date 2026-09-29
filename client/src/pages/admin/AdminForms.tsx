@@ -11,8 +11,8 @@ import { useAuth } from "../../context/AuthContext";
 // different call. Branching on `kind` beats three near-identical modals.
 type PendingKind = "delete" | "archive" | "restore";
 
-const BODY_TEXT: CSSProperties = { margin: 0, fontSize: 14, lineHeight: 1.5 };
-const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" };
+const BODY_TEXT: CSSProperties = { margin: 0, fontSize: "0.875rem", lineHeight: 1.5 };
+const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" };
 
 export default function AdminForms() {
   const navigate = useNavigate();
@@ -143,7 +143,7 @@ export default function AdminForms() {
           <>
             Design form templates, set staff-only fields, and publish for parents.
             {user?.organization_slug ? (
-              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: 11, verticalAlign: "middle" }}>
+              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: "0.6875rem", verticalAlign: "middle" }}>
                 {user.organization_slug}
               </span>
             ) : null}
@@ -186,7 +186,7 @@ export default function AdminForms() {
             alignItems: "center",
             gap: 10,
             flexWrap: "wrap",
-            fontSize: 13,
+            fontSize: "0.8125rem",
             marginBottom: 16,
           }}
         >
@@ -215,7 +215,7 @@ export default function AdminForms() {
             color: "rgb(186,48,64)",
             padding: "10px 12px",
             borderRadius: "var(--radius)",
-            fontSize: 13,
+            fontSize: "0.8125rem",
             marginBottom: 16,
           }}
         >

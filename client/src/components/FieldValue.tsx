@@ -181,7 +181,7 @@ export function renderEditor(
             <span className="track">
               <span className="thumb" />
             </span>
-            <span style={{ marginLeft: 8, fontSize: 13 }}>{o}</span>
+            <span style={{ marginLeft: 8, fontSize: "0.8125rem" }}>{o}</span>
           </label>
         );
       }

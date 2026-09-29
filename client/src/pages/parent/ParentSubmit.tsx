@@ -110,7 +110,7 @@ export default function ParentSubmit() {
                   color: "rgb(186,48,64)",
                   padding: "10px 12px",
                   borderRadius: "var(--radius)",
-                  fontSize: 13,
+                  fontSize: "0.8125rem",
                   marginBottom: 16,
                 }}
               >
@@ -229,7 +229,7 @@ function renderInput(
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {(field.options || []).map((o) => (
-            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8125rem", cursor: "pointer" }}>
               <input
                 type="radio"
                 name={`field-${field.id}`}
@@ -245,7 +245,7 @@ function renderInput(
       return (
         <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
           {(field.options || []).map((o) => (
-            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+            <label key={o} style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8125rem", cursor: "pointer" }}>
               <input
                 type="checkbox"
                 checked={Array.isArray(value) && value.includes(o)}

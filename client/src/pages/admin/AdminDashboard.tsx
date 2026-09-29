@@ -34,8 +34,8 @@ type TextFilterKey = "school_id" | "form_id" | "status" | "from" | "to";
 
 // Inline styles for the delete confirmation, matching the form-delete dialog on
 // the Forms page so the two destructive prompts read as the same kind of thing.
-const BODY_TEXT: CSSProperties = { margin: 0, fontSize: 14, lineHeight: 1.5 };
-const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" };
+const BODY_TEXT: CSSProperties = { margin: 0, fontSize: "0.875rem", lineHeight: 1.5 };
+const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" };
 const DANGER = "var(--danger, #b93040)";
 
 export default function AdminDashboard() {
@@ -276,7 +276,7 @@ export default function AdminDashboard() {
           <>
             All form submissions across every school. Filter, then export the exact columns you need.
             {user?.organization_slug ? (
-              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: 11, verticalAlign: "middle" }}>
+              <span className="badge badge-blue" style={{ marginLeft: 10, fontSize: "0.6875rem", verticalAlign: "middle" }}>
                 {user.organization_slug}
               </span>
             ) : null}
@@ -332,7 +332,7 @@ export default function AdminDashboard() {
             marginBottom: 16,
             textDecoration: "none",
             color: "var(--text)",
-            fontSize: 13,
+            fontSize: "0.8125rem",
           }}
         >
           <Webhook size={16} />

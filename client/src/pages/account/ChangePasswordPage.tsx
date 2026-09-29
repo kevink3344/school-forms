@@ -21,7 +21,7 @@ export const FORCED_PASSWORD_PATH = "/account/password/required";
 const noticeBase: CSSProperties = {
   padding: "10px 12px",
   borderRadius: "var(--radius)",
-  fontSize: 13,
+  fontSize: "0.8125rem",
   marginBottom: 16,
 };
 const successNotice: CSSProperties = {
@@ -137,7 +137,7 @@ export default function ChangePasswordPage({ forced = false }: { forced?: boolea
               a second, pointless change. */}
           {forced && success ? (
             <div>
-              <p style={{ marginTop: 0, fontSize: 13, color: "var(--muted, #5b6470)" }}>
+              <p style={{ marginTop: 0, fontSize: "0.8125rem", color: "var(--muted, #5b6470)" }}>
                 You can now use School Forms with your new password.
               </p>
               <button type="button" className="primary-button" onClick={goBack}>

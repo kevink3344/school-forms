@@ -336,7 +336,7 @@ export default function WebhookLog() {
             <h3 style={{ marginLeft: 8 }}>This log is getting large</h3>
           </div>
           <div className="card-body">
-            <p style={{ margin: 0, fontSize: 13 }}>
+            <p style={{ margin: 0, fontSize: "0.8125rem" }}>
               {retention.rows.toLocaleString()} attempts are stored (warning threshold{" "}
               {retention.threshold.toLocaleString()}). Payloads are kept indefinitely, so this is the point to
               consider exporting and trimming older rows.
@@ -350,7 +350,7 @@ export default function WebhookLog() {
           the count is what keeps them from being *silently* missing. */}
       {unattributed > 0 && (
         <div className="card">
-          <div className="card-body" style={{ fontSize: 13, color: "var(--text-muted)" }}>
+          <div className="card-body" style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
             {unattributed.toLocaleString()} attempt{unattributed === 1 ? "" : "s"} could not be attributed to a
             form or organization and cannot be listed here — usually a request with a wrong or missing secret,
             or one naming a form that no longer exists.
@@ -369,7 +369,7 @@ export default function WebhookLog() {
             border: "1px solid var(--border)",
             padding: "10px 12px",
             borderRadius: "var(--radius)",
-            fontSize: 13,
+            fontSize: "0.8125rem",
             marginBottom: 16,
           }}
         >
@@ -482,7 +482,7 @@ export default function WebhookLog() {
               padding: "9px 14px",
               borderBottom: "1px solid var(--border)",
               background: "var(--filled-bg)",
-              fontSize: 13,
+              fontSize: "0.8125rem",
             }}
           >
             <span>{notice}</span>
@@ -720,7 +720,7 @@ export default function WebhookLog() {
                     border: "1px solid var(--border)",
                     borderRadius: "var(--radius)",
                     padding: 12,
-                    fontSize: 12,
+                    fontSize: "0.75rem",
                     maxHeight: 320,
                     overflow: "auto",
                     whiteSpace: "pre-wrap",
@@ -738,7 +738,7 @@ export default function WebhookLog() {
                     border: "1px solid var(--tint-line)",
                     padding: "10px 12px",
                     borderRadius: "var(--radius)",
-                    fontSize: 13,
+                    fontSize: "0.8125rem",
                     marginTop: 14,
                   }}
                 >
@@ -753,7 +753,7 @@ export default function WebhookLog() {
                     color: "rgb(186,48,64)",
                     padding: "10px 12px",
                     borderRadius: "var(--radius)",
-                    fontSize: 13,
+                    fontSize: "0.8125rem",
                     marginTop: 14,
                   }}
                 >
@@ -813,18 +813,18 @@ export default function WebhookLog() {
               </button>
             </div>
             <div className="modal-body">
-              <p style={{ margin: 0, fontSize: 14, lineHeight: 1.5 }}>
+              <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5 }}>
                 Re-send the {stats.failed} failed attempt{stats.failed === 1 ? "" : "s"} for{" "}
                 <strong>{forms.find((f) => String(f.id) === formId)?.title ?? "this form"}</strong> through
                 today&apos;s rules?
               </p>
-              <p style={{ margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" }}>
+              <p style={{ margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                 Attempts that already succeeded, were never stored, or failed schema validation are skipped. Each
                 delivery is file-stamped at the moment it arrives, so a recovered submission gets today&apos;s
                 timestamp while its school year comes from when the response originally arrived.
               </p>
               {bulkMessage && (
-                <p style={{ margin: "10px 0 0", fontSize: 13 }}>{bulkMessage}</p>
+                <p style={{ margin: "10px 0 0", fontSize: "0.8125rem" }}>{bulkMessage}</p>
               )}
             </div>
             <div className="modal-foot">

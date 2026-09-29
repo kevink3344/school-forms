@@ -15,8 +15,8 @@ const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "comp
 
 // Inline styles for the delete confirmation, matching the dispatch on the admin
 // dashboard and the form-delete dialog on the Forms page.
-const BODY_TEXT: CSSProperties = { margin: 0, fontSize: 14, lineHeight: 1.5 };
-const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: 13, color: "var(--text-muted)" };
+const BODY_TEXT: CSSProperties = { margin: 0, fontSize: "0.875rem", lineHeight: 1.5 };
+const BODY_HINT: CSSProperties = { margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" };
 // Inline rather than a class, deliberately: `.secondary-button:hover` re-colours
 // the label to the brand accent, and an inline `color` is what survives that
 // hover — a danger control that turns "safe blue" when you reach for it is worse
@@ -314,7 +314,7 @@ export default function StaffSubmissionDetail() {
             {detail.form_name} Submission — {detail.student_name || "Unnamed"}
           </h1>
           <p>
-            <span className="cell-mono" style={{ fontSize: 12 }}>
+            <span className="cell-mono" style={{ fontSize: "0.75rem" }}>
               {detail.public_id}
             </span>
           </p>
@@ -322,7 +322,7 @@ export default function StaffSubmissionDetail() {
         <div className="head-actions">
           <label
             htmlFor="submission-status"
-            style={{ fontSize: 15, fontWeight: 600, color: "var(--text-muted)" }}
+            style={{ fontSize: "0.9375rem", fontWeight: 600, color: "var(--text-muted)" }}
           >
             Select Status
           </label>

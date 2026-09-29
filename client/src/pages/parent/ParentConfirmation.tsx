@@ -50,8 +50,8 @@ export default function ParentConfirmation() {
               <Check size={32} strokeWidth={2.4} />
             </div>
 
-            <h1 style={{ margin: "0 0 8px", fontSize: 22 }}>Thank you, your form was submitted.</h1>
-            <p className="muted-note" style={{ margin: "0 0 20px", fontSize: 14 }}>
+            <h1 style={{ margin: "0 0 8px", fontSize: "1.375rem" }}>Thank you, your form was submitted.</h1>
+            <p className="muted-note" style={{ margin: "0 0 20px", fontSize: "0.875rem" }}>
               Your submission has been received. Keep this Submission ID safe — it's your only reference.
             </p>
 
@@ -66,7 +66,7 @@ export default function ParentConfirmation() {
                 <div className="field-list" style={{ gridTemplateColumns: "1fr", gap: "10px 0" }}>
                   <div className="field">
                     <span className="f-label">Submission ID</span>
-                    <span className="f-value cell-mono" style={{ fontSize: 13 }}>
+                    <span className="f-value cell-mono" style={{ fontSize: "0.8125rem" }}>
                       {publicId}
                     </span>
                   </div>
@@ -80,7 +80,7 @@ export default function ParentConfirmation() {
                   </div>
                   <div className="field">
                     <span className="f-label">Submitted</span>
-                    <span className="f-value cell-mono" style={{ fontSize: 13 }}>
+                    <span className="f-value cell-mono" style={{ fontSize: "0.8125rem" }}>
                       {new Date(info.submitted_at).toLocaleString()}
                     </span>
                   </div>

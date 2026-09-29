@@ -286,7 +286,7 @@ export default function SchoolsPanel() {
           <ChevronLeft size={16} />
           <span>Prev</span>
         </button>
-        <span style={{ fontSize: 13 }}>
+        <span style={{ fontSize: "0.8125rem" }}>
           Page {currentPage} of {totalPages}
         </span>
         <button
@@ -297,7 +297,7 @@ export default function SchoolsPanel() {
           <span>Next</span>
           <ChevronRight size={16} />
         </button>
-        <span style={{ fontSize: 13, marginLeft: "auto" }}>{total} total</span>
+        <span style={{ fontSize: "0.8125rem", marginLeft: "auto" }}>{total} total</span>
       </div>
 
       <SchoolDrawer

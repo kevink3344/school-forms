@@ -243,11 +243,11 @@ export default function SubmissionsGrid({
                 <tr key={s.public_id}>
                   {/* The frozen column. `grid-cell-pinned` caps its width so a long
                       school name can't grow the pinned area past the viewport. */}
-                  <td
-                    className="cell-strong grid-cell-pinned"
-                    style={{ whiteSpace: "nowrap" }}
-                    data-label="Student / School"
-                  >
+                  {/* No inline `white-space` here: single-line values are a desktop
+                      presentation and live in the stylesheet, because the mobile card
+                      view has to reverse it and an inline declaration cannot be
+                      overridden by a rule (see `.grid-cell-pinned` in global.css). */}
+                  <td className="cell-strong grid-cell-pinned" data-label="Student / School">
                     <a
                       className="link-name"
                       href={submissionPath(s.public_id)}
@@ -258,9 +258,16 @@ export default function SubmissionsGrid({
                     >
                       {s.student_name || "Unnamed submission"}
                     </a>
-                    <span className="cell-mono" style={{ marginLeft: 8, whiteSpace: "nowrap" }}>
-                      {s.school_name ?? "—"}
-                    </span>
+                    {/* Both inline declarations that used to sit here are gone.
+                        `marginLeft: 8` was already dead: `.grid-cell-pinned
+                        .cell-mono` resets it to 0 with `!important` in both the
+                        desktop and mobile rules. `whiteSpace: "nowrap"` was the
+                        live one — and an inline declaration beats every rule, so
+                        the school name stayed on one line on a phone and ran
+                        8px past the card (342px inside a 345px table) while the
+                        stylesheet's own `white-space: normal` could not reach it.
+                        The stylesheet now owns both properties. */}
+                    <span className="cell-mono">{s.school_name ?? "—"}</span>
                   </td>
                   {!hiddenBase.has(BASE_KEYS.submissionId) && (
                     <td className="cell-mono" data-label="Submission ID">{shortId(s.public_id)}</td>
@@ -297,7 +304,7 @@ export default function SubmissionsGrid({
                   })}
 
                   {!hiddenBase.has(BASE_KEYS.actions) && (
-                    <td data-label="Actions" style={{ whiteSpace: "nowrap" }}>
+                    <td data-label="Actions" className="grid-cell-actions">
                       <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
                         <button className="badge-button" onClick={() => onOpen(s.public_id)}>
                           Review
@@ -457,7 +464,10 @@ export function StaffCell({
   // into the `.grid-col-staff` wash via each of the branches below.
   if (!column.staff_only) {
     return (
-      <td data-label={column.label} style={{ whiteSpace: "nowrap" }}>
+      /* `grid-field-cell` carries the desktop single-line rule in the stylesheet
+         rather than inline here, so the mobile card view can wrap a long value
+         such as a Parent/Guardian name instead of clipping it at the cell edge. */
+      <td data-label={column.label} className="grid-field-cell">
         {displayValue(value, type)}
       </td>
     );

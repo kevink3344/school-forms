@@ -361,7 +361,7 @@ export default function AdminFormDesigner() {
             alignItems: "center",
             gap: 10,
             flexWrap: "wrap",
-            fontSize: 13,
+            fontSize: "0.8125rem",
             marginBottom: 16,
           }}
         >
@@ -400,7 +400,7 @@ export default function AdminFormDesigner() {
             color: "rgb(186,48,64)",
             padding: "10px 12px",
             borderRadius: "var(--radius)",
-            fontSize: 13,
+            fontSize: "0.8125rem",
             marginBottom: 16,
           }}
         >
@@ -448,7 +448,7 @@ export default function AdminFormDesigner() {
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 4,
-                      fontSize: 12,
+                      fontSize: "0.75rem",
                       fontWeight: 600,
                     }}
                     title={docFolderName ? `Valid folder: ${docFolderName}` : "Valid folder"}
@@ -464,7 +464,7 @@ export default function AdminFormDesigner() {
                       display: "inline-flex",
                       alignItems: "center",
                       gap: 4,
-                      fontSize: 12,
+                      fontSize: "0.75rem",
                       fontWeight: 600,
                     }}
                     title="This folder id isn't an accessible Google Drive folder"
@@ -482,7 +482,7 @@ export default function AdminFormDesigner() {
                   setDirty(true);
                 }}
               />
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
                 Generated documents for this form are saved to this folder. Leave blank to use the default.
               </div>
             </div>
@@ -498,7 +498,7 @@ export default function AdminFormDesigner() {
                   setDirty(true);
                 }}
               />
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
                 Optional link to the source Google Form. Shown to staff so they can open it.
               </div>
 
@@ -508,7 +508,7 @@ export default function AdminFormDesigner() {
                   alignItems: "center",
                   gap: 8,
                   marginTop: 12,
-                  fontSize: 13,
+                  fontSize: "0.8125rem",
                   cursor: "pointer",
                 }}
               >
@@ -522,7 +522,7 @@ export default function AdminFormDesigner() {
                 />
                 Generate form fields
               </label>
-              <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 4 }}>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
                 When enabled, the fields below are created automatically from the Google Form.
                 Requires Google Forms access to be configured.
               </div>
@@ -538,7 +538,7 @@ export default function AdminFormDesigner() {
                     {generating ? "Generating…" : "Generate fields now"}
                   </button>
                   {generateMsg && (
-                    <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{generateMsg}</span>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{generateMsg}</span>
                   )}
                 </div>
               )}
@@ -570,7 +570,7 @@ export default function AdminFormDesigner() {
         <div className="card-body">
           {activeTab === "form" ? (
             <>
-              <div className="sub" style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+              <div className="sub" style={{ marginBottom: 12, fontSize: "0.75rem", color: "var(--text-muted)" }}>
                 These fields are shown to parents when they submit the form.
               </div>
               {formFields.length === 0 ? (
@@ -594,7 +594,7 @@ export default function AdminFormDesigner() {
             </>
           ) : (
             <>
-              <div className="sub" style={{ marginBottom: 12, fontSize: 12, color: "var(--text-muted)" }}>
+              <div className="sub" style={{ marginBottom: 12, fontSize: "0.75rem", color: "var(--text-muted)" }}>
                 These fields are hidden from parents. Staff fill them in on each submission's detail page.
               </div>
               {staffFields.length === 0 ? (
@@ -681,7 +681,7 @@ function FieldRow({
       }}
     >
       <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 10 }}>
-        <span className="cell-mono" style={{ fontSize: 11 }}>
+        <span className="cell-mono" style={{ fontSize: "0.6875rem" }}>
           #{index + 1}
         </span>
         <div style={{ display: "flex", gap: 4 }}>
@@ -698,7 +698,7 @@ function FieldRow({
               display: "flex",
               alignItems: "center",
               gap: 8,
-              fontSize: 13,
+              fontSize: "0.8125rem",
               cursor: "pointer",
               marginLeft: 8,
             }}
@@ -712,7 +712,7 @@ function FieldRow({
           </label>
         )}
         {field.staff_only && !showStaffOnlyToggle && (
-          <span className="badge badge-orange" style={{ fontSize: 11, marginLeft: 8 }}>
+          <span className="badge badge-orange" style={{ fontSize: "0.6875rem", marginLeft: 8 }}>
             Staff Only
           </span>
         )}
@@ -756,7 +756,7 @@ function FieldRow({
               })
             }
           />
-          <div className="filter-hint" style={{ fontSize: 11, color: "var(--text-muted)", marginTop: 4 }}>
+          <div className="filter-hint" style={{ fontSize: "0.6875rem", color: "var(--text-muted)", marginTop: 4 }}>
             Separate each option with a comma (e.g. Option A, Option B, Option C).
           </div>
         </div>
@@ -767,7 +767,7 @@ function FieldRow({
           <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
             <span
               style={{
-                fontSize: 11,
+                fontSize: "0.6875rem",
                 fontWeight: 700,
                 letterSpacing: "0.06em",
                 textTransform: "uppercase",
@@ -797,7 +797,7 @@ function FieldRow({
                   }}
                   style={{
                     cursor: "pointer",
-                    fontSize: 13,
+                    fontSize: "0.8125rem",
                     fontWeight: 700,
                     padding: "7px 14px",
                     borderRadius: "var(--radius)",
@@ -820,7 +820,7 @@ function FieldRow({
           </div>
         )}
 
-        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 13, cursor: "pointer" }}>
+        <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: "0.8125rem", cursor: "pointer" }}>
           <input
             type="checkbox"
             checked={field.required}

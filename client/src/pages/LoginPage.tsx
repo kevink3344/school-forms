@@ -227,7 +227,7 @@ export default function LoginPage() {
         <div className="card" style={{ width: "100%", maxWidth: 460, padding: 32 }}>
           <p
             style={{
-              fontSize: 11,
+              fontSize: "0.6875rem",
               fontWeight: 700,
               textTransform: "uppercase",
               letterSpacing: "0.08em",
@@ -237,13 +237,13 @@ export default function LoginPage() {
           >
             Authentication
           </p>
-          <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Sign-in unavailable</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "8px 0 0" }}>
+          <h1 style={{ fontSize: "1.375rem", fontWeight: 700, margin: 0 }}>Sign-in unavailable</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem", margin: "8px 0 0" }}>
             {settingsError}
           </p>
           {/* Says out loud what the page is doing, because silently showing the
               test form is exactly what this replaced. */}
-          <p style={{ color: "var(--text-muted)", fontSize: 12, margin: "10px 0 0" }}>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.75rem", margin: "10px 0 0" }}>
             No sign-in form is shown until the mode is known, so a failed lookup can never
             present the wrong one.
           </p>
@@ -267,7 +267,7 @@ export default function LoginPage() {
     return (
       <Centered>
         <div className="card" style={{ width: "100%", maxWidth: 400, padding: 32 }}>
-          <p style={{ color: "var(--text-muted)", fontSize: 13, margin: 0 }}>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem", margin: 0 }}>
             Loading…
           </p>
         </div>
@@ -284,7 +284,7 @@ export default function LoginPage() {
           <div style={{ marginBottom: 6 }}>
             <p
               style={{
-                fontSize: 11,
+                fontSize: "0.6875rem",
                 fontWeight: 700,
                 textTransform: "uppercase",
                 letterSpacing: "0.08em",
@@ -294,8 +294,8 @@ export default function LoginPage() {
             >
               Authentication
             </p>
-            <h1 style={{ fontSize: 22, fontWeight: 700, margin: 0 }}>Sign In</h1>
-            <p style={{ color: "var(--text-muted)", fontSize: 13, margin: "6px 0 0" }}>
+            <h1 style={{ fontSize: "1.375rem", fontWeight: 700, margin: 0 }}>Sign In</h1>
+            <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem", margin: "6px 0 0" }}>
               {effectiveMode === "select" &&
                 "Select a test user from the directory and create a session without entering email or password."}
               {effectiveMode === "password" &&
@@ -312,7 +312,7 @@ export default function LoginPage() {
                 color: "rgb(186,48,64)",
                 padding: "10px 12px",
                 borderRadius: "var(--radius)",
-                fontSize: 13,
+                fontSize: "0.8125rem",
                 marginBottom: 16,
                 marginTop: 12,
               }}
@@ -407,7 +407,7 @@ export default function LoginPage() {
                   color: "rgb(146,90,10)",
                   padding: "12px 14px",
                   borderRadius: "var(--radius)",
-                  fontSize: 13,
+                  fontSize: "0.8125rem",
                 }}
               >
                 {maintenanceMessage}
@@ -417,7 +417,7 @@ export default function LoginPage() {
 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 18 }}>
             {effectiveMode === "password" ? (
-              <p style={{ fontSize: 13, color: "var(--text-muted)", margin: 0 }}>
+              <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: 0 }}>
                 Staff?{" "}
                 <Link to="/register" style={{ color: "var(--accent)", fontWeight: 600 }}>
                   Create an account
@@ -438,7 +438,7 @@ export default function LoginPage() {
                       ...(adminMode === m || (adminMode === null && effectiveMode === m)
                         ? { background: "var(--accent)", color: "#fff" }
                         : {}),
-                      fontSize: 10,
+                      fontSize: "0.625rem",
                     }}
                   >
                     {MODE_LABELS[m]}

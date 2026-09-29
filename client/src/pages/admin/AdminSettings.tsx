@@ -107,7 +107,7 @@ function AudienceChips({
   const allSelected = ROLES.every((r) => value.includes(r));
   const chip = (has: boolean): React.CSSProperties => ({
     cursor: "pointer",
-    fontSize: 13,
+    fontSize: "0.8125rem",
     fontWeight: 700,
     padding: "7px 14px",
     borderRadius: "var(--radius)",
@@ -903,7 +903,7 @@ export default function AdminSettings() {
                 color: "rgb(146,90,10)",
                 padding: "10px 14px",
                 borderRadius: "var(--radius)",
-                fontSize: 13,
+                fontSize: "0.8125rem",
                 marginBottom: 16,
               }}
             >
@@ -947,10 +947,10 @@ export default function AdminSettings() {
                   >
                     {active ? "ACTIVE" : m.label}
                   </span>
-                  <span style={{ fontSize: 13, fontWeight: 700, color: "var(--text)" }}>
+                  <span style={{ fontSize: "0.8125rem", fontWeight: 700, color: "var(--text)" }}>
                     {m.label}
                   </span>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>{m.desc}</span>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>{m.desc}</span>
                 </button>
               );
             })}
@@ -984,7 +984,7 @@ export default function AdminSettings() {
         title="Documents Link"
         subtitle="Show or hide the Documents sidebar link, enabled by role"
       >
-        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           Toggle which roles see <strong>Documents</strong> in the sidebar. Toggling a role
           off hides the link for those users immediately; the API also refuses their
           requests. At least one role should remain enabled for the page to be used.
@@ -1009,7 +1009,7 @@ export default function AdminSettings() {
               >
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                  <span style={{ fontSize: 13, color: "var(--text)" }}>
+                  <span style={{ fontSize: "0.8125rem", color: "var(--text)" }}>
                     {role === "admin"
                       ? "Administrator"
                       : role === "cdm_contact"
@@ -1019,7 +1019,7 @@ export default function AdminSettings() {
                   </span>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
                     {has ? "Visible" : "Hidden"}
                   </span>
                   <Toggle
@@ -1039,12 +1039,12 @@ export default function AdminSettings() {
         title="Menu Settings"
         subtitle="Show or hide sidebar menu items, enabled by role"
       >
-        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           Choose which sidebar items each role can see. Hiding an item removes it from
           the menu for that role; it does not delete any data or change permissions on
           the underlying pages.
         </p>
-        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           <strong>Documents</strong> is not listed here. It is controlled by the
           Documents Link panel above, which also decides whether the documents API
           accepts a request.
@@ -1054,7 +1054,7 @@ export default function AdminSettings() {
             <div key={item}>
               <div
                 style={{
-                  fontSize: 11,
+                  fontSize: "0.6875rem",
                   fontWeight: 700,
                   letterSpacing: "0.06em",
                   textTransform: "uppercase",
@@ -1084,12 +1084,12 @@ export default function AdminSettings() {
                     >
                       <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                         <span className={`badge ${badge.cls}`}>{badge.label}</span>
-                        <span style={{ fontSize: 13, color: "var(--text)" }}>
+                        <span style={{ fontSize: "0.8125rem", color: "var(--text)" }}>
                           {has ? "Sees this menu item" : "Menu item hidden"}
                         </span>
                       </div>
                       <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
-                        <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                        <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
                           {has ? "Visible" : "Hidden"}
                         </span>
                         <Toggle
@@ -1112,7 +1112,7 @@ export default function AdminSettings() {
         title="Slack Notifications"
         subtitle="Send a test message to verify the admin alert webhook"
       >
-        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           Admin alerts (new submissions, generated documents) are delivered to{" "}
           <strong>Slack</strong> through a webhook. Use this panel to verify the webhook
           is working and preview how a message looks. The subject and body support Slack
@@ -1162,7 +1162,7 @@ export default function AdminSettings() {
         title="Webhook Log"
         subtitle="Every response Google Forms has posted to this app, including the rejected ones"
       >
-        <p style={{ fontSize: 13, color: "var(--text-muted)", margin: "0 0 14px" }}>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           A response that is rejected — because its form was unpublished, its secret was
           wrong, or its body was invalid — is recorded in the log instead of disappearing.
           The log is read-only apart from <strong>Replay</strong>, which re-sends a rejected
@@ -1177,7 +1177,7 @@ export default function AdminSettings() {
               gap: 10,
               flexWrap: "wrap",
               marginBottom: 14,
-              fontSize: 13,
+              fontSize: "0.8125rem",
             }}
           >
             <span>
@@ -1261,7 +1261,7 @@ export default function AdminSettings() {
                     <td data-label="Message">
                       <div style={{ fontWeight: 600 }}>{m.title}</div>
                       {preview !== "" && (
-                        <div style={{ fontSize: 12, color: "var(--text-muted)", marginTop: 2 }}>
+                        <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 2 }}>
                           {preview}
                           {more ? " …" : ""}
                         </div>
@@ -1285,7 +1285,7 @@ export default function AdminSettings() {
                     >
                       {sysMsgDeleteId === m.id ? (
                         <div style={{ display: "inline-flex", alignItems: "center", gap: 8 }}>
-                          <span style={{ fontSize: 12, color: "var(--text-muted)" }}>
+                          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
                             Delete for every user?
                           </span>
                           <button
@@ -1323,7 +1323,7 @@ export default function AdminSettings() {
             )}
           </tbody>
         </table>
-        <p style={{ fontSize: 12, color: "var(--text-muted)", margin: 0, padding: "12px 14px" }}>
+        <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0, padding: "12px 14px" }}>
           Closing a message is recorded against the one user who closed it, and cannot be undone
           for them — post a new message to say it again. A message whose audience is{" "}
           <strong>No one</strong> is stored but delivered to nobody; switching one to{" "}
@@ -1443,7 +1443,7 @@ export default function AdminSettings() {
                     disabled={orgForm.id === user?.organization_id}
                     onChange={(v) => setOrgForm((f) => ({ ...f, active: v }))}
                   />
-                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                     {orgForm.active ? "Active" : "Inactive"}
                     {orgForm.id === user?.organization_id ? " (your organization)" : ""}
                     {!orgForm.active && " — users of this org can no longer sign in"}
@@ -1511,7 +1511,7 @@ export default function AdminSettings() {
                 <span
                   style={{
                     display: "block",
-                    fontSize: 11,
+                    fontSize: "0.6875rem",
                     fontWeight: 600,
                     color: "var(--text-muted)",
                     textTransform: "uppercase",
@@ -1526,7 +1526,7 @@ export default function AdminSettings() {
                   onChange={(next) => setSysMsgForm((f) => ({ ...f, audience: next }))}
                 />
                 <span
-                  style={{ display: "block", fontSize: 11, color: "var(--text-muted)", marginTop: 6 }}
+                  style={{ display: "block", fontSize: "0.6875rem", color: "var(--text-muted)", marginTop: 6 }}
                 >
                   {sysMsgForm.audience.length === 0
                     ? "No role selected — this message is stored but delivered to nobody."
@@ -1539,7 +1539,7 @@ export default function AdminSettings() {
                     checked={sysMsgForm.active}
                     onChange={(v) => setSysMsgForm((f) => ({ ...f, active: v }))}
                   />
-                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                     {sysMsgForm.active ? "Active" : "Inactive"}
                     {!sysMsgForm.active && " — stored, but no user is shown it"}
                   </span>
@@ -1609,7 +1609,7 @@ export default function AdminSettings() {
                     <li>The temporary password is shown once and cannot be retrieved later.</li>
                   </ul>
                 </div>
-                <p style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                   Pass it to {form.display_name} over a channel you trust — a phone call or
                   in person, not the same email that carries the account.
                 </p>
@@ -1635,7 +1635,7 @@ export default function AdminSettings() {
                   <code
                     style={{
                       flex: 1,
-                      fontSize: 15,
+                      fontSize: "0.9375rem",
                       letterSpacing: "0.06em",
                       wordBreak: "break-all",
                       userSelect: "all",
@@ -1759,7 +1759,7 @@ export default function AdminSettings() {
                       disabled={form.id === user?.id}
                       onChange={(v) => setForm((f) => ({ ...f, active: v }))}
                     />
-                    <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                    <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                       {form.active ? "Active" : "Inactive"}
                       {form.id === user?.id ? " (you)" : ""}
                     </span>
@@ -1775,7 +1775,7 @@ export default function AdminSettings() {
                     checked={form.show_on_test_screen}
                     onChange={(v) => setForm((f) => ({ ...f, show_on_test_screen: v }))}
                   />
-                  <span style={{ fontSize: 13, color: "var(--text-muted)" }}>
+                  <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
                     {form.show_on_test_screen
                       ? "Listed in the Select User (Test) dropdown"
                       : "Not listed in the Select User (Test) dropdown"}

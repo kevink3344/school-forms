@@ -260,7 +260,7 @@ export default function StaffDocuments() {
                     color: "rgb(186,48,64)",
                     padding: "10px 12px",
                     borderRadius: "var(--radius)",
-                    fontSize: 13,
+                    fontSize: "0.8125rem",
                     marginTop: 14,
                   }}
                 >

@@ -73,8 +73,8 @@ export default function RegisterPage() {
         style={{ width: "100%", maxWidth: 440, padding: 32, boxShadow: "var(--shadow-card)" }}
       >
         <div style={{ marginBottom: 8 }}>
-          <h1 style={{ fontSize: 22, fontWeight: 700 }}>School Contact Registration</h1>
-          <p style={{ color: "var(--text-muted)", fontSize: 13 }}>
+          <h1 style={{ fontSize: "1.375rem", fontWeight: 700 }}>School Contact Registration</h1>
+          <p style={{ color: "var(--text-muted)", fontSize: "0.8125rem" }}>
             Create a School Contact account for your school
           </p>
         </div>
@@ -86,7 +86,7 @@ export default function RegisterPage() {
               color: "rgb(186,48,64)",
               padding: "10px 12px",
               borderRadius: "var(--radius)",
-              fontSize: 13,
+              fontSize: "0.8125rem",
               marginBottom: 16,
             }}
           >
@@ -156,7 +156,7 @@ export default function RegisterPage() {
           </button>
         </form>
 
-        <p style={{ marginTop: 18, fontSize: 13, color: "var(--text-muted)" }}>
+        <p style={{ marginTop: 18, fontSize: "0.8125rem", color: "var(--text-muted)" }}>
           Already registered?{" "}
           <Link to="/login" style={{ color: "var(--accent)", fontWeight: 600 }}>
             Sign in

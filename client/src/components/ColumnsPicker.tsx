@@ -53,7 +53,7 @@ export default function ColumnsPicker({ columns, checked, onToggle, onToggleAll,
       {heading && (
         <h3
           style={{
-            fontSize: 13,
+            fontSize: "0.8125rem",
             textTransform: "uppercase",
             letterSpacing: "0.05em",
             color: "var(--text-muted)",
