@@ -119,7 +119,18 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
     const data = parsed.data;
 
     // Guard: an admin cannot deactivate their own account.
-    if (req.user!.id === id && data.active === false) {
+    //
+    // `Number(...)` on the claim is load-bearing, not tidiness. On the live
+    // database `users.id` is `bigint` and the driver returns it as a STRING, so
+    // `req.user!.id` is `"8"` while `id` (from `Number(req.params.id)`) is `8`.
+    // A strict compare is therefore false for every admin on every save, leaving
+    // this guard silently dead on production — measured 2026-09-30 with a probe
+    // that read `SELECT TOP 1 id, email FROM dbo.users` as `{"id":"1",…}`,
+    // `typeof row.id === "string"`. Convert at the COMPARISON, which is the
+    // boundary rule `systemMessages.ts idOf()` already states. Do not "fix" it by
+    // coercing the claim inside `requireAuth`: that file explains why the claim
+    // must stay VERBATIM, and `auth.test.ts` pins it.
+    if (Number(req.user!.id) === id && data.active === false) {
       res.status(400).json({ error: "You cannot deactivate your own account" });
       return;
     }
@@ -147,10 +158,40 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       return;
     }
 
-    // Email uniqueness check (only when changing it).
-    if (data.email) {
+    // Email uniqueness check — only when the email is actually CHANGING, and
+    // comparing the ids NUMERICALLY. Both halves are load-bearing.
+    //
+    // The numeric compare: on the live database `users.id` is `bigint` (the
+    // database was created outside this app, which is why 10 declared indexes
+    // are missing), and `mssql` hands a `bigint` back as a JS **string** — the
+    // probe above read a real row as `{"id":"1",…}`. `id` here is
+    // `Number(req.params.id)`, a genuine number, so `existing.id !== id` was
+    // `"8" !== 8` — TRUE for every row. Because the admin form resends `email`
+    // on every save, that turned "you may not move an email onto another
+    // account" into "you may not save this user at all": 409 "Email already
+    // registered" on an edit that changed nothing but the school.
+    //
+    // It never reproduced locally because `school-form-data` has `users.id` as
+    // `INT`, which both drivers return as a number (`intMode: "number"` on
+    // libSQL, a real number on mssql) — so `8 !== 8` is false there and the
+    // check passes. The fix shipped for the earlier cross-tenant 403 was verified
+    // only against local dev, which is exactly the control that would have
+    // caught this.
+    //
+    // The CHANGE compare: `if (data.email)` tested PRESENCE, not change — which
+    // the previous comment ("only when changing it") already claimed it did, the
+    // gap between the comment and the code being what amplified this. Comparing
+    // against `target.email`, the row fetched above from the same database, so
+    // the two operands agree by construction, restores the stated intent and
+    // settles a no-op edit before any lookup runs.
+    //
+    // The check is KEPT rather than deleted: `UX_users_email` is one of the 10
+    // indexes this database could not create, so duplicate emails are possible.
+    // A probe found 0 duplicate groups on 2026-09-30 — a measurement, not a
+    // constraint, so a genuine duplicate must still be refused.
+    if (data.email && data.email !== target.email) {
       const existing = await getUserByEmail(data.email);
-      if (existing && existing.id !== id) {
+      if (existing && Number(existing.id) !== id) {
         res.status(409).json({ error: "Email already registered" });
         return;
       }
@@ -216,7 +257,11 @@ usersRouter.post("/:id/reset-password", requireAuth, requireRoles("admin"), asyn
     // current-password check exists to block. An admin who wants a new password
     // for themselves already has POST /api/auth/change-password, which knows
     // their current one. (Mirrors "You cannot deactivate your own account" above.)
-    if (req.user!.id === id) {
+    //
+    // `Number(...)` for the same reason as that mirror: the driver returns the
+    // bigint id columns as strings, so the raw claim never equals the parsed
+    // number and this guard would be silently dead on production.
+    if (Number(req.user!.id) === id) {
       res.status(400).json({
         error: "You cannot reset your own password. Use Change Password instead.",
       });

@@ -449,10 +449,17 @@ export function featureToSchool(
 // -----------------------------------------------------------------------------
 // Users
 // -----------------------------------------------------------------------------
+// `ORDER BY id` is deliberate, not cosmetic. `UX_users_email` is one of the
+// indexes the live database could not create (its key column reports as
+// nvarchar(max)), so duplicate emails are possible there — and with no ORDER BY
+// this picked an ARBITRARY row, which is how a real duplicate becomes a 409 that
+// names no account and that nobody can explain. Deterministic lowest-id is the
+// behaviour every caller here already assumed.
 export async function getUserByEmail(email: string): Promise<User | null> {
   const rows = await execute<User>(
     `SELECT id, email, password_hash, role, school_id, organization_id, display_name, active, show_on_test_screen, must_change_password, created_at
-     FROM dbo.users WHERE email = @email`,
+     FROM dbo.users WHERE email = @email
+     ORDER BY id`,
     { email }
   );
   return rows[0] ?? null;
