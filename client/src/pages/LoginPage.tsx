@@ -466,10 +466,6 @@ function BrandPanel({ stats }: { stats: LoginStats | null }) {
       <img src="/wcpss-logo.svg" alt="Wake County Public School System" className="brand-logo" />
       <p className="brand-eyebrow">Enterprise Staff Support</p>
       <h1>Google Submissions</h1>
-      <p className="brand-tagline">
-        Choose a test user and sign in instantly. The correct organization and team
-        context will be applied automatically.
-      </p>
       <div className="brand-stats">
         <div className="brand-stat">
           <div className="stat-num">{n(stats?.users)}</div>

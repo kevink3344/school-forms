@@ -1462,10 +1462,6 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .login-brand h1 {
   font-size: 2.375rem; font-weight: 700; line-height: 1.15; margin: 14px 0 0;
 }
-.login-brand .brand-tagline {
-  color: rgba(255,255,255,0.72); font-size: 0.9375rem; line-height: 1.5;
-  margin: 16px 0 40px; max-width: 420px;
-}
 /* minmax(0, 1fr) and NOT bare 1fr. `1fr` is shorthand for `minmax(auto, 1fr)`,
    and that `auto` minimum is the track's min-content — so three tracks sized
    themselves to their widest label ("SUBMISSIONS" needs 108px + 36px padding =
@@ -1474,6 +1470,8 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .brand-stats {
   display: grid; grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 16px; max-width: 520px;
+  /* This 40px used to be the removed .brand-tagline rule's bottom margin. */
+  margin-top: 40px;
 }
 .brand-stat {
   background: rgba(255,255,255,0.08);
