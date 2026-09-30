@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { ChevronDown, Check, Copy, KeyRound, Plus, Webhook, X } from "lucide-react";
@@ -7,6 +7,7 @@ import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult
 import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import { refreshSystemMessages } from "../../components/SystemMessageBar";
+import { Toast } from "../../components/Toast";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
 
@@ -270,6 +271,21 @@ export default function AdminSettings() {
   const [error, setError] = useState("");
   const [message, setMessage] = useState("");
 
+  // Confirmation for a user SAVE, pinned to the viewport. This is the one action
+  // in this component that does not use the `.alert-success` banner under the
+  // page head: the admin who saves a row has scrolled past that banner to reach
+  // the row, so a message there is off screen at the exact moment it is needed.
+  // See components/Toast.tsx. `id` increments per call so that a repeated,
+  // identical message remounts the toast (restarting its dismiss timer and
+  // giving the live region something new to announce) instead of looking
+  // unchanged to React, which would silently swallow the second confirmation.
+  const [toast, setToast] = useState<{ id: number; text: string } | null>(null);
+  const toastSeq = useRef(0);
+  const showToast = (text: string) => {
+    toastSeq.current += 1;
+    setToast({ id: toastSeq.current, text });
+  };
+
   // Login Mode panel state.
   const [loginMode, setLoginMode] = useState<LoginMode>("select");
   const [loginModeOverride, setLoginModeOverride] = useState<LoginMode | null>(null);
@@ -524,7 +540,11 @@ export default function AdminSettings() {
           active: form.active,
           show_on_test_screen: form.show_on_test_screen,
         });
-        setMessage("User updated.");
+        // A toast rather than the banner, for the reason in Toast.tsx. The
+        // banner is CLEARED rather than left alone: an earlier action's message
+        // would otherwise be sitting there contradicting what was just saved.
+        setMessage("");
+        showToast("User updated successfully");
       }
       await load();
       closeModal();
@@ -1848,6 +1868,14 @@ export default function AdminSettings() {
           )}
         </div>
       </div>
+
+      {/* Rendered last so it paints above the drawer overlay (z-index 100) and
+          the system-message banner (201); `.toast` carries z-index 300 for the
+          same reason. Mounted with a per-notification `key` so a repeated save
+          remounts it and restarts its timer — see components/Toast.tsx. */}
+      {toast && (
+        <Toast key={toast.id} message={toast.text} onDismiss={() => setToast(null)} />
+      )}
     </div>
   );
 }

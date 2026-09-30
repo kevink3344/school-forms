@@ -473,6 +473,50 @@ input.edit-input {
 .alert-error { background: var(--orange-tint); color: var(--vacant-fg); border-color: var(--orange-tint-line); }
 .alert-success { background: var(--filled-bg); color: var(--filled-fg); border-color: var(--tint-line); }
 
+/* Toasts — a transient confirmation pinned to the viewport rather than to the
+   page flow (components/Toast.tsx). Kept out of the alert block above on purpose:
+   an alert is a fact about the page you are looking at, a toast is an event you
+   just caused, and they need different positioning, different lifetimes, and
+   different stacking. z-index 300 clears every layer in the app (the drawer
+   overlay 100, the system-message banner 201) so a confirmation cannot be
+   painted underneath the thing it is confirming. The colours are the
+   .alert-success tokens, not a second set that merely looks similar. */
+.toast {
+  position: fixed; right: 20px; bottom: 20px; z-index: 300;
+  display: flex; align-items: center; gap: 10px;
+  max-width: min(420px, calc(100vw - 40px));
+  padding: 11px 12px 11px 14px;
+  background: var(--filled-bg); color: var(--filled-fg);
+  border: 1px solid var(--tint-line); border-radius: var(--radius);
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.20);
+  font-size: 0.8125rem;
+  animation: toast-in 160ms ease-out;
+}
+/* The sentence needs a box of its own. `.toast` is a flex row with a `gap`, so a
+   bare text node beside the icon would become a flex item in its own right and
+   the 10px gap would land between the words rather than around them — the text
+   stays correct and the layout reads as ragged. */
+.toast__text { flex: 1 1 auto; min-width: 0; }
+.toast__icon { flex: none; }
+.toast__close {
+  flex: none; display: inline-flex; align-items: center; justify-content: center;
+  width: 22px; height: 22px; padding: 0; margin: 0;
+  border: 0; border-radius: var(--radius);
+  background: transparent; color: inherit; opacity: 0.7; cursor: pointer;
+}
+.toast__close:hover { opacity: 1; background: rgba(0, 0, 0, 0.07); }
+.toast__close:focus-visible { outline: 2px solid var(--filled-fg); outline-offset: 1px; }
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: none; }
+}
+/* The auto-dismiss timer is JS and keeps running regardless; this only removes
+   the entrance transition, so a reduced-motion user gets the same toast without
+   the movement. */
+@media (prefers-reduced-motion: reduce) {
+  .toast { animation: none; }
+}
+
 /* Badges (status) */
 .badge {
   display: inline-flex; align-items: center; padding: 4px 10px; border-radius: var(--radius);
