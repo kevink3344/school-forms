@@ -12,6 +12,7 @@ import {
   Download,
   KeyRound,
   ChevronDown,
+  ListChecks,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { FORCED_PASSWORD_PATH } from "../pages/account/ChangePasswordPage";
@@ -139,9 +140,12 @@ export function AppShell({ children }: { children: ReactNode }) {
   // override it.
   const showDocuments = useDocumentsEnabled(user?.role);
 
-  // Menu visibility per item, from the `menu_items` setting. Defaults to
-  // "visible to all roles" while loading so items don't flash away.
-  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, Role[]>>(defaultMenuItems);
+  // Menu visibility per item, from the `menu_items` setting. `null` for an item is
+  // the setting's UNRESTRICTED value — visible to every role, including roles
+  // created after it was saved — and it is not the same as an empty list, which
+  // hides the item from everyone. Defaults to `null` per item while loading so
+  // items don't flash away (see lib/settings).
+  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, string[] | null>>(defaultMenuItems);
 
   useEffect(() => {
     let cancelled = false;
@@ -158,9 +162,16 @@ export function AppShell({ children }: { children: ReactNode }) {
     };
   }, []);
 
-  // Whether a given menu item is visible to the current user's role.
-  const menuVisible = (item: MenuItemKey): boolean =>
-    user ? menuItems[item].includes(user.role) : false;
+  // Whether a given menu item is visible to the current user's role. Roles are
+  // admin-managed data, so the stored list is matched against `user.role` by VALUE
+  // — there is no compile-time set of roles to check membership in.
+  const menuVisible = (item: MenuItemKey): boolean => {
+    if (!user) return false;
+    const allowed = menuItems[item];
+    // `null` first: it is the default on every fresh installation, and reading
+    // `.includes` off it would throw rather than hide anything.
+    return allowed === null || allowed.includes(user.role);
+  };
 
   // Close the drawer and the account menu whenever the route changes.
   useEffect(() => {
@@ -303,6 +314,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span className="s-label">Forms</span>
                 </NavLink>
               )}
+              {/* Available Forms — a sibling of the queue, not of Settings, so it
+                  sits with the other form-related links. Gated by its own
+                  `menu_items` key (it has no `documents_link`-style setting). */}
+              {menuVisible("available_forms") && (
+                <NavLink to="/staff/forms" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
+                  <ListChecks size={18} />
+                  <span className="s-label">Available Forms</span>
+                </NavLink>
+              )}
               {/* Schools is no longer a sidebar item — it renders as a
                   collapsible section on the Settings page. */}
               {menuVisible("reports") && (
@@ -326,6 +346,12 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <Download size={18} />
                 <span className="s-label">Submissions</span>
               </NavLink>
+              {menuVisible("available_forms") && (
+                <NavLink to="/staff/forms" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
+                  <ListChecks size={18} />
+                  <span className="s-label">Available Forms</span>
+                </NavLink>
+              )}
               {showDocuments && (
                 <NavLink to="/staff/documents" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <FileStack size={18} />

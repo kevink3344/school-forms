@@ -54,6 +54,20 @@ export const BOOLEAN_COLUMNS: ReadonlySet<string> = new Set([
   "staff_only",
   "is_default",
   "show_on_test_screen",
+  // Added with dbo.roles (Settings → Roles). The Turso DDL declares all seven
+  // BOOLEAN, so `ResultSet.columnTypes` normally reports them and this set is
+  // never consulted — it is the fallback for a missing/older `columnTypes`
+  // entry, and without it a libSQL row would serve `can_edit: 0` where every
+  // TypeScript signature says `boolean`. `0` is falsy so a UI reading it in a
+  // condition would look correct while a `=== false` comparison would not,
+  // which is the shape of bug this set exists to prevent.
+  "can_view",
+  "can_edit",
+  "can_export",
+  "can_report",
+  "school_scoped",
+  "is_admin",
+  "built_in",
 ]);
 
 // -----------------------------------------------------------------------------
@@ -85,6 +99,12 @@ export const TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   // outside this set is served in each engine's raw shape, and the two engines
   // disagree about it.
   "dismissed_at",
+  // Added with dbo.form_access / dbo.form_access_events
+  // (docs/plans/public-private-forms.md). All three are declared DATETIME2 on SQL
+  // Server and TEXT on Turso, so all three must be listed or they read back as a
+  // `Date` on one engine and a string on the other.
+  "requested_at",
+  "decided_at",
 ]);
 
 /**

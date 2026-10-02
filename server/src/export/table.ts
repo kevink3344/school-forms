@@ -9,7 +9,7 @@
 // The behavior here is intentionally identical to the code that used to live in
 // routes/export.ts — moving it must not change the CSV output by a single byte.
 // -----------------------------------------------------------------------------
-import { fieldAccessRoles, type Role } from "../db/schema.js";
+import { fieldAccessRoles } from "../db/schema.js";
 import { listSubmissionValuesBatch, type ExportColumn } from "../db/queries.js";
 import { parseTimestamp } from "../db/client.js";
 
@@ -28,19 +28,29 @@ export interface ExportColumnWithFieldId extends ExportColumn {
 
 // Filter export/report columns for the requesting role. Staff (and School
 // Contacts) see public columns plus any staff-only column whose access roles
-// include their own role (e.g. "staff" / "cdm_contact"). Admins see everything
-// only when they opt into staff-only columns (includeStaffOnly); otherwise they
-// see just the public columns — matching the historical default.
+// include their own role (e.g. "staff" / "cdm_contact"). A staff-only column
+// whose access list is UNSET (`null`) is unrestricted, so every role sees it —
+// including a role an admin creates after the column was written. Admins see
+// everything only when they opt into staff-only columns (includeStaffOnly);
+// otherwise they see just the public columns — matching the historical default.
+//
+// `role` is a plain string, not the `Role` union: roles are data now, so a
+// custom role must be able to flow through here without a cast.
 export function filterColumnsForRole<T extends { staff_only: boolean; roles: string[] | null }>(
   columns: T[],
-  role: Role,
+  role: string,
   includeStaffOnly: boolean
 ): T[] {
   if (role === "admin") {
     return columns.filter((c) => !c.staff_only || includeStaffOnly);
   }
-  // Staff-like: visible when public, or its access roles grant this role.
-  return columns.filter((c) => !c.staff_only || (fieldAccessRoles(c) ?? []).includes(role));
+  // Staff-like: visible when public, or when its access roles grant this role or
+  // are unset (unrestricted).
+  return columns.filter((c) => {
+    if (!c.staff_only) return true;
+    const allowed = fieldAccessRoles(c);
+    return allowed === null || allowed.includes(role);
+  });
 }
 
 // Resolve the numeric field id encoded in a `field_N` key (0 when malformed).
@@ -101,6 +111,74 @@ export function csvEscape(value: unknown): string {
 }
 
 // -----------------------------------------------------------------------------
+// Google Drive document answers.
+//
+// ★ `drive.google.com/file/d/`, NOT `docs.google.com/document/d/` — a Google Forms
+// file UPLOAD stores a binary file in Drive, not a Google Doc, and the two paths
+// are not interchangeable. Measured against the Drive API with this app's own
+// credentials, reading each file's own `webViewLink`:
+//
+//   application/pdf                        -> drive.google.com/file/d/<id>/view
+//   application/vnd.google-apps.document   -> docs.google.com/document/d/<id>/edit
+//
+// ★ The URL template is DUPLICATED from client/src/lib/googleDoc.ts, because the
+// server cannot import from the client and the client cannot import from here.
+// `google-doc-field.test.ts` asserts the two are byte-identical — a hand-copy is
+// acceptable only when a gate diffs it against its source, which is the same
+// technique MENU_ITEM_KEYS <-> MENU_ITEMS and the two dialects' index lists use.
+// -----------------------------------------------------------------------------
+export const GOOGLE_DOC_URL_PREFIX = "https://drive.google.com/file/d/";
+export const GOOGLE_DOC_URL_SUFFIX = "/view";
+
+/** The Docs viewer URL for a Drive document id. */
+export function googleDocUrl(id: string): string {
+  return `${GOOGLE_DOC_URL_PREFIX}${encodeURIComponent(id)}${GOOGLE_DOC_URL_SUFFIX}`;
+}
+
+/**
+ * A google_doc answer as exportable TEXT.
+ *
+ * ★ A CSV cell has no hyperlink concept and (per the plan's Q2 answer) XLSX does
+ * not get one either, so every writer receives the URL as plain text — which a
+ * spreadsheet auto-links on paste. That keeps all three writers identical, which
+ * is the "what you see is what you export" invariant this module exists for.
+ *
+ * ★ Multiple ids are joined with a SPACE, never a comma: a comma is the CSV
+ * delimiter (so it would need quoting) and a comma-joined list of URLs reads as
+ * one URL. A space-joined list is the honest representation — a spreadsheet
+ * links the first and leaves the rest readable.
+ *
+ * A value that is already an absolute http(s) URL is passed through unchanged, so
+ * a form whose script was changed to send a URL does not get double-wrapped.
+ */
+export function googleDocExportText(value: unknown): string {
+  const ids = googleDocIds(value);
+  return ids.map((id) => (isAbsoluteHttpUrl(id) ? id : googleDocUrl(id))).join(" ");
+}
+
+/**
+ * The document ids carried by a google_doc answer, in order.
+ *
+ * Handles BOTH shapes the webhook can produce: an array (a Google Forms
+ * file-upload question) and a bare string (a short-answer question). Splits a
+ * string on whitespace and commas so a hand-typed list works too. Blank entries
+ * are dropped so a trailing empty answer does not render a dead link.
+ */
+export function googleDocIds(value: unknown): string[] {
+  const raw: string[] = Array.isArray(value)
+    ? value.map((v) => String(v))
+    : typeof value === "string"
+      ? value.split(/[\s,]+/)
+      : [];
+  return raw.map((s) => s.trim()).filter((s) => s !== "");
+}
+
+/** True only for an absolute http(s) URL — never for `javascript:` or `data:`. */
+export function isAbsoluteHttpUrl(v: string): boolean {
+  return /^https?:\/\//i.test(v);
+}
+
+// -----------------------------------------------------------------------------
 // Row building
 // -----------------------------------------------------------------------------
 export interface ExportSourceSubmission {
@@ -126,7 +204,13 @@ export async function buildExportRows(
   // silently — every answer column would come back blank with no error at all,
   // a worse failure than the 500 this change fixes.
   const byFieldId = new Map<string, string>();
-  for (const c of columns) byFieldId.set(String(c.field_id), c.key);
+  // The field's control type, keyed the same way, so a google_doc answer can be
+  // rendered as its URL here rather than by each of the three writers.
+  const typeByFieldId = new Map<string, string>();
+  for (const c of columns) {
+    byFieldId.set(String(c.field_id), c.key);
+    typeByFieldId.set(String(c.field_id), c.type);
+  }
 
   const valuesBySubmission = await listSubmissionValuesBatch(submissions.map((s) => s.id));
 
@@ -137,8 +221,15 @@ export async function buildExportRows(
       status: s.status,
     };
     for (const v of valuesBySubmission.get(s.id) ?? []) {
-      const key = byFieldId.get(String(v.field_id));
-      if (key) row[key] = v.value;
+      const idKey = String(v.field_id);
+      const key = byFieldId.get(idKey);
+      if (!key) continue;
+      // ★ Rendered HERE, where the column's type is known, rather than in
+      // `cellText`/`csvEscape`, which receive only the value. A google_doc answer
+      // is stored as the bare id(s); the URL is derived so the export matches what
+      // the grid shows.
+      row[key] =
+        typeByFieldId.get(idKey) === "google_doc" ? googleDocExportText(v.value) : v.value;
     }
     return row;
   });

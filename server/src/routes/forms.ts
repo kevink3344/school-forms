@@ -5,6 +5,7 @@ import {
   getFormWithFields,
   createForm,
   updateForm,
+  listFormCodes,
   execute,
   getOrganizationBySlug,
   getViewColumnsConfig,
@@ -15,9 +16,11 @@ import {
   restoreForm,
 } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
-import { createFormSchema, updateFormSchema } from "../schemas.js";
+import { createFormSchema, updateFormSchema, setVisibilitySchema } from "../schemas.js";
 import { validateDriveFolder } from "../google/docs.js";
 import { FORM_STATUS } from "../db/schema.js";
+import { canAccessForm } from "../access/formAccess.js";
+import { listAvailableFormsFor, setFormVisibility } from "../db/formAccess.js";
 
 export const formsRouter = Router();
 
@@ -77,6 +80,11 @@ formsRouter.get("/:id/public", async (req, res, next) => {
 });
 
 // Admin: list forms (optionally filter by school) — scoped to the admin's org
+//
+// ★ This is the ONE visibility decision for every picker in the app
+// (docs/plans/public-private-forms.md §7.2). The predicate is passed as the
+// viewer so a private form is omitted for an account with no grant — and it is
+// AND-ed onto the org filter inside `listForms`, never substituted for it.
 formsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const isStaff = req.user!.role !== "admin";
@@ -84,7 +92,29 @@ formsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "admin"),
     // (templates are org-wide and shared across schools, so school-scoping
     // would hide forms their school contributes to).
     const schoolId = !isStaff && req.query.school_id ? Number(req.query.school_id) : undefined;
-    const forms = await listForms(schoolId, req.user!.organization_id);
+    const forms = await listForms(schoolId, req.user!.organization_id, req.user!);
+    res.json(forms);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Every PUBLISHED form in the org, each with the caller's relationship to it.
+//
+// ★ NOT a replacement for GET / — that answers "what may I read?" and is what
+// every picker uses; this answers "what exists, and what is my relationship to
+// it?" and is a superset by design (docs/plans/public-private-forms.md §16.4).
+// Two endpoints, two questions.
+//
+// ★ `status = 'published'` is enforced inside `listAvailableFormsFor`. It is the
+// trap: the naive org-only query would put DRAFTS on a page every internal role
+// can open, and drafts are not served publicly anywhere else either.
+formsRouter.get("/available", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    // `Number(...)` at the boundary: the driver returns `bigint` claims as
+    // STRINGS while the query layer declares `number`. See the note in
+    // routes/systemMessages.ts.
+    const forms = await listAvailableFormsFor(req.user!, Number(req.user!.organization_id));
     res.json(forms);
   } catch (err) {
     next(err);
@@ -153,11 +183,33 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
       return;
     }
+    // Prefixes must be unique across every form: `UX_forms_code` is a filtered
+    // unique index, so a collision would otherwise abort the UPDATE and reach the
+    // client as a 500 naming an index. Check here first so the designer can show
+    // the sentence a reader can act on. Skipped when the value is unchanged, so a
+    // plain title edit never pays for the lookup.
+    const nextCode = parsed.data.code;
+    if (nextCode && nextCode !== (existing.code ?? "").toUpperCase()) {
+      const clash = (await listFormCodes()).find(
+        (f) => f.id !== id && f.code.toUpperCase() === nextCode
+      );
+      if (clash) {
+        res.status(409).json({
+          error: `Prefix "${nextCode}" is already used by another form. Submission ids have to be unique across forms, so pick a different prefix.`,
+        });
+        return;
+      }
+    }
     const updated = await updateForm(id, {
       title: parsed.data.title,
       description: parsed.data.description,
       status: parsed.data.status,
       fields: parsed.data.fields,
+      // Only a real prefix is forwarded. `updateFormSchema` sanitizes the field
+      // and turns a blank one into undefined, and `updateForm` reads an absent
+      // key as "leave the stored prefix alone" — so clearing the box in the
+      // designer is a no-op rather than a re-prefix of future ids.
+      ...(nextCode ? { code: nextCode } : {}),
       // Only pass `doc_folder_id` when actually supplied so an omitted key can
       // never clear the stored value (nullable clear semantics in updateForm).
       ...(Object.prototype.hasOwnProperty.call(parsed.data, "doc_folder_id")
@@ -303,6 +355,43 @@ formsRouter.patch("/:id/status", requireAuth, requireRoles("admin"), async (req,
   }
 });
 
+// Admin: set a form's visibility (public | private).
+//
+// ★ A DEDICATED endpoint rather than a field on PUT /:id, for two reasons
+// (docs/plans/public-private-forms.md §8): PUT /:id uses
+// `hasOwnProperty` to tell "absent" from "clear", so an optional visibility on it
+// would be a third state in an endpoint that already has two; and switching to
+// private has a SIDE EFFECT ON ROWS IN A DIFFERENT TABLE (the grandfather
+// backfill), which deserves its own endpoint and its own test rather than riding
+// along on a form-editing call.
+//
+// The response reports how many accounts were grandfathered, so the admin's
+// confirmation can say so — a number that is otherwise guessed at, and one that
+// is wrong in the direction of locking someone out.
+formsRouter.patch("/:id/visibility", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const parsed = setVisibilitySchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const result = await setFormVisibility({
+      formId: id,
+      organizationId: Number(req.user!.organization_id),
+      visibility: parsed.data.visibility,
+      actorId: req.user!.id,
+    });
+    if (!result.found) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    res.json({ ...(await getFormWithFields(id, req.user!.organization_id)), granted: result.granted });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // Admin: delete an UNUSED form (zero submissions). Refuses with 409 when the
 // form has any submission history: submissions.form_id is ON DELETE CASCADE, so
 // a naive delete would silently destroy every submission (and its values,
@@ -351,6 +440,13 @@ formsRouter.get("/:id/columns", requireAuth, requireRoles("staff", "cdm_contact"
     const existing = await getFormWithFields(id, req.user!.organization_id);
     if (!existing) {
       res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    // ★ 403 for an action on a thing you may not read, matching "Forbidden:
+    // submission belongs to another school". The 404 above comes first so a
+    // missing form and a locked one are distinguishable to the caller.
+    if (!(await canAccessForm(req.user!, id))) {
+      res.status(403).json({ error: "Forbidden: no access to this form" });
       return;
     }
     res.json(await getViewColumnsConfig(id, req.user!.id));

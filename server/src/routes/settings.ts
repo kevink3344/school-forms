@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { getSetting, setSetting } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
-import { ROLES, type Role } from "../db/schema.js";
+import { getRolesCache } from "../db/roles-cache.js";
 import { env } from "../config/env.js";
 import { notifySlack } from "../notify/slack.js";
 
@@ -10,10 +10,11 @@ export const settingsRouter = Router();
 export const DOCUMENTS_LINK_KEY = "documents_link";
 
 // Menu visibility — which sidebar items are shown, by role. Stored as a JSON
-// object of `{ [menuKey]: Role[] }`, e.g. `{"forms":["admin","staff"]}`.
-// A missing key (or a null/blank setting) means "visible to every role", so
-// legacy rows keep working. An explicitly empty array hides that item for all.
-// Unknown keys are ignored, which is what lets a row written by an earlier
+// object of `{ [menuKey]: string[] | null }`, e.g. `{"forms":["admin","staff"]}`.
+// A missing key (or a null/blank setting, or an explicit null) means "visible to
+// every role", so legacy rows keep working and a role created later is included
+// rather than silently excluded. An explicitly empty array hides that item for
+// all. Unknown keys are ignored, which is what lets a row written by an earlier
 // version — still carrying the retired `documents` and `schools` keys — keep
 // parsing cleanly instead of needing a migration.
 export const MENU_ITEMS_KEY = "menu_items";
@@ -25,7 +26,7 @@ export const MENU_ITEMS_KEY = "menu_items";
 // Documents Link panel), which also gates the /api/documents endpoints. Having it
 // in both places meant a hidden `menu_items.documents` silently overrode a visible
 // `documents_link`, so the admin's Documents Link toggles appeared to do nothing.
-export const MENU_ITEM_KEYS = ["forms", "reports"] as const;
+export const MENU_ITEM_KEYS = ["forms", "reports", "available_forms"] as const;
 export type MenuItemKey = (typeof MENU_ITEM_KEYS)[number];
 
 // Allow-list of keys that can be read/written. Never let an arbitrary key hit
@@ -55,27 +56,43 @@ function defaultValue(key: string): string {
     return "We are performing scheduled maintenance. Please try again shortly.";
   }
   if (key === DOCUMENTS_LINK_KEY) {
-    return JSON.stringify([...ROLES]); // visible to every current role by default
+    // NULL means UNRESTRICTED (see parseDocumentRoles), which is the historical
+    // "visible to every role" default. Materialising [...ROLES] here instead
+    // would freeze the default at the roles that exist today, so an admin-created
+    // role would not see the Documents link in an untouched installation.
+    return JSON.stringify(null);
   }
   if (key === MENU_ITEMS_KEY) {
-    // Every menu item visible to every role by default.
+    // Every menu item visible to everyone by default (null = unrestricted).
     return JSON.stringify(defaultMenuItems());
   }
   return "select"; // login_mode
 }
 
-// The default menu map: every toggleable item visible to every current role.
-export function defaultMenuItems(): Record<MenuItemKey, Role[]> {
-  const out = {} as Record<MenuItemKey, Role[]>;
-  for (const k of MENU_ITEM_KEYS) out[k] = [...ROLES];
+// The default menu map. `null` per item means "visible to everyone", including
+// roles created later — NOT `[...ROLES]`, which would bake in today's list.
+export function defaultMenuItems(): Record<MenuItemKey, string[] | null> {
+  const out = {} as Record<MenuItemKey, string[] | null>;
+  for (const k of MENU_ITEM_KEYS) out[k] = null;
   return out;
 }
 
-// Parse a stored menu_items value into a full map. A missing key, a null/blank
-// setting, or an unparsable value falls back to "visible to every role" for that
-// item so legacy rows behave as before. An explicitly empty array is preserved
-// (hidden for everyone). Unknown keys are ignored; unknown roles are dropped.
-export function parseMenuItems(raw: string | null | undefined): Record<MenuItemKey, Role[]> {
+// Parse a stored menu_items value into a full map.
+//
+// A missing key, a null/blank setting, or an unparsable value falls back to
+// "visible to every role" for that item so legacy rows behave as before. An
+// explicitly empty array is preserved (hidden for everyone).
+//
+// ★ Unknown roles are now PRESERVED rather than dropped. The old
+// `ROLES.filter((r) => v.includes(r))` meant a stored row written before a role
+// existed silently dropped that role, while a *missing* key defaulted to
+// "everyone" and included it — so the same configuration behaved differently
+// depending on whether anyone had ever opened the Menu Settings panel. The write
+// path is validated; this normalisation was a second, weaker copy of that
+// validation, and removing it removes the asymmetry.
+export function parseMenuItems(
+  raw: string | null | undefined
+): Record<MenuItemKey, string[] | null> {
   const out = defaultMenuItems();
   if (raw === null || raw === undefined || raw.trim() === "") return out;
   let parsed: unknown;
@@ -88,43 +105,89 @@ export function parseMenuItems(raw: string | null | undefined): Record<MenuItemK
   const obj = parsed as Record<string, unknown>;
   for (const k of MENU_ITEM_KEYS) {
     const v = obj[k];
-    if (v === undefined) continue; // missing → default (all roles)
+    if (v === undefined) continue; // missing → default (everyone)
     if (!Array.isArray(v)) continue;
-    out[k] = (ROLES as readonly Role[]).filter((r) => v.includes(r));
+    out[k] = v.map(String).filter(Boolean);
   }
   return out;
 }
 
-// Whether a given menu item is visible to a role.
+// Whether a given menu item is visible to a role. `null` (unrestricted) means
+// every role sees it, including a role an admin creates later.
 export function menuItemVisibleFor(
   raw: string | null | undefined,
   item: MenuItemKey,
-  role: Role
+  role: string
 ): boolean {
-  return parseMenuItems(raw)[item].includes(role);
+  const allowed = parseMenuItems(raw)[item];
+  return allowed === null || allowed.includes(role);
 }
 
-// Parse a stored documents_link value (a JSON role array) into a Role[]. A null,
-// undefined, or blank value defaults to every current role so legacy rows behave
-// as before. An explicitly empty array means "hidden for everyone" (master off).
-export function parseDocumentRoles(raw: string | null | undefined): Role[] {
-  if (raw === null || raw === undefined || raw.trim() === "") return [...ROLES];
+// Parse a stored documents_link value (a JSON role array) into `string[] | null`.
+//
+// ★ `null` means UNRESTRICTED — every role, including ones that do not exist
+// yet. A null, undefined or blank value returns the sentinel rather than
+// `[...ROLES]`; the latter froze the default at the roles present when the value
+// was written. An explicitly empty array means "hidden for everyone" and is kept
+// distinct. Unknown role keys are preserved so a stored row is never silently
+// rewritten.
+export function parseDocumentRoles(raw: string | null | undefined): string[] | null {
+  if (raw === null || raw === undefined || raw.trim() === "") return null;
   try {
     const parsed = JSON.parse(raw);
+    // An explicit `null` in the stored JSON is the same sentinel.
+    if (parsed === null) return null;
     if (Array.isArray(parsed)) {
-      return parsed.filter(
-        (r): r is Role => typeof r === "string" && (ROLES as readonly string[]).includes(r)
-      );
+      return parsed.filter((r): r is string => typeof r === "string" && r !== "");
     }
   } catch {
     // fall through to the default
   }
-  return [...ROLES];
+  return null;
 }
 
 // Decide whether a given role currently sees the Documents link.
-export function documentsEnabledFor(raw: string | null | undefined, role: Role): boolean {
-  return parseDocumentRoles(raw).includes(role);
+export function documentsEnabledFor(raw: string | null | undefined, role: string): boolean {
+  const allowed = parseDocumentRoles(raw);
+  return allowed === null || allowed.includes(role);
+}
+
+// Validate a submitted array of role keys against the live catalog.
+//
+// ★ This asks the DATABASE, not a constant. The old check was
+// `(ROLES as readonly string[]).includes(r)` — membership in the three built-in
+// keys — so the moment an admin could create a role, the write path rejected it.
+// A custom role existed in the catalog, could be assigned to a user, and could
+// not be added to the Documents Link or Menu settings: the panel's own control
+// would 400 with a message listing three keys the admin had never created one of.
+//
+// Unknown keys are REFUSED rather than stored. The alternative — accept anything,
+// on the grounds that a dangling key fails safe (every reader treats an unknown
+// key as absent, so it narrows access) — trades an immediate, actionable error for
+// a silent no-op the admin discovers later as "the toggle does nothing". Deletion
+// is where a dangling key becomes a real hazard (see `roleUsage`), and refusing it
+// here is what keeps that census meaningful.
+//
+// Lookup is case-insensitive and the SUBMITTED spelling is preserved, because
+// that is the spelling every other store holds; normalising here would silently
+// rename an existing grant.
+async function validateRoleKeys(
+  values: unknown[]
+): Promise<{ ok: true; keys: string[] } | { ok: false; error: string }> {
+  const catalog = await getRolesCache();
+  const out: string[] = [];
+  for (const value of values) {
+    if (typeof value !== "string" || value.trim() === "") {
+      return { ok: false, error: "roles must be an array of non-empty strings" };
+    }
+    const key = value.trim();
+    if (!catalog.has(key.toLowerCase())) {
+      const known = [...catalog.keys()].sort().join(", ");
+      return { ok: false, error: `unknown role "${key}". Known roles: ${known}` };
+    }
+    if (!out.includes(key)) out.push(key);
+  }
+  return { ok: true, keys: out };
 }
 
 // -----------------------------------------------------------------------------
@@ -177,22 +240,34 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
 
     let effective = value.trim();
     if (key === DOCUMENTS_LINK_KEY) {
-      // Validate + normalize the JSON role array (dedupe, canonical role order).
+      // Two accepted shapes:
+      //   `null`            → UNRESTRICTED (every role, including future ones)
+      //   ["admin","staff"] → exactly those roles
+      // An empty array is a third, distinct meaning: hidden for everyone.
       let roles: unknown;
       try {
         roles = JSON.parse(effective);
       } catch {
-        res.status(400).json({ error: "value must be a JSON array of roles" });
+        res.status(400).json({ error: "value must be a JSON array of roles, or null" });
         return;
       }
-      if (!Array.isArray(roles) || roles.some((r) => typeof r !== "string" || !(ROLES as readonly string[]).includes(r))) {
-        res.status(400).json({ error: `value must be a JSON array of roles: ${JSON.stringify(ROLES)}` });
+      if (roles === null) {
+        effective = JSON.stringify(null);
+      } else if (!Array.isArray(roles)) {
+        res.status(400).json({ error: "value must be a JSON array of roles, or null" });
         return;
+      } else {
+        const checked = await validateRoleKeys(roles);
+        if (!checked.ok) {
+          res.status(400).json({ error: checked.error });
+          return;
+        }
+        effective = JSON.stringify(checked.keys);
       }
-      effective = JSON.stringify(ROLES.filter((r) => (roles as string[]).includes(r)));
     } else if (key === MENU_ITEMS_KEY) {
-      // Validate + normalize the JSON menu map. Unknown keys are dropped and
-      // unknown roles are filtered out; each value must be an array of roles.
+      // A JSON object of `{ [menuKey]: string[] | null }`. Unknown menu KEYS are
+      // dropped (MENU_ITEM_KEYS is the schema); unknown ROLES are rejected with a
+      // message naming the ones that exist.
       let parsed: unknown;
       try {
         parsed = JSON.parse(effective);
@@ -205,15 +280,26 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
         return;
       }
       const obj = parsed as Record<string, unknown>;
-      const normalized: Record<string, Role[]> = {};
+      const normalized: Record<string, string[] | null> = {};
       for (const k of MENU_ITEM_KEYS) {
         const v = obj[k];
         if (v === undefined) continue;
-        if (!Array.isArray(v) || v.some((r) => typeof r !== "string" || !(ROLES as readonly string[]).includes(r))) {
-          res.status(400).json({ error: `menu item "${k}" must be an array of roles: ${JSON.stringify(ROLES)}` });
+        // `null` is the unrestricted sentinel — stored explicitly so the intent
+        // is recorded, rather than omitted and re-derived from a default.
+        if (v === null) {
+          normalized[k] = null;
+          continue;
+        }
+        if (!Array.isArray(v)) {
+          res.status(400).json({ error: `menu item "${k}" must be an array of roles, or null` });
           return;
         }
-        normalized[k] = ROLES.filter((r) => (v as string[]).includes(r));
+        const checked = await validateRoleKeys(v);
+        if (!checked.ok) {
+          res.status(400).json({ error: `menu item "${k}": ${checked.error}` });
+          return;
+        }
+        normalized[k] = checked.keys;
       }
       effective = JSON.stringify(normalized);
     } else if (key === "login_mode") {

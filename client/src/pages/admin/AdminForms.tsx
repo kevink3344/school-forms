@@ -288,7 +288,24 @@ export default function AdminForms() {
                 <tr key={f.id} style={{ opacity: f.status === "archived" ? 0.6 : undefined }}>
                   <td className="cell-strong" data-label="Title">
                     <FormIdBadge id={f.id} />
-                    {f.title}
+                    {/* The title is the row's link into the designer, matching the
+                        grids elsewhere (SubmissionsGrid, WebhookLog,
+                        StaffDocuments), which all wrap the name in
+                        `<Link className="link-name">`.
+
+                        A real <Link>, not a click handler on the <tr>: the row also
+                        carries Publish / Archive / Delete, so a row-wide handler
+                        would fire when someone was aiming at a button — and a
+                        `<td onClick>` is not keyboard-reachable, so the title would
+                        be reachable by mouse only.
+
+                        The badge stays OUTSIDE the anchor so its own "Form ID n"
+                        tooltip and chip styling are not underlined on hover; it is
+                        the number an Apps Script is configured with, not part of
+                        the link text. */}
+                    <Link className="link-name" to={`/admin/forms/${f.id}`}>
+                      {f.title}
+                    </Link>
                   </td>
                   <td data-label="Status">
                     <FormStatusBadge status={f.status} />

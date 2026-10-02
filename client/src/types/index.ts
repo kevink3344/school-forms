@@ -1,6 +1,24 @@
 // Shared types mirroring the backend API contract (server/src/db/schema.ts)
 
-export type Role = "admin" | "staff" | "cdm_contact";
+/**
+ * A role key.
+ *
+ * This is `string`, NOT a union of the roles this installation happens to ship
+ * with, because roles are admin-managed DATA: `dbo.roles` is the catalog and an
+ * administrator can add a key from Settings → Roles at any time. A union would
+ * be a claim baked in at module load, and it would make every new role fail to
+ * compile rather than simply work.
+ *
+ * The consequence to keep in mind while reading this codebase: **a role literal
+ * must never decide what an account may do.** `user.role === "admin"` is only
+ * true for the role whose key literally is "admin", which answers "no" for a
+ * role an administrator created and granted administrator power. Authority comes
+ * from `User.capabilities`, which the server resolves from the catalog. A literal
+ * is legitimate only for DISPLAY — ordering the built-ins, or choosing a fallback
+ * badge for a role with none stored.
+ */
+export type Role = string;
+
 export type FormStatus = "draft" | "published" | "archived";
 export type SubmissionStatus = "submitted" | "in_review" | "flagged" | "completed";
 export type FieldType =
@@ -11,7 +29,8 @@ export type FieldType =
   | "select"
   | "checkbox"
   | "radio"
-  | "email";
+  | "email"
+  | "google_doc";
 
 export interface School {
   id: number;
@@ -68,6 +87,94 @@ export interface User {
   // quietly become a permanent one. Cleared by a successful password change.
   // See docs/plans/password-recovery.md.
   must_change_password: boolean;
+  // What this account's role permits. RESOLVED BY THE SERVER from the role
+  // catalog — never derived on the client from `role`, because the client's copy
+  // was the one that decided where a signed-in account LANDED: a custom role sent
+  // the browser to /login and the router bounced it back, an infinite loop.
+  capabilities: Capabilities;
+}
+
+/**
+ * The authority an account's role carries, resolved server-side.
+ *
+ * These are the ONLY sanctioned inputs to an authorization decision in the
+ * client. Note the two that are not actions: `is_admin` is the broad grant
+ * (users, schools, form authoring, settings) and `school_scoped` narrows every
+ * read to the account's own school.
+ *
+ * An unknown role resolves to the restrictive answer for both, so a typo in a
+ * role key yields an account that can do nothing rather than one that can do
+ * everything.
+ */
+export interface Capabilities {
+  view: boolean;
+  edit: boolean;
+  export: boolean;
+  report: boolean;
+  is_admin: boolean;
+  school_scoped: boolean;
+}
+
+/**
+ * A row of the role catalog (`dbo.roles`), as returned by the /api/roles
+ * endpoints — a mirror of `RoleRow` in server/src/db/schema.ts.
+ *
+ * `built_in` means the boot ladder seeds this row and re-derives its six
+ * security flags at every start, so its capabilities are not editable and it is
+ * never deletable (an installation with zero administrators must not be able to
+ * delete `admin`). `label`, `description` and `badge` are display-only, carry no
+ * authority, and ARE editable on a built-in.
+ *
+ * `badge` holds a bare CSS suffix ("orange", "teal", …), not a class name; the
+ * client renders `badge badge-${badge}`. It is `null` on every seeded row — the
+ * seed never sets it — so a reader must have a fallback rather than assuming a
+ * stored value.
+ */
+export interface RoleRow {
+  id: number;
+  role_key: string;
+  label: string;
+  description: string | null;
+  badge: string | null;
+  can_view: boolean;
+  can_edit: boolean;
+  can_export: boolean;
+  can_report: boolean;
+  school_scoped: boolean;
+  is_admin: boolean;
+  built_in: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Where a role is referenced, counted across all five channels.
+ *
+ * Counted rather than merely detected, because "in use" without a number is
+ * unactionable — an administrator cannot tell a stale experiment from 40 live
+ * accounts. It exists because the foreign key covers only the first of the five:
+ * form-field access lists, message audiences, menu items and the Documents Link
+ * setting each store role keys inside JSON, with no constraint behind them.
+ */
+export interface RoleUsage {
+  users: number;
+  form_fields: number;
+  system_messages: number;
+  menu_items: number;
+  documents_link: number;
+}
+
+/** Response of GET /api/roles/:key/usage (administrator-only). */
+export interface RoleUsageReport {
+  role_key: string;
+  built_in: boolean;
+  usage: RoleUsage;
+  total: number;
+  // The sentence a DELETE would refuse with, or `null` when nothing references
+  // the role. Composed by the SAME helper the 409 uses, so a disabled Delete
+  // button and the error behind it cannot disagree. Render this rather than
+  // re-writing the wording in the browser.
+  usage_message: string | null;
 }
 
 // Login modes selectable in Settings → Login Mode (and stored in app_settings).
@@ -151,11 +258,103 @@ export interface Form {
   // Optional link to the source Google Form this form mirrors. Shown to staff so
   // they can open it. Purely informational — no API integration.
   google_form_url: string | null;
+  // Who may READ this form's results (docs/plans/public-private-forms.md).
+  // `private` hides it from the organization's School Contacts unless they hold
+  // an approved grant; administrators and staff are unaffected either way.
+  visibility: FormVisibility;
   // Number of submissions attached to this form. Present on list responses so
   // the admin Forms list can gate the Delete action (used forms can't be deleted).
   submission_count?: number;
   created_at: string;
   updated_at: string;
+}
+
+// Who may read a form's results. `public` is the default and the value of every
+// form that predates the column.
+export type FormVisibility = "public" | "private";
+
+// The caller's relationship to a form, as returned by GET /api/forms/available.
+//
+// ★ DERIVED by the server from the same predicate every other query uses — the
+// client must never compute this from `visibility`, or there are two visibility
+// implementations and they will disagree.
+export type FormAccess = "granted" | "none" | "pending" | "denied";
+
+/** One row of the Available Forms page. */
+export interface AvailableForm {
+  id: number;
+  title: string;
+  description: string | null;
+  code: string | null;
+  access: FormAccess;
+  /** Only on a granted row: why it is readable. */
+  reason?: "role" | "public" | "grant";
+  requested_at?: string;
+  decided_at?: string | null;
+  note?: string | null;
+  /** The latest audit event, so the UI can say "declined" vs "access removed". */
+  last_event?: string | null;
+}
+
+/** One row of the admin access-request queue. */
+export interface AccessRequestRow {
+  user_id: number;
+  form_id: number;
+  status: "pending" | "approved" | "denied";
+  source: string;
+  requested_at: string;
+  decided_at: string | null;
+  decided_by: number | null;
+  note: string | null;
+  user_name: string | null;
+  user_email: string | null;
+  form_title: string | null;
+  form_code: string | null;
+  school_name: string | null;
+}
+
+/** One audit event in an account's history for a form. */
+export interface AccessEventRow {
+  id: number;
+  event: string;
+  actor_id: number | null;
+  actor_name: string | null;
+  note: string | null;
+  created_at: string;
+}
+
+/** One account's relationship to a form, with its full history. */
+export interface AccessGrantRow {
+  user_id: number;
+  user_name: string | null;
+  user_email: string | null;
+  school_name: string | null;
+  status: "pending" | "approved" | "denied" | null;
+  source: string | null;
+  decided_at: string | null;
+  note: string | null;
+  events: AccessEventRow[];
+}
+
+/**
+ * One access row belonging to ONE account, for the admin's Edit User drawer.
+ *
+ * ★ This is "grants that exist for this account", not "forms this person can
+ * read". The two differ for a staff or admin account, which is exempt by rule
+ * and normally holds no row at all — so its list is legitimately empty.
+ */
+export interface UserAccessRow {
+  form_id: number;
+  form_title: string | null;
+  form_code: string | null;
+  form_visibility: FormVisibility | null;
+  status: "pending" | "approved" | "denied";
+  source: string;
+  requested_at: string;
+  decided_at: string | null;
+  decided_by: number | null;
+  note: string | null;
+  last_event: string | null;
 }
 
 export interface FormWithFields extends Form {
@@ -511,20 +710,22 @@ export interface WebhookEventQuery {
  * serializing).
  *
  * `audience` is the API contract; the DB column behind it is a JSON string.
- * It is ALWAYS an array on the wire — never null. All four server readers go
- * through `toSystemMessage`, which runs the stored value through
- * `messageAudienceRoles()`, and that maps a NULL/absent/corrupt column to
- * every current role. So the three states are:
- *   - all roles (`["admin","staff","cdm_contact"]`) → everyone sees it. This is
- *     what a message authored before audiences existed reads back as, and it is
- *     deliberately indistinguishable from an admin explicitly selecting all
- *     three chips.
- *   - `[]` → nobody sees it. The only way to write a message that is authored
- *     but not delivered.
+ * Every server reader goes through `toSystemMessage`, which runs the stored value
+ * through `messageAudienceRoles()`. So the three states are:
+ *   - `null` → EVERYONE, including roles created later. This is a NULL column
+ *     (or an absent/corrupt one), and it is what a message authored before
+ *     audiences existed reads back as.
+ *   - `[]` → nobody sees it. The only way to write a message that is authored but
+ *     not delivered.
  *   - a subset → those roles, and only those.
- * `audience.length` is therefore the only thing that separates these states:
- * empty means nobody, and a full list means everyone — never treat a non-empty
- * array as "targeted", because "all roles" arrives that way too.
+ *
+ * ★ `null` is load-bearing and must NOT be flattened into the full roster of
+ * built-in roles. `messageAudienceRoles` used to return the roles that existed
+ * when it ran, which froze an unset audience at that moment: a role created
+ * afterwards could not see a message nobody had narrowed. Checking
+ * `audience !== null && audience.includes(role)` is the correct test;
+ * `audience.length` cannot distinguish "everyone" from "nobody" once null is in
+ * play, so never use a length as the test.
  */
 export interface SystemMessage {
   id: number;
@@ -532,7 +733,7 @@ export interface SystemMessage {
   title: string;
   body: string;
   active: boolean;
-  audience: string[];
+  audience: string[] | null;
   created_by: number | null;
   created_at: string;
   updated_at: string;

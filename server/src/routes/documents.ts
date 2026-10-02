@@ -1,5 +1,6 @@
 import { Router, type Request, type Response, type NextFunction } from "express";
 import { requireAuth, requireRoles, verifyAccessToken, scopedSchoolId } from "../auth.js";
+import type { FormViewer } from "../access/formAccess.js";
 import { listDocuments, getDocumentById, listDocumentsBySubmission } from "../db/documents.js";
 import { generateDocument, regenerateDocument, getDocumentPdf } from "../google/docs.js";
 import { getSetting } from "../db/queries.js";
@@ -27,15 +28,22 @@ export async function documentsEnabled(req: Request, res: Response, next: NextFu
 // role is narrowed further to its own school when it has one. Reading a document
 // therefore uses the same scope as listing documents, so a row that appears in
 // the list can always be opened.
+//
+// ★ The VIEWER travels with the scope for the same reason: the private-form rule
+// is applied inside `listDocuments`/`getDocumentById` from this object, so the
+// list and the by-id read narrow identically and a listed document always opens
+// (docs/plans/public-private-forms.md §7.2).
 function documentScope(user: {
   role: string;
   school_id: number | null;
   organization_id: number | null;
-}): { schoolId?: number; organizationId: number | null } {
+  id: number;
+}): { schoolId?: number; organizationId: number | null; viewer: FormViewer } {
   const schoolId = scopedSchoolId(user);
-  return schoolId === undefined
+  const base = schoolId === undefined
     ? { organizationId: user.organization_id }
     : { schoolId, organizationId: user.organization_id };
+  return { ...base, viewer: user };
 }
 
 // -----------------------------------------------------------------------------

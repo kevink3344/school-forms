@@ -2,8 +2,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, ApiError } from "../../lib/api";
 import { ChevronDown, Check, Copy, KeyRound, Plus, Webhook, X } from "lucide-react";
-import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, ROLES, audienceLabel, type MenuItemKey } from "../../lib/settings";
-import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, School, SystemMessage, WebhookEventSummary } from "../../types";
+import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, audienceLabel, type MenuItemKey } from "../../lib/settings";
+import { BADGE_CHOICES, badgeClass, roleBadgeFor, roleLabelFor, useRoleCatalog } from "../../lib/roles";
+import type { AccessGrantRow, AccessRequestRow, AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, RoleRow, RoleUsageReport, School, SystemMessage, UserAccessRow, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import { refreshSystemMessages } from "../../components/SystemMessageBar";
@@ -44,11 +45,12 @@ function Field({
 // A toggle switch component built from a styled checkbox — now shared (see
 // components/Toggle.tsx) so the filter toolbars do not grow a second copy.
 
-function roleBadge(role: Role): { cls: string; label: string } {
-  if (role === "admin") return { cls: "badge-orange", label: "Admin" };
-  if (role === "cdm_contact") return { cls: "badge-teal", label: "School Contact" };
-  return { cls: "badge-blue", label: "Staff" };
-}
+// Role labels and badges come from the catalog (lib/roles.ts), not from a chain of
+// `if (role === …)` comparisons here. The chain that used to live at this spot
+// labelled every role it did not recognise "Staff" and gave it staff's badge, so a
+// role an administrator created appeared in the Users grid as a second Staff
+// account with nothing to tell them apart — and it could not follow a rename, which
+// is the whole point of the Roles panel further down this page.
 
 // ---------------------------------------------------------------------------
 // System Messages (Settings → System Messages)
@@ -58,7 +60,9 @@ interface SysMsgFormState {
   title: string;
   body: string;
   active: boolean;
-  audience: string[]; // the roles that may see it
+  // The roles that may see it. `null` means everyone, INCLUDING roles created
+  // later — see `emptySysMsgForm`.
+  audience: string[] | null;
 }
 
 // A factory rather than a shared constant: the audience is an array, and a
@@ -76,36 +80,51 @@ function emptySysMsgForm(): SysMsgFormState {
     // opposite (`active` defaults to false on create); this form always sends
     // the field explicitly, so that default is never reached from the UI.
     active: true,
-    // Every role, which is the same thing a message authored before audiences
-    // existed reads back as.
-    audience: [...ROLES],
+    // Everyone, INCLUDING roles that do not exist yet. `null` is what the stored
+    // column uses for that, and it is deliberately not the built-in roster: the
+    // built-ins are a list frozen at the moment this form was opened, so an
+    // administrator who created a role afterwards would find it excluded from a
+    // message nobody had actually narrowed.
+    audience: null,
   };
 }
 
 /**
- * The Target Audience control: one chip per role, plus a bulk "+ Add all" chip
- * that appears only while a role is still unselected.
+ * The Target Audience control: one chip per role in the catalog, plus an
+ * "Everyone" chip for the unset (null) audience.
  *
- * There are only two states a role can be in — in the audience or not — so the
- * control is exactly the roster. That matters because the server distinguishes
- * three stored values: a NULL column (every role), an explicit list, and `[]`
- * (nobody). "No chip selected" is the only way to author `[]`, which is why
- * deselecting the last chip must send an empty ARRAY and never `null` — `null`
- * broadcasts to everyone, the precise opposite of what the admin just asked for.
+ * There are three stored states and all three are reachable here:
+ *   - `null` — everyone, including roles created later. That is what the
+ *     "Everyone" chip sets, and the reason it is a distinct chip rather than
+ *     "all the roles happen to be selected". A full roster and an unset audience
+ *     are NOT the same value, and the difference is invisible until someone adds
+ *     a role.
+ *   - `[]` — nobody. Deselecting the last role chip is how it is authored, which
+ *     is why that path must send an empty ARRAY and never `null`: `null`
+ *     broadcasts to everyone, the precise opposite of what the admin just asked
+ *     for.
+ *   - a list — exactly those.
  *
- * There is deliberately no "unset" state in the UI: on the wire `null` and "all
- * three roles" are indistinguishable (the server normalises a NULL column to the
- * full roster before serialising), so offering both would be offering a choice
- * that does not exist.
+ * Clicking a pressed role chip while the audience is `null` therefore materialises
+ * the explicit list of the OTHER roles rather than writing `null` back, which
+ * would make the click look like it did nothing.
+ *
+ * The chips are the catalog, so a role an administrator created appears here on
+ * its own. While the catalog is loading there is exactly one honest thing to
+ * render — that it is loading — rather than a built-in roster that would silently
+ * omit it.
  */
 function AudienceChips({
   value,
   onChange,
 }: {
-  value: string[];
-  onChange: (next: string[]) => void;
+  value: string[] | null;
+  onChange: (next: string[] | null) => void;
 }) {
-  const allSelected = ROLES.every((r) => value.includes(r));
+  const { roles, error } = useRoleCatalog();
+  const keys = roles.map((r) => r.role_key);
+  const effective = value ?? keys;
+  const isEveryone = value === null;
   const chip = (has: boolean): React.CSSProperties => ({
     cursor: "pointer",
     fontSize: "0.8125rem",
@@ -121,19 +140,31 @@ function AudienceChips({
     border: "1px solid var(--accent)",
   });
 
+  if (roles.length === 0) {
+    return (
+      <span style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+        {error ? `Could not load the role list: ${error}` : "Loading roles…"}
+      </span>
+    );
+  }
+
   return (
     <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
-      {ROLES.map((role) => {
-        const has = value.includes(role);
-        const label = roleBadge(role).label;
+      {roles.map((row) => {
+        const has = effective.includes(row.role_key);
+        const label = row.label;
         return (
           <button
-            key={role}
+            key={row.role_key}
             type="button"
             aria-pressed={has}
             title={has ? `Remove ${label} from this message` : `Show this message to ${label}`}
             onClick={() =>
-              onChange(has ? value.filter((r) => r !== role) : [...value, role])
+              onChange(
+                has
+                  ? effective.filter((r) => r !== row.role_key)
+                  : [...effective, row.role_key]
+              )
             }
             style={chip(has)}
           >
@@ -142,18 +173,16 @@ function AudienceChips({
           </button>
         );
       })}
-      {!allSelected && (
-        <button
-          type="button"
-          aria-pressed={false}
-          title="Show this message to every role"
-          onClick={() => onChange([...ROLES])}
-          style={chip(false)}
-        >
-          <Plus size={14} />
-          <span>Add all</span>
-        </button>
-      )}
+      <button
+        type="button"
+        aria-pressed={isEveryone}
+        title="Everyone, including any role added later — stored as an unset audience"
+        onClick={() => onChange(null)}
+        style={chip(isEveryone)}
+      >
+        {isEveryone ? <Check size={14} /> : <Plus size={14} />}
+        <span>Everyone</span>
+      </button>
     </div>
   );
 }
@@ -262,6 +291,108 @@ const EMPTY_ORG: OrgFormState = {
   active: true,
 };
 
+// ---------------------------------------------------------------------------
+// Roles (Settings → Roles)
+// ---------------------------------------------------------------------------
+interface RoleFormState {
+  // The role_key being edited, or null when creating. Also the flag the save
+  // handler branches on: a CREATE sends a body shape an UPDATE must not (and vice
+  // versa), so the mode is carried in the state rather than inferred.
+  editing: string | null;
+  role_key: string;
+  label: string;
+  description: string;
+  badge: string;
+  can_view: boolean;
+  can_edit: boolean;
+  school_scoped: boolean;
+  is_admin: boolean;
+  // Carried so the form can disable the four capability controls rather than let
+  // an admin change them and collect a 400 on save: this installation re-derives
+  // a built-in's capabilities from code at every start, so an edit here would
+  // appear to save and then silently revert.
+  built_in: boolean;
+}
+
+type RoleFlagKey =
+  | "can_view"
+  | "can_edit"
+  | "school_scoped"
+  | "is_admin";
+
+// The four capability flags, with the sentence each one needs to be unambiguous.
+// `school_scoped` and `is_admin` are not capabilities in the same sense as the
+// other two — they change WHICH rows a role can reach rather than whether it can
+// act at all — so they are labelled as what they are.
+//
+// ★ `Export` and `Report` were removed from this list, and from the table's Access
+// column, on request. They are still real columns on `dbo.roles` (`can_export`,
+// `can_report`), still seeded `1` on all four built-ins and still returned by the
+// API — only the two controls are gone. Before anyone re-adds them, know what they
+// were doing: nothing. `requireCapability` in server/src/auth.ts accepts "export"
+// and "report" but is attached to no route at all, and no client component reads
+// `user.capabilities.export`, so both flags described an authority that nothing
+// ever exercised. A create still sends them as `true` (see `handleRoleSave`) so no
+// role is left holding a flag it had before; an edit deliberately sends neither.
+const ROLE_FLAGS: { key: RoleFlagKey; label: string; hint: string }[] = [
+  { key: "can_view", label: "View submissions", hint: "May open and read submissions." },
+  { key: "can_edit", label: "Edit submissions", hint: "May change and archive submissions." },
+  {
+    key: "school_scoped",
+    label: "Limited to their own school",
+    hint: "Sees only submissions belonging to the school on their account.",
+  },
+  {
+    key: "is_admin",
+    label: "Administrator",
+    hint: "Full access, including users, schools and system settings.",
+  },
+];
+
+// The caption and hint styles of a `Field`, for the two controls in the Roles
+// drawer that cannot be one: a group of buttons and a group of checkboxes. A
+// <label> wrapping several controls hands every click to the first one inside it,
+// so these blocks use a plain span and reproduce the look deliberately.
+const FIELD_CAPTION: React.CSSProperties = {
+  display: "block",
+  fontSize: "0.6875rem",
+  fontWeight: 600,
+  color: "var(--text-muted)",
+  textTransform: "uppercase",
+  letterSpacing: "0.04em",
+  marginBottom: 6,
+};
+const FIELD_HINT: React.CSSProperties = {
+  display: "block",
+  fontSize: "0.6875rem",
+  color: "var(--text-muted)",
+  marginTop: 6,
+};
+
+// A factory rather than a constant for the same reason as `emptySysMsgForm` — the
+// object is handed to state and then mutated per keystroke, so a shared instance
+// would leak one form's edits into the next.
+//
+// ★ `can_view` starts TRUE while every other flag starts false. The server's own
+// create defaults are restrictive across the board, and it is right to be — but a
+// role saved with all four flags off can sign in and do nothing at all, and an
+// admin who creates one and assigns it gets a support ticket rather than a
+// message. "Can see nothing" is a deliberate choice, so it is made explicitly.
+function emptyRoleForm(): RoleFormState {
+  return {
+    editing: null,
+    role_key: "",
+    label: "",
+    description: "",
+    badge: "blue",
+    can_view: true,
+    can_edit: false,
+    school_scoped: false,
+    is_admin: false,
+    built_in: false,
+  };
+}
+
 export default function AdminSettings() {
   const { user } = useAuth();
   const [users, setUsers] = useState<AdminUser[]>([]);
@@ -292,12 +423,33 @@ export default function AdminSettings() {
   const [maintenanceMessage, setMaintenanceMessage] = useState(MAINTENANCE_DEFAULT);
   const [loginModeBusy, setLoginModeBusy] = useState(false);
 
-  // Documents link panel state. A JSON role array stored in app_settings.
-  const [docRoles, setDocRoles] = useState<Role[]>(ROLES);
+  // The role catalog: every role in this installation, including the ones an
+  // administrator created. Shared with the Users grid, the Documents and Menu
+  // toggles and the System Messages audience chips — all of them call
+  // `useRoleCatalog`, which fetches once and dedupes, so this page costs one
+  // request no matter how many controls read it.
+  const roleCatalog = useRoleCatalog();
+  const roles = roleCatalog.roles;
+  const roleKeys = roles.map((r) => r.role_key);
+
+  // Per-role reference census, keyed by role_key. Its only consumer is the Delete
+  // button, which is disabled — with the server's own sentence in its tooltip —
+  // while anything references the role. `GET /api/roles/:key/usage` composes that
+  // sentence with the same helper the 409 refusal interpolates, so a disabled
+  // button and the error behind it cannot disagree about the reason.
+  const [roleUsage, setRoleUsage] = useState<Record<string, RoleUsageReport>>({});
+
+  // Documents link panel state. A JSON role array stored in app_settings, where
+  // `null` means unrestricted — every role, including ones created later. That is
+  // the server's own default for the key, so it is also the honest initial state:
+  // seeding this with the built-in roster would render a narrowed list that the
+  // stored value does not contain.
+  const [docRoles, setDocRoles] = useState<string[] | null>(null);
   const [docBusy, setDocBusy] = useState(false);
 
-  // Menu visibility per item, from the `menu_items` setting.
-  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, Role[]>>(defaultMenuItems);
+  // Menu visibility per item, from the `menu_items` setting. `null` per item means
+  // the item is shown to everyone.
+  const [menuItems, setMenuItems] = useState<Record<MenuItemKey, string[] | null>>(defaultMenuItems);
   const [menuBusy, setMenuBusy] = useState(false);
 
   // Slack test panel state — subject, body, and a busy flag.
@@ -350,6 +502,16 @@ export default function AdminSettings() {
   // so the confirmation appears in the row it applies to.
   const [sysMsgDeleteId, setSysMsgDeleteId] = useState<number | null>(null);
 
+  // Roles panel state. The list itself comes from `useRoleCatalog` above; these
+  // are only the drawer's form and the two inline confirmations.
+  const [roleOpen, setRoleOpen] = useState(false);
+  const [roleForm, setRoleForm] = useState<RoleFormState>(emptyRoleForm);
+  const [roleSaving, setRoleSaving] = useState(false);
+  const [roleSaveError, setRoleSaveError] = useState("");
+  // Which row's Delete has been clicked once. Keyed by role_key, like the delete
+  // endpoint.
+  const [roleDeleteKey, setRoleDeleteKey] = useState<string | null>(null);
+
   const load = useCallback(async () => {
     setLoading(true);
     setError("");
@@ -388,6 +550,33 @@ export default function AdminSettings() {
     void load();
   }, [load]);
 
+  // Refresh the reference census whenever the catalog changes — after a create, a
+  // rename or a delete. Per-role try/catch: one failing request must not blank the
+  // panel, and a role whose census is unknown gets no Delete affordance rather
+  // than a wrong one (`roleUsage[key]` is then simply absent).
+  useEffect(() => {
+    if (roles.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      const pairs = await Promise.all(
+        roles.map(async (r): Promise<[string, RoleUsageReport] | null> => {
+          try {
+            return [r.role_key, await api.getRoleUsage(r.role_key)];
+          } catch {
+            return null;
+          }
+        })
+      );
+      if (cancelled) return;
+      const next: Record<string, RoleUsageReport> = {};
+      for (const pair of pairs) if (pair) next[pair[0]] = pair[1];
+      setRoleUsage(next);
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [roles]);
+
   // Intake counters for the Webhook Log section. Deliberately its own try/catch:
   // a webhook-stats failure must not blank out the account and organization
   // panels, and the link to the log stays usable regardless.
@@ -424,6 +613,127 @@ export default function AdminSettings() {
     void loadSysMsgs();
   }, [loadSysMsgs]);
 
+  // ---------------------------------------------------------------------------
+  // Access Requests (docs/plans/public-private-forms.md §10.2).
+  //
+  // ★ The pending count is fetched SEPARATELY from the queue and is rendered on
+  // the section TITLE, because the section is closed by default and §15 Q3
+  // answered "in-app only" — so the count IS the notification. A count that only
+  // rendered inside an open section would be a count nobody sees.
+  //
+  // Its own try/catch, like the webhook counters: a failure here must not blank
+  // the account and organization panels.
+  // ---------------------------------------------------------------------------
+  const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([]);
+  const [accessPending, setAccessPending] = useState(0);
+  const [accessError, setAccessError] = useState("");
+  const [accessBusy, setAccessBusy] = useState<string | null>(null);
+  // Which form's grant list is expanded, and its rows.
+  const [grantsFormId, setGrantsFormId] = useState<number | null>(null);
+  const [grants, setGrants] = useState<AccessGrantRow[]>([]);
+  // The note an admin types before declining.
+  const [declineFor, setDeclineFor] = useState<string | null>(null);
+  const [declineNote, setDeclineNote] = useState("");
+
+  // Per-account access, for the Edit User drawer. Loaded when the drawer opens
+  // on an EXISTING user — a create has no account to grant to yet.
+  const [userAccess, setUserAccess] = useState<UserAccessRow[]>([]);
+  const [userAccessBusy, setUserAccessBusy] = useState<number | null>(null);
+  const [userAccessError, setUserAccessError] = useState("");
+
+  const loadUserAccess = useCallback(async (userId: number) => {
+    setUserAccessError("");
+    try {
+      setUserAccess(await api.listUserAccess(userId));
+    } catch (err) {
+      setUserAccessError(
+        err instanceof ApiError ? err.message : "Could not load this account's form access."
+      );
+      setUserAccess([]);
+    }
+  }, []);
+
+  /**
+   * Remove one account's access to one form.
+   *
+   * ★ Re-reads on success AND on a 409. The 409 means the form is public, so the
+   * row is still there and the list must not pretend otherwise — the server's
+   * message is shown verbatim because it names the fix ("make the form private
+   * first").
+   */
+  const removeAccess = async (userId: number, formId: number) => {
+    setUserAccessBusy(formId);
+    setUserAccessError("");
+    try {
+      await api.removeUserAccess(userId, formId);
+      await loadUserAccess(userId);
+    } catch (err) {
+      setUserAccessError(err instanceof ApiError ? err.message : "The removal did not reach the server.");
+    } finally {
+      setUserAccessBusy(null);
+    }
+  };
+
+  const loadAccess = useCallback(async () => {
+    try {
+      const [queue, summary] = await Promise.all([
+        api.listAccessRequests("pending"),
+        api.getAccessRequestSummary(),
+      ]);
+      setAccessRequests(queue);
+      setAccessPending(summary.pending);
+      setAccessError("");
+    } catch {
+      /* leave the section empty; the rest of Settings still works */
+    }
+  }, []);
+
+  useEffect(() => {
+    void loadAccess();
+  }, [loadAccess]);
+
+  const decide = async (
+    row: { user_id: number; form_id: number },
+    decision: "approve" | "decline" | "revoke",
+    note?: string
+  ) => {
+    const key = `${row.user_id}:${row.form_id}`;
+    setAccessBusy(key);
+    setAccessError("");
+    try {
+      await api.decideFormAccess({
+        user_id: row.user_id,
+        form_id: row.form_id,
+        decision,
+        note: note ?? null,
+      });
+      setDeclineFor(null);
+      setDeclineNote("");
+      await loadAccess();
+      // A revoke changes the grant list, so refresh it if it is open.
+      if (grantsFormId === row.form_id) setGrants(await api.listAccessGrants(row.form_id));
+    } catch (err) {
+      setAccessError(err instanceof ApiError ? err.message : "The decision did not reach the server.");
+    } finally {
+      setAccessBusy(null);
+    }
+  };
+
+  const toggleGrants = async (formId: number) => {
+    if (grantsFormId === formId) {
+      setGrantsFormId(null);
+      setGrants([]);
+      return;
+    }
+    setGrantsFormId(formId);
+    try {
+      setGrants(await api.listAccessGrants(formId));
+    } catch (err) {
+      setAccessError(err instanceof ApiError ? err.message : "Could not load the access list.");
+      setGrants([]);
+    }
+  };
+
   const openCreate = () => {
     setForm(EMPTY);
     // Always enter the drawer in its normal state, so a half-finished reset in a
@@ -456,6 +766,12 @@ export default function AdminSettings() {
     setResetError("");
     setModalOpen(true);
     setSaveError("");
+    // Load this account's form access. A create has no account yet, so only an
+    // edit does this — and the list is cleared first so the previous user's rows
+    // are never briefly visible under a different name.
+    setUserAccess([]);
+    setUserAccessError("");
+    void loadUserAccess(u.id);
   };
 
   // The signed-in admin's own tenant, which is the ONLY tenant this form can act
@@ -588,17 +904,25 @@ export default function AdminSettings() {
   };
 
   // Toggle a role's access to the Documents link. Optimistic with rollback.
-  const toggleDocRole = async (role: Role) => {
+  //
+  // ★ `null` is unrestricted, so turning ONE role off out of that state has to
+  // materialise the explicit list of the others. Writing `null` back would make
+  // the click look like it did nothing, and writing `[]` would hide Documents from
+  // everyone instead of from the one role the admin aimed at.
+  const toggleDocRole = async (role: string) => {
     setError("");
     setDocBusy(true);
     const prev = docRoles;
-    const next = prev.includes(role)
-      ? prev.filter((r) => r !== role)
-      : [...prev, role];
+    const current = prev ?? roleKeys;
+    const next = current.includes(role)
+      ? current.filter((r) => r !== role)
+      : [...current, role];
     setDocRoles(next);
     try {
       await api.updateSetting("documents_link", JSON.stringify(next));
-      setMessage(`Documents link ${next.includes(role) ? "enabled" : "hidden"} for ${role}.`);
+      setMessage(
+        `Documents link ${next.includes(role) ? "enabled" : "hidden"} for ${roleLabelFor(role)}.`
+      );
     } catch (err) {
       setDocRoles(prev);
       setError(err instanceof ApiError ? err.message : "Could not update Documents visibility");
@@ -607,12 +931,14 @@ export default function AdminSettings() {
     }
   };
 
-  // Toggle a role's visibility of a sidebar menu item. Optimistic with rollback.
-  const toggleMenuItemRole = async (item: MenuItemKey, role: Role) => {
+  // Toggle a role's visibility of a sidebar menu item. Optimistic with rollback,
+  // and the same `null` handling as the Documents toggle above.
+  const toggleMenuItemRole = async (item: MenuItemKey, role: string) => {
     setError("");
     setMenuBusy(true);
     const prev = menuItems;
-    const current = prev[item];
+    const stored = prev[item];
+    const current = stored ?? roleKeys;
     const nextRoles = current.includes(role)
       ? current.filter((r) => r !== role)
       : [...current, role];
@@ -621,7 +947,7 @@ export default function AdminSettings() {
     try {
       await api.updateSetting("menu_items", JSON.stringify(next));
       setMessage(
-        `${MENU_ITEM_LABELS[item]} ${nextRoles.includes(role) ? "shown" : "hidden"} for ${role}.`
+        `${MENU_ITEM_LABELS[item]} ${nextRoles.includes(role) ? "shown" : "hidden"} for ${roleLabelFor(role)}.`
       );
     } catch (err) {
       setMenuItems(prev);
@@ -734,8 +1060,10 @@ export default function AdminSettings() {
       title: m.title,
       body: m.body,
       active: m.active,
-      // A copy, so editing a message cannot mutate the row it was opened from.
-      audience: [...m.audience],
+      // A copy, so editing a message cannot mutate the row it was opened from —
+      // and `null` is carried through as `null` rather than expanded, because
+      // expanding it would silently narrow an "everyone" message on save.
+      audience: m.audience === null ? null : [...m.audience],
     });
     setSysMsgOpen(true);
     setSysMsgSaveError("");
@@ -809,6 +1137,146 @@ export default function AdminSettings() {
     }
   };
 
+  // -------------------------------------------------------------------------
+  // Roles handlers
+  // -------------------------------------------------------------------------
+  // A named updater for one capability flag. Assigning through a computed key in
+  // the JSX (`{ ...prev, [flag.key]: value }`) is the shape that makes TypeScript
+  // widen the object to an index signature and stop checking it; this keeps the
+  // object typed as a RoleFormState.
+  const setRoleFlag = (key: RoleFlagKey, value: boolean) => {
+    setRoleForm((prev) => {
+      const next: RoleFormState = { ...prev };
+      next[key] = value;
+      return next;
+    });
+  };
+
+  const openRoleCreate = () => {
+    setRoleForm(emptyRoleForm());
+    setRoleOpen(true);
+    setRoleSaveError("");
+    setRoleDeleteKey(null);
+  };
+
+  const openRoleEdit = (r: RoleRow) => {
+    setRoleForm({
+      editing: r.role_key,
+      role_key: r.role_key,
+      label: r.label,
+      description: r.description ?? "",
+      // A blank stored badge falls back to the picker's default for the same reason
+      // `roleBadgeFor` does: `""` is not a colour, and rendering the picker with no
+      // selection at all would look like a bug rather than a default.
+      badge: r.badge && r.badge.trim() !== "" ? r.badge : "blue",
+      can_view: r.can_view,
+      can_edit: r.can_edit,
+      school_scoped: r.school_scoped,
+      is_admin: r.is_admin,
+      built_in: r.built_in,
+    });
+    setRoleOpen(true);
+    setRoleSaveError("");
+    setRoleDeleteKey(null);
+  };
+
+  const closeRole = () => {
+    if (roleSaving) return;
+    setRoleOpen(false);
+    setRoleSaveError("");
+    setRoleForm(emptyRoleForm());
+  };
+
+  const handleRoleSave = async () => {
+    setRoleSaving(true);
+    setRoleSaveError("");
+    try {
+      if (roleForm.editing === null) {
+        // ★ The key is OMITTED when the field is blank, not sent empty. The server
+        // derives it from the name (`finance_lead`), and — if the derivation is not
+        // usable — answers with a message naming the key it derived. Sending ""
+        // instead is a validation failure about a field the admin deliberately left
+        // alone.
+        await api.createRole({
+          ...(roleForm.role_key.trim() === "" ? {} : { role_key: roleForm.role_key.trim() }),
+          label: roleForm.label.trim(),
+          description: roleForm.description.trim(),
+          badge: roleForm.badge,
+          can_view: roleForm.can_view,
+          can_edit: roleForm.can_edit,
+          // ★ Sent as a constant rather than from a control, because the Export and
+          // Report controls were removed from this form while the columns stayed.
+          // A CREATE has no prior value to preserve, so it has to state one — and
+          // `true` is what every role in this installation already holds (all four
+          // built-ins are seeded with both). Sending the schema default (`false`)
+          // would quietly create every new role with two flags nobody can see or
+          // set. An EDIT deliberately sends neither; see the branch below.
+          can_export: true,
+          can_report: true,
+          school_scoped: roleForm.school_scoped,
+          is_admin: roleForm.is_admin,
+        });
+        setMessage(`Role "${roleForm.label.trim()}" created.`);
+      } else if (roleForm.built_in) {
+        // ★ A built-in role's six flags are re-derived from code at every start, so
+        // the API refuses them (400, naming each field it will not accept). Sending
+        // the name, description and badge only is what keeps renaming a built-in
+        // from failing on flags this form disables anyway.
+        await api.updateRole(roleForm.editing, {
+          label: roleForm.label.trim(),
+          description: roleForm.description.trim(),
+          badge: roleForm.badge,
+        });
+        setMessage(`Role "${roleForm.label.trim()}" saved.`);
+      } else {
+        // ★ `is_admin` is deliberately NOT sent. The API refuses to PROMOTE an
+        // existing role to administrator (only a create can grant it), and the form
+        // keeps that checkbox fixed for the same reason — so sending it would be a
+        // 400 about a control the administrator could not change anyway.
+        await api.updateRole(roleForm.editing, {
+          label: roleForm.label.trim(),
+          description: roleForm.description.trim(),
+          badge: roleForm.badge,
+          can_view: roleForm.can_view,
+          can_edit: roleForm.can_edit,
+          // ★ `can_export` / `can_report` are deliberately NOT sent, for the same
+          // reason `is_admin` is not (below): their controls no longer exist in this
+          // form, so there is no value here that the administrator chose. The update
+          // path writes only the fields it is given, so omitting them leaves whatever
+          // the role already stores — whereas sending a constant would silently
+          // rewrite a flag in the middle of an unrelated label edit.
+          school_scoped: roleForm.school_scoped,
+        });
+        setMessage(`Role "${roleForm.label.trim()}" saved.`);
+      }
+      setRoleOpen(false);
+      setRoleForm(emptyRoleForm());
+      // Re-fetch the catalog rather than patching it from the response: the panel's
+      // other columns (the census, the built-in flag, the derived key) come from the
+      // server, and a locally assembled row would have to guess all three.
+      await roleCatalog.reload();
+    } catch (err) {
+      setRoleSaveError(err instanceof ApiError ? err.message : "Could not save the role");
+    } finally {
+      setRoleSaving(false);
+    }
+  };
+
+  const deleteRole = async (r: RoleRow) => {
+    setError("");
+    setRoleDeleteKey(null);
+    try {
+      await api.deleteRole(r.role_key);
+      setMessage(`Role "${r.label}" deleted.`);
+      await roleCatalog.reload();
+    } catch (err) {
+      // The 409 carries the same sentence the Delete button's tooltip showed, so
+      // this path is for the race the census cannot cover (something started
+      // referencing the role between the census and the delete).
+      setError(err instanceof ApiError ? err.message : "Could not delete the role");
+    }
+  };
+
   return (
     <div>
       <PageHead
@@ -864,7 +1332,7 @@ export default function AdminSettings() {
                 </tr>
               ) : (
                 users.map((u) => {
-                  const badge = roleBadge(u.role);
+                  const badge = roleBadgeFor(u.role);
                   return (
                     <tr key={u.id} className="grid-row" onClick={() => openEdit(u)} title="Edit user">
                       <td className="cell-strong" data-label="Name">{u.display_name}</td>
@@ -909,6 +1377,255 @@ export default function AdminSettings() {
             </tbody>
           </table>
         </div>
+      </CollapsibleSection>
+
+      {/* Roles panel — the installation's role catalog. Sits directly under the
+          Users panel because the two are read together: this one says what a role
+          may do, the one above says who is in it. */}
+      <CollapsibleSection
+        title="Roles"
+        subtitle="Create roles and choose what each one may do. Roles apply to the whole installation."
+        bodyStyle={{ padding: 0 }}
+      >
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "space-between",
+            alignItems: "center",
+            gap: 8,
+            padding: "10px 14px",
+            borderBottom: "1px solid var(--border)",
+          }}
+        >
+          {/* ★ The scope, said out loud. A role is not per school and not per form —
+              it is one row in this installation's catalog, offered for every account
+              in every organization. An administrator who assumes otherwise will add
+              a "Central Office" role here and then wonder why every school can pick
+              it. Nothing about the UI would correct that assumption. */}
+          <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+            {roles.length > 0 &&
+              `${roles.length} role${roles.length === 1 ? "" : "s"} · ${
+                roles.filter((r) => r.built_in).length
+              } built in · any role can be assigned to any user in any organization`}
+          </span>
+          <button className="primary-button" onClick={openRoleCreate}>
+            + Add Role
+          </button>
+        </div>
+        <div className="grid-wrap">
+          <table className="grid">
+            <thead>
+              <tr>
+                <th>Role</th>
+                <th>Key</th>
+                <th>Access</th>
+                <th>Scope</th>
+                <th>Users</th>
+                <th style={{ textAlign: "right" }}>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {roles.length === 0 ? (
+                <tr>
+                  <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
+                    {roleCatalog.error
+                      ? `Could not load the roles: ${roleCatalog.error}`
+                      : "Loading roles…"}
+                  </td>
+                </tr>
+              ) : (
+                roles.map((r) => {
+                  const usage = roleUsage[r.role_key];
+                  const badge = roleBadgeFor(r.role_key);
+                  // ★ `Export` and `Report` were removed from this list on request.
+                  // The two `can_*` columns still exist on the row and the API still
+                  // returns them — only these two labelled badges are gone, because
+                  // all four seeded roles carry both and the pair therefore read the
+                  // same on every row.
+                  const caps = [
+                    r.can_view ? "View" : null,
+                    r.can_edit ? "Edit" : null,
+                  ].filter((c): c is string => c !== null);
+                  return (
+                    <tr key={r.role_key}>
+                      <td>
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+                          <span className={`badge ${badge.cls}`}>{r.label}</span>
+                          {r.built_in && (
+                            <span
+                              className="badge badge-gray"
+                              // ★ The sentence has to be true on EVERY built-in row,
+                              // not just on `admin`. An earlier wording ended "...so
+                              // an installation can never be left with no
+                              // administrator", which is a claim about the
+                              // administrator row shown on `reviewer` too. The
+                              // protection is that the installation creates the
+                              // role; seeding one administrator this way is the
+                              // purpose, not the consequence of deleting this row.
+                              title="The installation defines this role and re-applies its access flags at every start. Because the installation creates it, it can never be deleted — seeding one administrator this way is what keeps an installation from ending up with nobody able to administer it."
+                            >
+                              Built in
+                            </span>
+                          )}
+                        </div>
+                        {r.description && (
+                          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                            {r.description}
+                          </div>
+                        )}
+                      </td>
+                      <td>
+                        {/* The key is what is actually stored — in form-field access
+                            lists, message audiences, the menu setting and the
+                            Documents link. Shown so an administrator can line this
+                            panel up with anything that names a role. */}
+                        <code style={{ fontSize: "0.75rem" }}>{r.role_key}</code>
+                      </td>
+                      <td>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 4 }}>
+                          {r.is_admin && <span className="badge badge-orange">Administrator</span>}
+                          {caps.map((c) => (
+                            <span key={c} className="badge badge-blue">
+                              {c}
+                            </span>
+                          ))}
+                          {/* `caps` now tests View and Edit only, so this branch is
+                              reached by a role carrying neither. The sentence stays
+                              true as written: `can_export` and `can_report` are
+                              deliberately not part of the condition, because nothing
+                              in the app consults them (see ROLE_FLAGS above). */}
+                          {caps.length === 0 && !r.is_admin && (
+                            <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                              No access — can sign in and nothing else
+                            </span>
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ fontSize: "0.8125rem" }}>
+                        {r.school_scoped ? "Own school only" : "All schools"}
+                      </td>
+                      <td style={{ fontSize: "0.8125rem" }}>
+                        {usage ? (
+                          <span title={usage.usage_message ?? "Nothing references this role."}>
+                            {usage.usage.users}
+                          </span>
+                        ) : (
+                          <span style={{ color: "var(--text-muted)" }}>—</span>
+                        )}
+                      </td>
+                      <td style={{ textAlign: "right" }}>
+                        <div
+                          style={{
+                            display: "flex",
+                            justifyContent: "flex-end",
+                            alignItems: "center",
+                            gap: 8,
+                          }}
+                        >
+                          {/* ★ Edit is offered on EVERY row, built-in or not.
+                              The installation pins a built-in's ACCESS FLAGS only:
+                              `label`, `description` and `badge` are deliberately
+                              excluded from the re-derivation (see PUT
+                              /api/roles/:key, and `handleRoleSave`'s built_in branch)
+                              specifically so they stay editable. Gating Edit on
+                              `!r.built_in` therefore hid the one part of a built-in
+                              that CAN be changed — and because all four seeded roles
+                              are built-in, it left this installation with no way to
+                              edit any role at all. Only Delete varies by row. */}
+                          <button className="secondary-button" onClick={() => openRoleEdit(r)}>
+                            Edit
+                          </button>
+                          {r.built_in ? (
+                            <span
+                              style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}
+                              // True for all four built-ins: the reason is the
+                              // re-seed, and a deletion a restart would undo is not
+                              // an operation worth offering.
+                              title="A built-in role can never be deleted: the installation re-creates it and resets its access flags at every start, so a deletion would be undone by the next restart."
+                            >
+                              Cannot be deleted
+                            </span>
+                          ) : roleDeleteKey === r.role_key ? (
+                            <>
+                              <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                                Delete this role?
+                              </span>
+                              <button className="secondary-button" onClick={() => setRoleDeleteKey(null)}>
+                                Cancel
+                              </button>
+                              <button
+                                className="secondary-button"
+                                style={DANGER_BUTTON}
+                                onClick={() => void deleteRole(r)}
+                              >
+                                Delete
+                              </button>
+                            </>
+                          ) : (
+                            <>
+                              {/* ★ DISABLED, not hidden, and never disabled silently.
+                                  The reason sentence comes from the server
+                                  (`usage_message`), composed by the same helper the
+                                  DELETE refusal interpolates — so a greyed-out button
+                                  and the 409 behind it cannot disagree. Hiding the
+                                  button instead would leave an administrator unable
+                                  to tell a protected role from a broken page. */}
+                              <button
+                                className="secondary-button"
+                                style={
+                                  usage && usage.total > 0
+                                    ? { ...DANGER_BUTTON, opacity: 0.55 }
+                                    : DANGER_BUTTON
+                                }
+                                disabled={usage === undefined || usage.total > 0}
+                                title={
+                                  usage === undefined
+                                    ? "Checking whether anything uses this role…"
+                                    : usage.total > 0
+                                      ? usage.usage_message ?? "This role is in use."
+                                      : `Delete the role "${r.label}"`
+                                }
+                                onClick={() => setRoleDeleteKey(r.role_key)}
+                              >
+                                {usage && usage.total > 0 ? "In use" : "Delete"}
+                              </button>
+                            </>
+                          )}
+                        </div>
+                        {/* The sentence is repeated as VISIBLE text, not only as a
+                            title: a disabled button does not take pointer events in
+                            every browser, so a tooltip on it is unreachable — which
+                            would make the most important line on the row the one
+                            nobody can read. */}
+                        {!r.built_in && usage && usage.total > 0 && usage.usage_message && (
+                          <div
+                            style={{
+                              fontSize: "0.6875rem",
+                              color: "var(--text-muted)",
+                              marginTop: 4,
+                              maxWidth: 340,
+                              marginLeft: "auto",
+                            }}
+                          >
+                            {usage.usage_message}
+                          </div>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })
+              )}
+            </tbody>
+          </table>
+        </div>
+        <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: 0, padding: "12px 14px" }}>
+          Roles are installation-wide: every role can be assigned to any user in any
+          organization. <strong>Built-in roles</strong> cannot be deleted, and their access
+          flags come from the installation rather than from this page — this is what keeps
+          an installation from ending up with no administrator. A role that anything still
+          references cannot be deleted either; the button says what is holding it, and the
+          API refuses it for the same reason.
+        </p>
       </CollapsibleSection>
 
       {/* Login Mode panel */}
@@ -1009,13 +1726,29 @@ export default function AdminSettings() {
           off hides the link for those users immediately; the API also refuses their
           requests. At least one role should remain enabled for the page to be used.
         </p>
+        {/* The scope, stated rather than implied. "Unrestricted" and "all four roles
+            happen to be on" are the same picture in the list below but different
+            stored values, and the difference only shows up when a fifth role is
+            created. */}
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
+          {docRoles === null
+            ? "Currently unrestricted: every role can see Documents, including any role created later."
+            : docRoles.length === 0
+              ? "Currently enabled for no role — the link is hidden from everyone."
+              : `Currently enabled for ${docRoles.map((r) => roleLabelFor(r)).join(", ")}.`}
+        </p>
+        {roles.length === 0 ? (
+          <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+            {roleCatalog.error ? `Could not load the role list: ${roleCatalog.error}` : "Loading roles…"}
+          </p>
+        ) : (
         <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-          {ROLES.map((role) => {
-            const has = docRoles.includes(role);
-            const badge = roleBadge(role);
+          {roles.map((row) => {
+            const has = docRoles === null || docRoles.includes(row.role_key);
+            const badge = roleBadgeFor(row.role_key);
             return (
               <div
-                key={role}
+                key={row.role_key}
                 style={{
                   display: "flex",
                   alignItems: "center",
@@ -1030,11 +1763,7 @@ export default function AdminSettings() {
                 <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
                   <span className={`badge ${badge.cls}`}>{badge.label}</span>
                   <span style={{ fontSize: "0.8125rem", color: "var(--text)" }}>
-                    {role === "admin"
-                      ? "Administrator"
-                      : role === "cdm_contact"
-                        ? "School Contact"
-                        : "Staff member"}
+                    {badge.label}
                     {has ? " — can see Documents" : " — cannot see Documents"}
                   </span>
                 </div>
@@ -1045,13 +1774,14 @@ export default function AdminSettings() {
                   <Toggle
                     checked={has}
                     disabled={docBusy}
-                    onChange={() => void toggleDocRole(role)}
+                    onChange={() => void toggleDocRole(row.role_key)}
                   />
                 </div>
               </div>
             );
           })}
         </div>
+        )}
       </CollapsibleSection>
 
       {/* Menu Settings — show/hide sidebar items, by role */}
@@ -1085,12 +1815,13 @@ export default function AdminSettings() {
                 {MENU_ITEM_LABELS[item]}
               </div>
               <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                {ROLES.map((role) => {
-                  const has = menuItems[item].includes(role);
-                  const badge = roleBadge(role);
+                {roles.map((row) => {
+                  const allowed = menuItems[item];
+                  const has = allowed === null || allowed.includes(row.role_key);
+                  const badge = roleBadgeFor(row.role_key);
                   return (
                     <div
-                      key={role}
+                      key={row.role_key}
                       style={{
                         display: "flex",
                         alignItems: "center",
@@ -1115,7 +1846,7 @@ export default function AdminSettings() {
                         <Toggle
                           checked={has}
                           disabled={menuBusy}
-                          onChange={() => void toggleMenuItemRole(item, role)}
+                          onChange={() => void toggleMenuItemRole(item, row.role_key)}
                         />
                       </div>
                     </div>
@@ -1171,6 +1902,203 @@ export default function AdminSettings() {
             {slackBusy ? "Sending…" : "Send Test Message"}
           </button>
         </div>
+      </CollapsibleSection>
+
+      {/* Access Requests — the queue for private forms
+          (docs/plans/public-private-forms.md §10.2).
+          ★ The pending count is on the TITLE because the section is closed by
+          default and nothing pushes (§15 Q3): the count IS the notification. */}
+      <CollapsibleSection
+        title={`Access Requests${accessPending > 0 ? ` (${accessPending} pending)` : ""}`}
+        subtitle="Requests to read a private form. Approving is the only thing that grants access."
+        bodyStyle={{ padding: 0 }}
+      >
+        {accessError && (
+          <div className="alert-error" role="alert" style={{ margin: 14 }}>
+            {accessError}
+          </div>
+        )}
+        <table className="grid">
+          <thead>
+            <tr>
+              <th>Requester</th>
+              <th>Form</th>
+              <th>Requested</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {accessRequests.length === 0 ? (
+              <tr>
+                <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
+                  No pending requests.
+                </td>
+              </tr>
+            ) : (
+              accessRequests.map((r) => {
+                const key = `${r.user_id}:${r.form_id}`;
+                const busy = accessBusy === key;
+                return (
+                  <tr key={key}>
+                    <td data-label="Requester">
+                      <div className="cell-strong">{r.user_name ?? `User ${r.user_id}`}</div>
+                      <div className="cell-sub">
+                        {r.user_email}
+                        {r.school_name ? ` · ${r.school_name}` : ""}
+                      </div>
+                    </td>
+                    <td data-label="Form">
+                      <div className="cell-strong">
+                        {r.form_code ? `#${r.form_id} ` : ""}
+                        {r.form_title}
+                      </div>
+                      <button
+                        type="button"
+                        className="badge-button"
+                        onClick={() => void toggleGrants(r.form_id)}
+                      >
+                        {grantsFormId === r.form_id ? "Hide access list" : "Who has access?"}
+                      </button>
+                    </td>
+                    <td data-label="Requested" className="cell-mono">
+                      {new Date(r.requested_at).toLocaleDateString()}
+                    </td>
+                    <td>
+                      {declineFor === key ? (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+                          <input
+                            className="edit-input"
+                            placeholder="Reason (shown to the requester)"
+                            value={declineNote}
+                            onChange={(e) => setDeclineNote(e.target.value)}
+                          />
+                          <div style={{ display: "flex", gap: 6 }}>
+                            <button
+                              type="button"
+                              className="badge-button danger"
+                              disabled={busy}
+                              onClick={() => void decide(r, "decline", declineNote)}
+                            >
+                              Confirm decline
+                            </button>
+                            <button
+                              type="button"
+                              className="badge-button"
+                              onClick={() => {
+                                setDeclineFor(null);
+                                setDeclineNote("");
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <button
+                            type="button"
+                            className="badge-button"
+                            disabled={busy}
+                            onClick={() => void decide(r, "approve")}
+                          >
+                            Approve
+                          </button>
+                          <button
+                            type="button"
+                            className="badge-button"
+                            disabled={busy}
+                            onClick={() => {
+                              setDeclineFor(key);
+                              setDeclineNote("");
+                            }}
+                          >
+                            Decline
+                          </button>
+                        </div>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })
+            )}
+          </tbody>
+        </table>
+
+        {/* The access list for one form, with a Revoke per row and each
+            account's event history. ★ A revoke control needs a list to act on,
+            and the HISTORY is what makes "declined" and "access removed"
+            distinguishable (§15 Q6/Q7). */}
+        {grantsFormId !== null && (
+          <div style={{ borderTop: "1px solid var(--border)", padding: "14px" }}>
+            <h3 className="section-title">Who can read this form</h3>
+            {grants.length === 0 ? (
+              <p className="empty-note">Nobody holds a grant on this form.</p>
+            ) : (
+              <table className="grid">
+                <thead>
+                  <tr>
+                    <th>Account</th>
+                    <th>Status</th>
+                    <th>History</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {grants.map((g) => (
+                    <tr key={g.user_id}>
+                      <td data-label="Account">
+                        <div className="cell-strong">{g.user_name ?? `User ${g.user_id}`}</div>
+                        <div className="cell-sub">{g.user_email}</div>
+                      </td>
+                      <td data-label="Status">
+                        <span
+                          className={`badge ${
+                            g.status === "approved"
+                              ? "badge-green"
+                              : g.status === "pending"
+                                ? "badge-blue"
+                                : "badge-gray"
+                          }`}
+                        >
+                          {g.status ?? "no row"}
+                        </span>
+                        {g.source === "backfill" && (
+                          <div className="cell-sub">Grandfathered when the form went private</div>
+                        )}
+                      </td>
+                      <td data-label="History">
+                        <ul className="event-list">
+                          {g.events.map((e) => (
+                            <li key={e.id}>
+                              <span className="cell-mono">{e.event}</span>{" "}
+                              {new Date(e.created_at).toLocaleDateString()}
+                              {e.actor_name ? ` by ${e.actor_name}` : ""}
+                              {e.note ? ` — “${e.note}”` : ""}
+                            </li>
+                          ))}
+                        </ul>
+                      </td>
+                      <td>
+                        {g.status === "approved" && (
+                          <button
+                            type="button"
+                            className="badge-button danger"
+                            disabled={accessBusy === `${g.user_id}:${grantsFormId}`}
+                            onClick={() =>
+                              void decide({ user_id: g.user_id, form_id: grantsFormId }, "revoke")
+                            }
+                          >
+                            Revoke
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        )}
       </CollapsibleSection>
 
       {/* Webhook Log — the log itself stays on its own page because its filters
@@ -1356,8 +2284,7 @@ export default function AdminSettings() {
         title="Organizations"
         subtitle="Tenant boundaries — schools are shared across all organizations"
         bodyStyle={{ padding: 0 }}
-      >
-        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
+      >        <div style={{ display: "flex", justifyContent: "flex-end", gap: 8, padding: "10px 14px", borderBottom: "1px solid var(--border)" }}>
           <button className="primary-button" onClick={openOrgCreate}>
             + Add Organization
           </button>
@@ -1548,9 +2475,16 @@ export default function AdminSettings() {
                 <span
                   style={{ display: "block", fontSize: "0.6875rem", color: "var(--text-muted)", marginTop: 6 }}
                 >
-                  {sysMsgForm.audience.length === 0
-                    ? "No role selected — this message is stored but delivered to nobody."
-                    : `Visible to ${audienceLabel(sysMsgForm.audience)}.`}
+                  {/* Three stored states, three sentences. `null` is not "every role
+                      that exists" — it is "everyone, including roles created after
+                      this message was saved", which is a different and often the
+                      intended meaning. Collapsing it into a list would narrow the
+                      message the moment an administrator adds a role. */}
+                  {sysMsgForm.audience === null
+                    ? "Visible to everyone — including any role created later."
+                    : sysMsgForm.audience.length === 0
+                      ? "No role selected — this message is stored but delivered to nobody."
+                      : `Visible to ${audienceLabel(sysMsgForm.audience)}.`}
                 </span>
               </div>
               <Field label="Active" full>
@@ -1720,11 +2654,20 @@ export default function AdminSettings() {
                 <select
                   className="edit-select"
                   value={form.role}
-                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value as Role }))}
+                  onChange={(e) => setForm((f) => ({ ...f, role: e.target.value }))}
                 >
-                  <option value="staff">Staff</option>
-                  <option value="cdm_contact">School Contact</option>
-                  <option value="admin">Admin</option>
+                  {roles.map((r) => (
+                    <option key={r.role_key} value={r.role_key}>
+                      {r.label}
+                    </option>
+                  ))}
+                  {/* The catalog is fetched once and may still be in flight. A role
+                      cannot be removed from the catalog while a user references it
+                      (the FK refuses), so once it loads it always holds the value
+                      being edited — but rendering the raw key while the request is
+                      outstanding is better than a select with no matching option,
+                      which React shows as a blank field on the account you opened. */}
+                  {roles.length === 0 && <option value={form.role}>{form.role}</option>}
                 </select>
               </Field>
               {/* The tenant is SHOWN, not chosen.
@@ -1803,6 +2746,103 @@ export default function AdminSettings() {
                 </div>
               </Field>
             </div>
+
+            {/* Form access — the grants that EXIST for this account, with a
+                Remove per row.
+                ★ Only for an existing account (a create has none), and only
+                PRIVATE forms appear: a grant on a public form is inert, since
+                everyone can read a public form regardless.
+                ★ A staff or admin account legitimately shows an empty list — it
+                is exempt BY RULE and holds no row. The note says so, or the
+                empty state reads as missing data. */}
+            {form.id !== null && (
+              <div className="drawer-section">
+                <h3 className="section-title">Form access</h3>
+                {userAccessError && (
+                  <div className="alert-error" role="alert" style={{ marginBottom: 10 }}>
+                    {userAccessError}
+                  </div>
+                )}
+                {userAccess.length === 0 ? (
+                  <p className="empty-note">
+                    No individual form grants.{" "}
+                    {form.role === "admin" || form.role === "staff"
+                      ? "This role reads every form in the organization, so it needs no grants."
+                      : "This account can read every public form; private forms need a grant."}
+                  </p>
+                ) : (
+                  <table className="grid">
+                    <thead>
+                      <tr>
+                        <th>Form</th>
+                        <th>Status</th>
+                        <th />
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {userAccess.map((a) => (
+                        <tr key={a.form_id}>
+                          <td data-label="Form">
+                            <span className="cell-strong">
+                              #{a.form_id} {a.form_title ?? "(deleted form)"}
+                            </span>
+                            {a.source === "backfill" && (
+                              <div className="cell-sub">Grandfathered when the form went private</div>
+                            )}
+                          </td>
+                          <td data-label="Status">
+                            <span
+                              className={`badge ${
+                                a.status === "approved"
+                                  ? "badge-green"
+                                  : a.status === "pending"
+                                    ? "badge-blue"
+                                    : "badge-gray"
+                              }`}
+                            >
+                              {a.status}
+                            </span>
+                            {a.status === "denied" && (
+                              <div className="cell-sub">
+                                {a.last_event === "revoked" ? "Access removed" : "Declined"}
+                              </div>
+                            )}
+                          </td>
+                          <td>
+                            {/* ★ Only an APPROVED row can be removed. A pending
+                                request is answered in the Access Requests
+                                section, and a denied row is already without
+                                access — a Remove button on either would be a
+                                control the API refuses. */}
+                            {a.status === "approved" && (
+                              <button
+                                type="button"
+                                className="badge-button danger"
+                                disabled={userAccessBusy === a.form_id}
+                                title={
+                                  a.form_visibility === "public"
+                                    ? "This form is public — make it private first"
+                                    : "Remove this account's access to the form"
+                                }
+                                onClick={() => void removeAccess(form.id!, a.form_id)}
+                              >
+                                Remove access
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                )}
+                <p className="empty-note" style={{ marginTop: 8 }}>
+                  Removing access takes effect immediately and is recorded in the
+                  form&apos;s history. The account will see the form under
+                  &ldquo;Available to request&rdquo; and can ask for access again —
+                  approving that request is what restores it.
+                </p>
+              </div>
+            )}
               </>
             )}
           </div>
@@ -1866,6 +2906,159 @@ export default function AdminSettings() {
               </button>
             </div>
           )}
+        </div>
+      </div>
+
+      {/* Create / edit role — right slide-out drawer. */}
+      <div className={`drawer-overlay ${roleOpen ? "open" : ""}`} onClick={closeRole}>
+        <div className="drawer" onClick={(e) => e.stopPropagation()}>
+          <div className="drawer-head">
+            <h2>{roleForm.editing === null ? "Add Role" : "Edit Role"}</h2>
+            <button className="icon-button close" onClick={closeRole} title="Close">
+              <X size={18} />
+            </button>
+          </div>
+          <div className="drawer-body">
+            {roleSaveError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 12 }}>
+                {roleSaveError}
+              </div>
+            )}
+            <div className="form-grid">
+              <Field label="Name" full>
+                <input
+                  className="edit-input"
+                  value={roleForm.label}
+                  maxLength={60}
+                  onChange={(e) => setRoleForm((f) => ({ ...f, label: e.target.value }))}
+                  placeholder="Finance Lead"
+                />
+              </Field>
+              <Field label="Key" full>
+                <input
+                  className="edit-input"
+                  value={roleForm.role_key}
+                  maxLength={40}
+                  readOnly={roleForm.editing !== null}
+                  onChange={(e) => setRoleForm((f) => ({ ...f, role_key: e.target.value }))}
+                  placeholder="finance_lead"
+                />
+                <span style={{ ...FIELD_HINT, textTransform: "none" }}>
+                  {roleForm.editing !== null
+                    ? "The key cannot be changed. It is what form-field access lists, message audiences and menu settings actually store, so renaming it would leave those grants pointing at nothing."
+                    : 'Optional — leave it blank and the key is made from the name ("Finance Lead" becomes finance_lead). Lower case letters, digits and underscores only.'}
+                </span>
+              </Field>
+              <Field label="Description" full>
+                <textarea
+                  className="edit-input"
+                  value={roleForm.description}
+                  maxLength={400}
+                  onChange={(e) => setRoleForm((f) => ({ ...f, description: e.target.value }))}
+                  placeholder="What this role is for, in a line. Shown beside the role in this panel."
+                  rows={3}
+                />
+              </Field>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={FIELD_CAPTION}>Badge colour</span>
+                <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                  {/* ★ Only three choices, because only three of a stylesheet's
+                      eight badge names resolve to different pixels — the other five
+                      are duplicates of these. Offering "teal" beside "green" would
+                      be offering the same colour twice under two labels. */}
+                  {BADGE_CHOICES.map((c) => (
+                    <button
+                      key={c.value}
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => setRoleForm((f) => ({ ...f, badge: c.value }))}
+                      style={
+                        roleForm.badge === c.value
+                          ? { borderColor: "var(--accent)", boxShadow: "0 0 0 1px var(--accent)" }
+                          : undefined
+                      }
+                      aria-pressed={roleForm.badge === c.value}
+                      title={c.hint}
+                    >
+                      <span className={`badge ${badgeClass(c.value)}`}>{c.label}</span>
+                    </button>
+                  ))}
+                </div>
+                <span style={FIELD_HINT}>
+                  {BADGE_CHOICES.find((c) => c.value === roleForm.badge)?.hint ??
+                    `This role's stored badge is "${roleForm.badge}", which is not one of the three above — choosing one replaces it.`}
+                </span>
+              </div>
+              <div style={{ gridColumn: "1 / -1" }}>
+                <span style={FIELD_CAPTION}>Access</span>
+                <div
+                  style={{
+                    display: "grid",
+                    gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))",
+                    gap: 8,
+                  }}
+                >
+                  {ROLE_FLAGS.map((f) => {
+                    // Two locks, for two different reasons. A built-in's capabilities
+                    // are re-derived from code at every start — all six columns on the
+                    // row, of which this form shows four — so an edit here would save
+                    // and then revert. Administrator is a create-time decision on any
+                    // role, which is why it is fixed once the role exists.
+                    const locked =
+                      roleForm.built_in || (f.key === "is_admin" && roleForm.editing !== null);
+                    return (
+                      <label
+                        key={f.key}
+                        style={{
+                          display: "flex",
+                          alignItems: "flex-start",
+                          gap: 8,
+                          fontSize: "0.8125rem",
+                          opacity: locked ? 0.6 : 1,
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={roleForm[f.key]}
+                          disabled={locked}
+                          onChange={(e) => setRoleFlag(f.key, e.target.checked)}
+                          style={{ marginTop: 2 }}
+                        />
+                        <span>
+                          {f.label}
+                          <span style={{ display: "block", fontSize: "0.6875rem", color: "var(--text-muted)" }}>
+                            {f.hint}
+                          </span>
+                        </span>
+                      </label>
+                    );
+                  })}
+                </div>
+                <span style={FIELD_HINT}>
+                  {roleForm.built_in
+                    ? "This role is built in: its access flags are set by the installation at every start, so they are shown but cannot be changed. The name, description and badge can be."
+                    : roleForm.editing !== null
+                      ? "Administrator can only be granted when a role is created, so that checkbox is fixed. The other three can be changed."
+                      : "A role with every box clear can sign in and do nothing else."}
+                </span>
+              </div>
+            </div>
+          </div>
+          <div className="drawer-foot">
+            <span className="muted-note">
+              {roleForm.editing === null ? "New role" : `Editing "${roleForm.role_key}"`}
+            </span>
+            <button className="secondary-button" onClick={closeRole} disabled={roleSaving}>
+              Cancel
+            </button>
+            <button
+              className="primary-button"
+              onClick={() => void handleRoleSave()}
+              disabled={roleSaving || !roleForm.label.trim()}
+            >
+              {roleSaving ? "Saving…" : "Save"}
+            </button>
+          </div>
         </div>
       </div>
 

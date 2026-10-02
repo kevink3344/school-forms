@@ -1,5 +1,6 @@
 import { Router } from "express";
 import { requireAuth, requireRoles, scopedSchoolId, isSchoolScoped, type JwtUser } from "../auth.js";
+import { canAccessForm } from "../access/formAccess.js";
 import {
   createReportView,
   deleteReportView,
@@ -88,6 +89,12 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
 
   const form = await getForm(q.form_id, user.organization_id);
   if (!form) return { ok: false, status: 404, error: "Form not found" };
+  // ★ A locked form must refuse HERE, at the one resolution point every report
+  // path goes through — otherwise the Reports selector would offer a form the
+  // export then happily served (docs/plans/public-private-forms.md §7.2).
+  if (!(await canAccessForm(user, q.form_id))) {
+    return { ok: false, status: 403, error: "Forbidden: no access to this form" };
+  }
 
   // Authorize first, then select — an unauthorized key can never reach the query.
   const visible = filterColumnsForRole(await getExportColumns(q.form_id), user.role, includeStaffOnly);
@@ -116,6 +123,9 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
     from: q.from,
     to: q.to,
     q: q.q,
+    // The viewer travels with the filter, so the rows and every count computed
+    // from them narrow together (see SubmissionListFilters).
+    viewer: user,
   });
   const rows = await buildExportRows(columns, submissions);
 
@@ -248,7 +258,16 @@ reportsRouter.get("/export", requireAuth, requireRoles(...REPORT_ROLES), async (
 reportsRouter.get("/views", requireAuth, requireRoles(...REPORT_ROLES), async (req, res, next) => {
   try {
     const views = await listReportViews(req.user!.id);
-    res.json({ views: views.map(presentReportView) });
+    // ★ Filter out a view naming a form the caller may no longer read. Without
+    // this the Reports selector offers a saved view that, when chosen, is then
+    // refused by resolveReport — a control the API rejects, which reads as a bug
+    // in the feature rather than the policy it is
+    // (docs/plans/public-private-forms.md §7.2, trap 13).
+    const allowed: typeof views = [];
+    for (const v of views) {
+      if (await canAccessForm(req.user!, Number(v.form_id))) allowed.push(v);
+    }
+    res.json({ views: allowed.map(presentReportView) });
   } catch (err) {
     next(err);
   }

@@ -18,6 +18,7 @@ import {
   getOrganizationBySlug,
 } from "../db/queries.js";
 import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId } from "../auth.js";
+import { canAccessForm } from "../access/formAccess.js";
 import { maybeGenerateDocument } from "../google/docs.js";
 import { sendSlackAlert } from "../notify/slack.js";
 import {
@@ -108,6 +109,31 @@ submissionsRouter.get("/:publicId/public", async (req, res, next) => {
 });
 
 // -----------------------------------------------------------------------------
+// The two access guards every row-level route applies, in one place.
+//
+// ★ They MUST stay together and in this order. `canAccessSchool` is the school
+// rule (a School Contact sees only their own school); `canAccessForm` is the
+// private-form rule (docs/plans/public-private-forms.md §7.2). Writing them out
+// at each of the ten call sites is how one of them eventually gets forgotten on
+// a new route — and the failure is silent, because a missing guard looks exactly
+// like a route nobody has called yet.
+//
+// Returns the 403 body to send, or null when the caller may proceed.
+// -----------------------------------------------------------------------------
+async function submissionAccessError(
+  req: Request,
+  submission: { school_id: number | null; form_id: number }
+): Promise<{ status: number; error: string } | null> {
+  if (!canAccessSchool(req.user!, submission.school_id)) {
+    return { status: 403, error: "Forbidden: submission belongs to another school" };
+  }
+  if (!(await canAccessForm(req.user!, submission.form_id))) {
+    return { status: 403, error: "Forbidden: no access to this form" };
+  }
+  return null;
+}
+
+// -----------------------------------------------------------------------------
 // Shared filter reading for the submission list AND its archive counts.
 //
 // ONE reader for both. The counts badge ("N archived hidden") is only meaningful
@@ -127,6 +153,9 @@ function submissionFiltersFrom(req: Request) {
     status: req.query.status ? String(req.query.status) : undefined,
     from: req.query.from ? String(req.query.from) : undefined,
     to: req.query.to ? String(req.query.to) : undefined,
+    // ★ The viewer travels WITH the filter, so the list and the archive counts
+    // narrow together — see the note on SubmissionListFilters.
+    viewer: req.user!,
   };
 }
 
@@ -185,9 +214,11 @@ submissionsRouter.get("/:publicId", requireAuth, requireRoles("staff", "cdm_cont
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    // A School Contact may only view submissions belonging to their own school.
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden: submission belongs to another school" });
+    // A School Contact may only view submissions belonging to their own school,
+    // and nobody may read a row on a private form they hold no grant for.
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     res.json(submission);
@@ -211,8 +242,9 @@ submissionsRouter.patch("/:publicId/status", requireAuth, requireRoles("staff", 
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     await updateSubmissionStatus(submission.id, parsed.data.status);
@@ -254,8 +286,9 @@ submissionsRouter.post("/:publicId/archive", requireAuth, requireRoles("staff", 
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const changed = await archiveSubmission(submission.id, req.user!.id);
@@ -291,8 +324,9 @@ submissionsRouter.post("/:publicId/restore", requireAuth, requireRoles("staff", 
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const changed = await restoreSubmission(submission.id);
@@ -353,8 +387,9 @@ submissionsRouter.delete("/:publicId", requireAuth, requireRoles("admin"), async
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const deleted = await deleteSubmission(submission.id);
@@ -384,8 +419,9 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "c
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     await updateSubmissionValues(submission.id, parsed.data.answers, {
@@ -415,8 +451,9 @@ submissionsRouter.get("/:publicId/documents", requireAuth, requireRoles("staff",
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const documents = submission.documents;
@@ -436,8 +473,9 @@ submissionsRouter.get("/:publicId/adhoc", requireAuth, requireRoles("staff", "cd
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const fields = await listAdhocFields(submission.id);
@@ -462,8 +500,9 @@ submissionsRouter.post("/:publicId/adhoc", requireAuth, requireRoles("staff", "c
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const existing = await listAdhocFields(submission.id);
@@ -498,8 +537,9 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const fieldId = Number(req.params.fieldId);
@@ -530,8 +570,9 @@ submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles(
       res.status(404).json({ error: "Submission not found" });
       return;
     }
-    if (!canAccessSchool(req.user!, submission.school_id)) {
-      res.status(403).json({ error: "Forbidden" });
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
       return;
     }
     const fieldId = Number(req.params.fieldId);

@@ -69,12 +69,44 @@ const TURSO_DDL: string[] = [
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_organizations_slug ON organizations(slug)`,
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_organizations_name ON organizations(name)`,
 
+  // --- roles -----------------------------------------------------------------
+  // The mutable role catalog (Settings → Roles). `role_key` is what users.role
+  // stores and what the four JSON-array stores already hold. Its UNIQUE index is
+  // load-bearing: an FK target needs one, and that FK is what makes "a role that
+  // has been assigned cannot be deleted" a database rule.
+  //
+  // SQLite enforces FKs only when `PRAGMA foreign_keys = ON`, which
+  // driver/libsql.ts sets on open — without it the DELETE guard below would be
+  // silently advisory on this dialect and enforced on SQL Server, which is the
+  // worst of both.
+  `CREATE TABLE IF NOT EXISTS roles (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     role_key      TEXT NOT NULL COLLATE NOCASE,
+     label         TEXT NOT NULL,
+     description   TEXT,
+     badge         TEXT,
+     can_view      BOOLEAN NOT NULL DEFAULT 1,
+     can_edit      BOOLEAN NOT NULL DEFAULT 0,
+     can_export    BOOLEAN NOT NULL DEFAULT 0,
+     can_report    BOOLEAN NOT NULL DEFAULT 0,
+     school_scoped BOOLEAN NOT NULL DEFAULT 0,
+     is_admin      BOOLEAN NOT NULL DEFAULT 0,
+     built_in      BOOLEAN NOT NULL DEFAULT 0,
+     created_at    TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     updated_at    TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS UX_roles_key ON roles(role_key)`,
+
   // --- users -----------------------------------------------------------------
+  // No CHECK on `role` any more, deliberately: the valid set is data, so the
+  // constraint is the foreign key rather than a list written into the DDL. That
+  // is strictly stronger — a CHECK can only test a list frozen at migration
+  // time, while the FK tests the table an admin actually edits.
   `CREATE TABLE IF NOT EXISTS users (
      id                   INTEGER PRIMARY KEY AUTOINCREMENT,
      email                TEXT NOT NULL COLLATE NOCASE,
      password_hash        TEXT NOT NULL,
-     role                 TEXT NOT NULL CHECK (role IN ('admin','staff','cdm_contact')),
+     role                 TEXT NOT NULL COLLATE NOCASE REFERENCES roles(role_key) ON DELETE NO ACTION,
      school_id            INTEGER REFERENCES schools(id) ON DELETE SET NULL,
      organization_id      INTEGER NOT NULL REFERENCES organizations(id) ON DELETE NO ACTION,
      display_name         TEXT NOT NULL,
@@ -103,6 +135,11 @@ const TURSO_DDL: string[] = [
      view_columns    TEXT,
      doc_folder_id   TEXT,
      google_form_url TEXT,
+     -- docs/plans/public-private-forms.md. 'public' is the default and the value
+     -- of every row that predates the column, so shipping it narrows nothing
+     -- until an administrator marks a form private.
+     visibility      TEXT NOT NULL DEFAULT 'public'
+                     CHECK (visibility IN ('public','private')),
      created_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
      updated_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
@@ -232,6 +269,40 @@ const TURSO_DDL: string[] = [
    )`,
   `CREATE UNIQUE INDEX IF NOT EXISTS UX_ufvc_user_form ON user_form_view_columns(user_id, form_id)`,
 
+  // --- form_access / form_access_events --------------------------------------
+  // Public / Private forms (docs/plans/public-private-forms.md).
+  //
+  // ★ NO FOREIGN KEYS, matching system_message_dismissals and webhook_events: a
+  // deleted user or form must not be blocked by its access rows (they are removed
+  // explicitly when the parent goes). On SQLite FK enforcement is off by default
+  // anyway, so declaring them would be a claim the engine does not honour.
+  //
+  // ★ PRIMARY KEY (user_id, form_id) is the idempotency mechanism — see the SQL
+  // Server declaration for the full reasoning.
+  `CREATE TABLE IF NOT EXISTS form_access (
+     user_id      INTEGER NOT NULL,
+     form_id      INTEGER NOT NULL,
+     status       TEXT NOT NULL CHECK (status IN ('pending','approved','denied')),
+     source       TEXT NOT NULL CHECK (source IN ('request','backfill','direct')),
+     requested_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     decided_at   TEXT,
+     decided_by   INTEGER,
+     note         TEXT,
+     PRIMARY KEY (user_id, form_id)
+   )`,
+  // Append-only audit log. NEVER read by the visibility predicate — see the SQL
+  // Server declaration. `actor_id` is nullable: NULL for a self-service request.
+  `CREATE TABLE IF NOT EXISTS form_access_events (
+     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+     user_id    INTEGER NOT NULL,
+     form_id    INTEGER NOT NULL,
+     event      TEXT NOT NULL
+                CHECK (event IN ('requested','withdrawn','approved','declined','revoked','backfilled')),
+     actor_id   INTEGER,
+     note       TEXT,
+     created_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+
   // Carry the one legacy forms.view_columns value over to the form's designer,
   // who is the person most likely to have set it. Idempotent, and deliberately
   // best-effort: a form with no designer_id has no recoverable owner and simply
@@ -328,6 +399,34 @@ const TURSO_DDL: string[] = [
   `INSERT INTO organizations (slug, name)
      SELECT 'technology-services', 'Technology Services'
      WHERE NOT EXISTS (SELECT 1 FROM organizations WHERE slug = 'technology-services')`,
+
+  // The four built-in roles, seeded exactly as the SQL Server ladder does, one
+  // row at a time and only when absent. `can_report = 1` on all four because
+  // routes/reports.ts already holds REPORT_ROLES = ["staff","cdm_contact",
+  // "admin"] — every current role has report access, so seeding anything less
+  // would be a behaviour change rather than a new feature.
+  `INSERT INTO roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     SELECT 'admin', 'Administrator', 'Full access, including users, schools and system settings.', 1, 1, 1, 1, 0, 1, 1
+     WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_key = 'admin')`,
+  `INSERT INTO roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     SELECT 'staff', 'Staff', 'Day-to-day form work: read, edit and export submissions.', 1, 1, 1, 1, 0, 0, 1
+     WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_key = 'staff')`,
+  `INSERT INTO roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     SELECT 'cdm_contact', 'School Contact', 'Staff access, limited to their own school.', 1, 1, 1, 1, 1, 0, 1
+     WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_key = 'cdm_contact')`,
+  `INSERT INTO roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     SELECT 'reviewer', 'Reviewer', 'Read, export and report. Cannot change submissions.', 1, 0, 1, 1, 0, 0, 1
+     WHERE NOT EXISTS (SELECT 1 FROM roles WHERE role_key = 'reviewer')`,
+
+  // Re-derive the built-ins' SECURITY flags from code on every boot, mirroring
+  // the SQL Server ladder. This is what stops a stray UPDATE from permanently
+  // granting write access to a role the guards trust; `updated_at` is left alone
+  // because these values are derived and a timestamp on them would only record
+  // when the app last started.
+  `UPDATE roles SET can_view=1, can_edit=1, can_export=1, can_report=1, school_scoped=0, is_admin=1, built_in=1 WHERE role_key = 'admin'`,
+  `UPDATE roles SET can_view=1, can_edit=1, can_export=1, can_report=1, school_scoped=0, is_admin=0, built_in=1 WHERE role_key = 'staff'`,
+  `UPDATE roles SET can_view=1, can_edit=1, can_export=1, can_report=1, school_scoped=1, is_admin=0, built_in=1 WHERE role_key = 'cdm_contact'`,
+  `UPDATE roles SET can_view=1, can_edit=0, can_export=1, can_report=1, school_scoped=0, is_admin=0, built_in=1 WHERE role_key = 'reviewer'`,
 ];
 
 function returningList(returning: string[]): string {
@@ -403,6 +502,19 @@ export const tursoDialect: Dialect = {
       table: "system_messages",
       column: "audience",
       definition: "TEXT",
+    },
+    {
+      // Public / Private forms (docs/plans/public-private-forms.md). In
+      // `TURSO_DDL` as well, so a fresh database gets it from CREATE TABLE; this
+      // entry is for a database created before the column existed. SQLite cannot
+      // add a CHECK via ALTER TABLE, so the constraint lives only in the CREATE
+      // TABLE above — which is why the app must also validate `visibility` on
+      // write rather than trusting the database (dual-db.md §5.3's asymmetry).
+      // `form_access` and `form_access_events` are both brand-new tables, so
+      // neither needs an entry here.
+      table: "forms",
+      column: "visibility",
+      definition: "TEXT NOT NULL DEFAULT 'public'",
     },
   ],
 

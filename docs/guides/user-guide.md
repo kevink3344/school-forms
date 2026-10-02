@@ -201,7 +201,7 @@ The **Fields** card has two tabs: **Form Fields** and **Staff Only Fields**.
 Click **Add Form Field** or **Add Staff Only Field** to add one. Each field has:
 
 - **Label** — the question text
-- **Type** — Text, Text Area, Number, Date, Email, Select, Radio, or Checkbox
+- **Type** — Text, Text Area, Number, Date, Email, Google Document, Select, Radio, or Checkbox
 - **Options (comma separated)** — for Select, Radio, and Checkbox types only
 - **Required** — whether the parent must answer
 
@@ -626,9 +626,27 @@ is your only reference for the submission.
 | **Number** | A numeric value |
 | **Date** | A calendar date |
 | **Email** | An email address |
+| **Google Document** | A Google Drive file id, shown as a clickable link that opens the file in Google Drive |
 | **Select** | A dropdown list of options |
 | **Radio** | A single choice from a short list |
 | **Checkbox** | One or more choices from a list |
+
+### Google Document fields
+
+A **Google Document** field holds the **id** of a file in Google Drive — not the file itself. The
+app turns each id into a link that opens the file in Google Drive, so a reviewer can click straight
+through.
+
+Where the id comes from: a Google Forms **file upload** question answers with the Drive file id, and
+so does a short-answer question whose script sends one. If the question allows more than one file,
+the answer is a **list** — each file is shown as a numbered link.
+
+**Access is managed in Google Drive, not in School Forms.** The app builds the link but does not
+grant permission to open it. If a link says you do not have access, ask a staff member to share the
+file (or the folder it lives in) with you.
+
+You can find a submission by its file id, or by pasting the whole Google Drive **URL** into the
+search box — the app recognises the URL and matches the id inside it.
 
 ## 5.3 Troubleshooting
 

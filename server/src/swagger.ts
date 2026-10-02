@@ -124,7 +124,7 @@ export function buildSwaggerSpec(req?: Request) {
             id: { type: "integer" },
             form_id: { type: "integer" },
             label: { type: "string" },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
             options: { type: "array", items: { type: "string" }, nullable: true },
             required: { type: "boolean" },
             staff_only: { type: "boolean" },
@@ -154,6 +154,13 @@ export function buildSwaggerSpec(req?: Request) {
             code: { type: "string", nullable: true },
             submission_seq: { type: "integer" },
             doc_folder_id: { type: "string", nullable: true, description: "Google Drive parent folder for this form's generated documents. NULL falls back to the global env folder." },
+            google_form_url: { type: "string", nullable: true, description: "Optional link to the source Google Form this form mirrors. Informational only — no API integration." },
+            visibility: {
+              type: "string",
+              enum: ["public", "private"],
+              description:
+                "Who may READ this form's results. `public` (the default) means every internal member of the organization; `private` means the organization's School Contacts do not see it without an approved grant — **administrators and staff are unaffected either way**. This narrows reading only; the parent submission path is untouched.",
+            },
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
             fields: { type: "array", items: { $ref: "#/components/schemas/FormField" } },
@@ -235,7 +242,7 @@ export function buildSwaggerSpec(req?: Request) {
             label: { type: "string" },
             staff_only: { type: "boolean" },
             roles: { type: "array", items: { type: "string" }, nullable: true, description: "Roles that may access a staff-only column; null for public columns." },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"], description: "The field's control type. Present on export-preview columns so a client can pick an editor without a second request." },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"], description: "The field's control type. Present on export-preview columns so a client can pick an editor without a second request." },
             options: { type: "array", items: { type: "string" }, nullable: true, description: "Allowed values for select/checkbox/radio fields; null otherwise." },
           },
         },
@@ -326,7 +333,7 @@ export function buildSwaggerSpec(req?: Request) {
             id: { type: "integer" },
             submission_id: { type: "integer" },
             label: { type: "string" },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
             options: { type: "array", items: { type: "string" }, nullable: true },
             value: { type: "object", nullable: true },
             sort_order: { type: "integer" },
@@ -1680,6 +1687,278 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/forms/available": {
+        get: {
+          tags: ["Forms"],
+          summary: "Every published form in my organization, with my relationship to it",
+          description:
+            "The **Available Forms** discovery surface (docs/plans/public-private-forms.md §16).\n\n" +
+            "Returns every PUBLISHED form in the caller's organization, each carrying an `access` value:\n\n" +
+            "- `granted` — the caller may read it. `reason` says why: `role` (admin/staff are exempt by rule), `public`, or `grant`.\n" +
+            "- `none` — private, and the caller holds no row. This is the *requestable* set.\n" +
+            "- `pending` — the caller has asked and no administrator has answered.\n" +
+            "- `denied` — declined, or the access was revoked. `last_event` distinguishes the two.\n\n" +
+            "**Drafts and archived forms never appear, for any role.** They are unpublished and are not served by the anonymous public endpoints either.\n\n" +
+            "This is NOT a replacement for `GET /api/forms`: that answers \"what may I read?\" and is what every picker uses. This answers \"what exists, and what is my relationship to it?\" — a superset by design.",
+          security: [{ [bearerScheme]: [] }],
+          responses: {
+            "200": {
+              description: "OK — every published form with the caller's access",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "array",
+                    items: {
+                      type: "object",
+                      properties: {
+                        id: { type: "integer" },
+                        title: { type: "string" },
+                        description: { type: "string", nullable: true },
+                        code: { type: "string", nullable: true },
+                        access: { type: "string", enum: ["granted", "none", "pending", "denied"] },
+                        reason: { type: "string", enum: ["role", "public", "grant"], nullable: true },
+                        requested_at: { type: "string", format: "date-time", nullable: true },
+                        decided_at: { type: "string", format: "date-time", nullable: true },
+                        note: { type: "string", nullable: true },
+                        last_event: { type: "string", nullable: true },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+        },
+      },
+      "/api/forms/{id}/visibility": {
+        patch: {
+          tags: ["Forms"],
+          summary: "Set a form's visibility (public | private) — admin",
+          description:
+            "`public` means every internal member of the organization sees the form, exactly as before this feature existed. `private` means the organization's **School Contacts** (`cdm_contact`) do not see it unless they hold an approved grant — **administrators and `staff` are unaffected either way**.\n\n" +
+            "**Switching to private has a side effect.** In the same transaction, every `cdm_contact` in the organization who could see the form one instant before is written an `approved` / `source = 'backfill'` grant — the grandfather. Administrators and `staff` are exempt by rule and get no row. An account that was already **declined or revoked** is deliberately NOT re-granted, so an administrator's decision is never silently reversed.\n\n" +
+            "The response is the updated form plus `granted`, the number of accounts newly grandfathered — a number worth showing, because if it is wrong it is wrong in the direction of locking someone out.\n\n" +
+            "Switching back to `public` changes no data: the grants stay in place and simply become irrelevant, which is what makes the change reversible.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["visibility"],
+                  properties: {
+                    visibility: { type: "string", enum: ["public", "private"] },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK — the updated form, plus the number of accounts granted",
+              content: { "application/json": { schema: { $ref: "#/components/schemas/Form" } } },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Form not found in your organization" },
+          },
+        },
+      },
+      "/api/form-access/mine": {
+        get: {
+          tags: ["Form Access"],
+          summary: "Private forms I cannot read, with my status on each",
+          description:
+            "The locked forms in my organization, each with `access` of `none`, `pending` or `denied`, plus `last_event` so the UI can say *declined* versus *access removed*.\n\n" +
+            "This is what makes \"request access\" possible: without it a restricted person cannot even name what they are asking for.\n\n" +
+            "Returns `[]` for an administrator or a `staff` account — not as a special case but because the set is genuinely empty: nothing is locked to them.",
+          security: [{ [bearerScheme]: [] }],
+          responses: { "200": { description: "OK — the locked forms" } },
+        },
+      },
+      "/api/form-access/requests": {
+        get: {
+          tags: ["Form Access"],
+          summary: "The access-request queue — admin",
+          description:
+            "Requests joined to the requester (name, e-mail, school) and the form. `?status=pending` (the default) | `approved` | `denied`, oldest first.\n\n" +
+            "**This is the entire notification mechanism** — nothing pushes. The pending count is rendered on the closed Settings section title, because a count inside a closed section is a count nobody sees.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            {
+              name: "status",
+              in: "query",
+              required: false,
+              schema: { type: "string", enum: ["pending", "approved", "denied"] },
+            },
+          ],
+          responses: { "200": { description: "OK — the queue" } },
+        },
+        post: {
+          tags: ["Form Access"],
+          summary: "Request access to a private form",
+          description:
+            "`{ form_id }` — the caller's own row becomes `pending` and a `requested` event is written. The USER comes from the session, never the body.\n\n" +
+            "Idempotent for a row already `pending`.\n\n" +
+            "**Refused with 400** for a form that is not private, for a form the caller can already read, and — importantly — for a row that is already **`denied`**. A decline is final from the requester's side: if this upserted over it, a declined person could re-ask by pressing a button and the administrator's decision would mean nothing.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_id"],
+                  properties: { form_id: { type: "integer" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Requested" },
+            "400": { description: "Not private, already readable, or already declined" },
+            "404": { description: "Form not found in your organization" },
+          },
+        },
+      },
+      "/api/form-access/requests/withdraw": {
+        post: {
+          tags: ["Form Access"],
+          summary: "Withdraw my own pending request",
+          description:
+            "`{ form_id }` — deletes the caller's own row **only while it is `pending`**, and writes a `withdrawn` event.\n\n" +
+            "This cannot change anyone's access — it removes an unanswered question — which is why it is the one self-service action that survives the \"no way back after a decline\" rule.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_id"],
+                  properties: { form_id: { type: "integer" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Withdrawn" },
+            "409": { description: "There is no pending request to withdraw" },
+          },
+        },
+      },
+      "/api/form-access/requests/decide": {
+        post: {
+          tags: ["Form Access"],
+          summary: "Approve, decline or revoke a request — admin",
+          description:
+            "`{ user_id, form_id, decision: \"approve\" | \"decline\" | \"revoke\", note? }`.\n\n" +
+            "**One endpoint carrying a `decision` field rather than three routes**, so the state change and its audit row cannot be written differently by different handlers. `revoke` lives here too: it is a decision on an approved row, not a different kind of operation.\n\n" +
+            "`approve` → `approved`; `decline` and `revoke` both → `denied`, and the **audit log** is what tells them apart afterwards (`declined` vs `revoked`). A `revoke` applies only to an approved row and a `decline` only to a pending one, so a decision that does not apply answers **409** rather than silently changing the state under a misleading event name.\n\n" +
+            "The `event` value is written by the server and is never accepted from the body — a caller must not be able to label their own action in the audit log.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["user_id", "form_id", "decision"],
+                  properties: {
+                    user_id: { type: "integer" },
+                    form_id: { type: "integer" },
+                    decision: { type: "string", enum: ["approve", "decline", "revoke"] },
+                    note: {
+                      type: "string",
+                      nullable: true,
+                      description: "A reason for a decline, shown to the requester.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Decided" },
+            "400": { description: "Validation error" },
+            "409": { description: "No request in a state this decision applies to" },
+          },
+        },
+      },
+      "/api/form-access/grants": {
+        get: {
+          tags: ["Form Access"],
+          summary: "Who has access to this form, and their history — admin",
+          description:
+            "`?form_id=N` — every account with a relationship to the form, each with its full `form_access_events` timeline.\n\n" +
+            "**Includes the people with no row and the people with a `denied` row.** A grants-only list is the shape that hides exactly the account an administrator opened this screen to find, and a revoke control needs a list to revoke from.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "form_id", in: "query", required: true, schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": { description: "OK — grants with their event history" },
+            "400": { description: "form_id is required" },
+          },
+        },
+      },
+      "/api/form-access/summary": {
+        get: {
+          tags: ["Form Access"],
+          summary: "Pending access-request count — admin",
+          description:
+            "`{ pending: n }`, for the Settings section title. Rendered on the **closed** section, because with no push channel a count inside a closed section is a count nobody sees.",
+          security: [{ [bearerScheme]: [] }],
+          responses: { "200": { description: "OK — the pending count" } },
+        },
+      },
+      "/api/form-access/user/{userId}": {
+        get: {
+          tags: ["Form Access"],
+          summary: "One account's form-access rows — admin",
+          description:
+            "The rows that EXIST for this account, for the Edit User drawer.\n\n" +
+            "**This is \"grants you have made\", not \"forms this person can read\".** The two differ for a `staff` or admin account, which is exempt by rule and normally holds no row at all — so its list is legitimately empty. Deriving \"forms they can read\" would mean re-running the predicate per form and would offer a Remove button for rows that do not exist.\n\n" +
+            "Only PRIVATE forms are listed: a grant on a public form is inert, since the form is readable by everyone regardless.\n\n" +
+            "Scoped to the caller's organization — a user in another tenant answers **404**, not 403, so the two are indistinguishable.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "userId", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": { description: "OK — the account's access rows" },
+            "404": { description: "No such user in your organization" },
+          },
+        },
+      },
+      "/api/form-access/user/{userId}/remove": {
+        post: {
+          tags: ["Form Access"],
+          summary: "Remove one account's access to one form — admin",
+          description:
+            "`{ form_id }` — writes `denied` and a `revoked` event, exactly as the queue's Revoke does, so the two paths cannot disagree about what a removal looks like. `denied` also means the grandfather will NOT re-grant this account on a later flip, which is what makes the removal stick.\n\n" +
+            "**Refuses a PUBLIC form with 409.** On a public form every internal member can read it regardless of any row, so removing a grant would appear to succeed while changing nothing — the admin would watch the row vanish and the person would still open the form. The message says to make the form private first.\n\n" +
+            "The USER comes from the path and the FORM from the body, so a removal cannot be redirected to a different account than the one the admin has open.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "userId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_id"],
+                  properties: { form_id: { type: "integer" } },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Removed" },
+            "404": { description: "No such user in your organization, or no such form" },
+            "409": { description: "The form is public, or the account has no row for it" },
+          },
+        },
+      },
       "/api/submissions/{publicId}": {
         get: {
           tags: ["Submissions"],
@@ -1884,7 +2163,7 @@ export function buildSwaggerSpec(req?: Request) {
                   required: ["label", "type"],
                   properties: {
                     label: { type: "string" },
-                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
                     options: { type: "array", items: { type: "string" }, nullable: true },
                     value: { type: "object", nullable: true },
                   },
@@ -1920,7 +2199,7 @@ export function buildSwaggerSpec(req?: Request) {
                   required: ["label", "type"],
                   properties: {
                     label: { type: "string" },
-                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email"] },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
                     options: { type: "array", items: { type: "string" }, nullable: true },
                     value: { type: "object", nullable: true },
                   },

@@ -12,6 +12,7 @@ import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
 import StaffSubmissionDetail from "./pages/staff/StaffSubmissionDetail";
 import ReportsPage from "./pages/reports/ReportsPage";
+import AvailableForms from "./pages/forms/AvailableForms";
 import ChangePasswordPage, { FORCED_PASSWORD_PATH } from "./pages/account/ChangePasswordPage";
 import ParentSubmit from "./pages/parent/ParentSubmit";
 import ParentConfirmation from "./pages/parent/ParentConfirmation";
@@ -137,6 +138,23 @@ export default function App() {
           <ProtectedRoute roles={["staff", "cdm_contact"]}>
             <AppShell>
               <StaffQueue />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+      {/* Available Forms — every published form in the org, grouped by the
+          caller's relationship to it. Open to ALL THREE internal roles: an admin
+          sees every row as granted, which is a free invariant check on the
+          predicate (docs/plans/public-private-forms.md §16.5/§16.6).
+          ★ Declared BEFORE `/staff/:publicId` — React Router ranks a static
+          segment above a dynamic one regardless of order, but keeping the
+          literal first makes that obvious rather than relying on the ranking. */}
+      <Route
+        path="/staff/forms"
+        element={
+          <ProtectedRoute roles={["staff", "cdm_contact", "admin"]}>
+            <AppShell>
+              <AvailableForms />
             </AppShell>
           </ProtectedRoute>
         }

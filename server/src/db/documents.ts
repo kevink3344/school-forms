@@ -2,6 +2,7 @@ import { execute } from "./queries.js";
 import { getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { notArchived } from "./dialect/shared.js";
+import { formVisibilityExists, type FormViewer } from "../access/formAccess.js";
 import type { Document, ListDocumentRow } from "./schema.js";
 
 /** Statement builders for the active dialect (see db/dialect/). */
@@ -135,6 +136,10 @@ export async function listDocuments(params: {
   schoolId?: number | null;
   organizationId?: number | null;
   submissionId?: number | null;
+  // The viewer, so a document on a private form the caller cannot read is not
+  // listed (docs/plans/public-private-forms.md §7.2). Applied through the
+  // submission -> form join this statement already has.
+  viewer?: FormViewer | null;
 }): Promise<ListDocumentRow[]> {
   // Archived submissions are hidden from every view, and the Documents list is a
   // view of them organised by their generated PDFs — so their documents go with
@@ -155,6 +160,14 @@ export async function listDocuments(params: {
   if (params.submissionId !== undefined && params.submissionId !== null) {
     clauses.push("d.submission_id = @submissionId");
     p.submissionId = params.submissionId;
+  }
+  // ★ AND-ed onto the org/school filters, never substituted for them. The form
+  // alias here is `fv` (created by formVisibilityExists) because `f` is not in
+  // scope in `queryDocuments`.
+  if (params.viewer) {
+    const vis = formVisibilityExists(params.viewer, "s.form_id");
+    clauses.push(vis.sql);
+    Object.assign(p, vis.params);
   }
   return queryDocuments(clauses, p);
 }
@@ -201,7 +214,7 @@ function queryDocuments(
  */
 export async function getDocumentById(
   dbId: number,
-  params: { schoolId?: number | null; organizationId?: number | null }
+  params: { schoolId?: number | null; organizationId?: number | null; viewer?: FormViewer | null }
 ): Promise<(ListDocumentRow & { form_id: number }) | null> {
   const clauses: string[] = ["d.id = @dbId"];
   const p: Record<string, unknown> = { dbId };
@@ -217,6 +230,13 @@ export async function getDocumentById(
   if (params.organizationId !== undefined && params.organizationId !== null) {
     clauses.push("s.organization_id = @organizationId");
     p.organizationId = params.organizationId;
+  }
+  // ★ Same rule as the list, so a document that appears in the list can always
+  // be opened — the invariant `documentScope` exists to protect.
+  if (params.viewer) {
+    const vis = formVisibilityExists(params.viewer, "s.form_id");
+    clauses.push(vis.sql);
+    Object.assign(p, vis.params);
   }
   const rows = await execute<ListDocumentRow & { form_id: number }>(
     `SELECT d.id, d.submission_id, d.document_id, d.status, d.created_by,

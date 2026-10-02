@@ -1,6 +1,7 @@
 import { Router } from "express";
 import { listSubmissions, getExportColumns, getForm } from "../db/queries.js";
 import { requireAuth, requireRoles, scopedSchoolId } from "../auth.js";
+import { canAccessForm } from "../access/formAccess.js";
 import {
   filterColumnsForRole,
   withFieldId,
@@ -42,6 +43,14 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
       res.status(404).json({ error: "Form not found" });
       return;
     }
+    // ★ 403 for an action on a form you may not read (docs/plans/public-
+    // private-forms.md §7.2). Without this, a locked form's columns and rows
+    // would be readable through the export endpoint — the picker hiding it is a
+    // UI fact, not a permission.
+    if (!(await canAccessForm(req.user!, formId))) {
+      res.status(403).json({ error: "Forbidden: no access to this form" });
+      return;
+    }
 
     const rawColumns = await getExportColumns(formId);
     // Staff-only columns are always part of the preview: for an admin that is
@@ -50,7 +59,7 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
     // see. This keeps the preview in step with /csv, which includes them too.
     const columns = withFieldId(filterColumnsForRole(rawColumns, req.user!.role, true));
 
-    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status });
+    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status, viewer: req.user! });
     const rows = await buildExportRows(columns, submissions);
 
     res.json({
@@ -100,11 +109,15 @@ exportRouter.get("/csv", requireAuth, requireRoles("staff", "cdm_contact", "admi
       res.status(404).json({ error: "Form not found" });
       return;
     }
+    if (!(await canAccessForm(req.user!, formId))) {
+      res.status(403).json({ error: "Forbidden: no access to this form" });
+      return;
+    }
 
     const rawColumns = await getExportColumns(formId);
     const columns = withFieldId(filterColumnsForRole(rawColumns, req.user!.role, includeStaffOnly));
 
-    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status });
+    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status, viewer: req.user! });
     const rows = await buildExportRows(columns, submissions);
 
     // The field label is the visible header; each value is looked up by its

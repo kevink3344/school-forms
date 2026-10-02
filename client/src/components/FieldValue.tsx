@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import { Maximize2, X } from "lucide-react";
+import { googleDocIds, googleDocHref } from "../lib/googleDoc";
 
 // ---------------------------------------------------------------------------
 // Shared answer-field rendering.
@@ -61,7 +62,7 @@ export function FieldValue({
     return (
       <div className="field">
         <span className="f-label">{label}</span>
-        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{formatValue(value, type)}</span>
+        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{renderValue(value, type)}</span>
       </div>
     );
   }
@@ -94,6 +95,24 @@ export function renderEditor(
   opts?: { expandable?: boolean; label?: string }
 ): ReactNode {
   switch (type) {
+    case "google_doc":
+      // A plain text input holding the raw id(s), matching every other type, PLUS
+      // the resolved link underneath. The common case is viewing the document, not
+      // retyping its id — but the grid wraps this in a cell that commits on Enter,
+      // so the control has to stay an ordinary input rather than becoming a link
+      // with no way to edit it.
+      return (
+        <div className="doc-edit">
+          <input
+            className="edit-input"
+            type="text"
+            value={toStr(value)}
+            onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+            placeholder="Google Drive document id"
+          />
+          {!isEmpty(value) && <GoogleDocValue value={value} />}
+        </div>
+      );
     case "textarea":
       return (
         <TextareaAnswer
@@ -389,6 +408,60 @@ export function formatValue(v: unknown, type?: string): string {
   }
   if (Array.isArray(v)) return v.join(", ");
   return str;
+}
+
+// ---------------------------------------------------------------------------
+// Read-only value rendering.
+//
+// ★ `formatValue` above MUST keep returning a string. It feeds `displayValue`,
+// which feeds the grid's saving/failed states and the export path — all of which
+// compare or concatenate the result. Returning JSX from it would break them
+// SILENTLY, because a React element is truthy so `formatValue(v) || "—"` would
+// never fall back. So the link case lives in this sibling instead.
+//
+// Returns a plain string for every type except `google_doc`, which returns links.
+// ---------------------------------------------------------------------------
+export function renderValue(v: unknown, type?: string): ReactNode {
+  if (type === "google_doc") return <GoogleDocValue value={v} />;
+  return formatValue(v, type);
+}
+
+/**
+ * A google_doc answer as clickable Docs links.
+ *
+ * A Google Forms file-upload question answers with an ARRAY of Drive ids and a
+ * short-answer question with a single string, so `googleDocIds` normalises both.
+ * Multiple documents render as a NUMBERED list (the user's chosen shape) — a bare
+ * row of links gives no way to tell them apart or to refer to "the second one".
+ */
+export function GoogleDocValue({ value }: { value: unknown }) {
+  const ids = googleDocIds(value);
+  if (ids.length === 0) return null;
+
+  const link = (id: string, i: number) => (
+    <a
+      key={`${id}-${i}`}
+      className="doc-link"
+      href={googleDocHref(id)}
+      // ★ Not optional. Without `noopener` the opened document gets a
+      // `window.opener` handle back into the app; without `noreferrer` the app's
+      // URL leaks in the Referer. Every existing external link here does this.
+      target="_blank"
+      rel="noopener noreferrer"
+    >
+      {id}
+    </a>
+  );
+
+  if (ids.length === 1) return link(ids[0], 0);
+
+  return (
+    <ol className="doc-link-list">
+      {ids.map((id, i) => (
+        <li key={`${id}-${i}`}>{link(id, i)}</li>
+      ))}
+    </ol>
+  );
 }
 
 // A display string for a read-only cell, where blank should read as a dash.

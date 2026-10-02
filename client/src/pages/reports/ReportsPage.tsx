@@ -3,6 +3,7 @@ import { ChevronDown, ChevronRight, Download, Save, Star, Trash2, X } from "luci
 import { api, ApiError } from "../../lib/api";
 import { PageHead } from "../../components/layout";
 import ColumnsPicker, { cellText } from "../../components/ColumnsPicker";
+import { renderValue } from "../../components/FieldValue";
 import { fieldIdFromKey, StaffCell } from "../../components/SubmissionsGrid";
 import { useCellEdit } from "../../lib/useCellEdit";
 import { useAuth } from "../../context/AuthContext";
@@ -526,7 +527,12 @@ export default function ReportsPage() {
           if (!field) {
             return (
               <td key={c.key} className={c.staff_only ? "grid-col-staff" : undefined}>
-                {cellText(r[c.key])}
+                {/* ★ `renderValue`, not `cellText`: a google_doc column must render
+                    as a clickable Docs link here exactly as it does in the
+                    Submissions grid. The export itself still carries the URL as
+                    TEXT (server/src/export/table.ts), so the preview and the file
+                    show the same value — one as a link, one as text. */}
+                {renderValue(r[c.key], c.type)}
               </td>
             );
           }

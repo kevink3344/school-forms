@@ -1,7 +1,9 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
-import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES } from "./schema.js";
+import type { FormVisibility } from "./schema.js";
+import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { env } from "../config/env.js";
 import type {
@@ -13,6 +15,7 @@ import type {
   SubmissionValue,
   AdhocField,
   Role,
+  RoleRow,
   Organization,
   ListDocumentRow,
   SystemMessage,
@@ -216,7 +219,7 @@ export async function setSetting(key: string, value: string): Promise<string> {
 // control, not a security boundary — `POST /api/auth/select` is passwordless and
 // is intentionally left able to sign in a hidden user (docs/plans/login-mode.md).
 export async function listUsersForSelect(organizationId?: number | null): Promise<
-  { id: number; display_name: string; email: string; role: Role }[]
+  { id: number; display_name: string; email: string; role: string }[]
 > {
   const params: Record<string, unknown> = {};
   const where =
@@ -224,7 +227,7 @@ export async function listUsersForSelect(organizationId?: number | null): Promis
       ? "WHERE u.organization_id = @organizationId AND u.active = 1 AND o.active = 1 AND u.show_on_test_screen = 1"
       : "WHERE u.active = 1 AND o.active = 1 AND u.show_on_test_screen = 1";
   if (organizationId !== undefined && organizationId !== null) params.organizationId = organizationId;
-  return execute<{ id: number; display_name: string; email: string; role: Role }>(
+  return execute<{ id: number; display_name: string; email: string; role: string }>(
     `SELECT u.id, u.display_name, u.email, u.role
      FROM dbo.users u
      INNER JOIN dbo.organizations o ON o.id = u.organization_id
@@ -477,7 +480,7 @@ export async function getUserById(id: number): Promise<User | null> {
 export async function createUser(
   email: string,
   passwordHash: string,
-  role: Role,
+  role: string,
   schoolId: number | null,
   displayName: string,
   active = true,
@@ -558,7 +561,7 @@ export async function updateUser(
     email?: string;
     active?: boolean;
     school_id?: number | null;
-    role?: Role;
+    role?: string;
     organization_id?: number | null;
     show_on_test_screen?: boolean;
   }
@@ -649,6 +652,300 @@ export async function updateUserPassword(
 }
 
 // -----------------------------------------------------------------------------
+// Roles (the admin-managed catalog behind Settings → Roles)
+//
+// These back both the CRUD endpoints and the capability cache. `role_key` is the
+// identity: it is what `users.role` points at through FK_users_role and what the
+// four JSON stores (`form_fields.roles`, `system_messages.audience`,
+// `menu_items`, `documents_link`) hold. It is therefore IMMUTABLE after create —
+// see the note on `updateRole`.
+// -----------------------------------------------------------------------------
+const ROLE_COLUMNS =
+  "id, role_key, label, description, badge, can_view, can_edit, can_export, " +
+  "can_report, school_scoped, is_admin, built_in, created_at, updated_at";
+
+export async function listRoles(): Promise<RoleRow[]> {
+  return execute<RoleRow>(`SELECT ${ROLE_COLUMNS} FROM dbo.roles ORDER BY id`);
+}
+
+export async function getRoleByKey(roleKey: string): Promise<RoleRow | null> {
+  const rows = await execute<RoleRow>(
+    `SELECT ${ROLE_COLUMNS} FROM dbo.roles WHERE role_key = @roleKey`,
+    { roleKey }
+  );
+  return rows[0] ?? null;
+}
+
+export interface CreateRoleInput {
+  role_key: string;
+  label: string;
+  description: string | null;
+  badge: string | null;
+  can_view: boolean;
+  can_edit: boolean;
+  can_export: boolean;
+  can_report: boolean;
+  school_scoped: boolean;
+  is_admin: boolean;
+}
+
+// `built_in` is never a parameter: only the boot seed can create a built-in, so
+// an admin cannot mint a role that is then undeletable and un-editable.
+export async function createRole(input: CreateRoleInput): Promise<RoleRow> {
+  const rows = await execute<RoleRow>(
+    dialect().insertReturning({
+      table: "roles",
+      columns: [
+        "role_key",
+        "label",
+        "description",
+        "badge",
+        "can_view",
+        "can_edit",
+        "can_export",
+        "can_report",
+        "school_scoped",
+        "is_admin",
+        "built_in",
+      ],
+      returning: ROLE_COLUMNS.split(", "),
+      values:
+        "@roleKey, @label, @description, @badge, @canView, @canEdit, @canExport, " +
+        "@canReport, @schoolScoped, @isAdmin, 0",
+    }),
+    {
+      roleKey: input.role_key,
+      label: input.label,
+      description: input.description,
+      badge: input.badge,
+      canView: input.can_view,
+      canEdit: input.can_edit,
+      canExport: input.can_export,
+      canReport: input.can_report,
+      schoolScoped: input.school_scoped,
+      isAdmin: input.is_admin,
+    }
+  );
+  return rows[0];
+}
+
+// The editable surface of a role.
+//
+// ⚠️ `role_key` is NOT here, and that is the whole point. Renaming a key would
+// orphan every reference to it in one silent step: `users.role` would fail the
+// FK, but the four JSON stores have no constraint at all, so every field-access
+// list, message audience and menu entry naming the old key would simply stop
+// matching — access narrows with no error. An admin who wants a different key
+// creates a new role and reassigns, which is visible work.
+//
+// `built_in` is not here either: whether a role may be deleted is not a property
+// an admin edits.
+export interface UpdateRoleInput {
+  label?: string;
+  description?: string | null;
+  badge?: string | null;
+  can_view?: boolean;
+  can_edit?: boolean;
+  can_export?: boolean;
+  can_report?: boolean;
+  school_scoped?: boolean;
+  is_admin?: boolean;
+}
+
+// Apply a partial update. The SET clause is built from the keys the caller
+// actually supplied, so a PATCH of one checkbox cannot blank the others.
+//
+// The row is read first for two reasons: (a) the caller needs a discriminable
+// `null` for "no such role", and (b) a caller that sends no editable field at
+// all must be told so rather than issuing an empty UPDATE.
+export async function updateRole(
+  roleKey: string,
+  data: UpdateRoleInput
+): Promise<RoleRow | null> {
+  const existing = await getRoleByKey(roleKey);
+  if (!existing) return null;
+
+  const set: string[] = [];
+  const params: Record<string, unknown> = { roleKey: existing.role_key };
+  const put = (column: string, param: string, value: unknown): void => {
+    set.push(`${column} = @${param}`);
+    params[param] = value;
+  };
+
+  if (data.label !== undefined) put("label", "label", data.label);
+  if (data.description !== undefined) put("description", "description", data.description);
+  if (data.badge !== undefined) put("badge", "badge", data.badge);
+  if (data.can_view !== undefined) put("can_view", "canView", data.can_view);
+  if (data.can_edit !== undefined) put("can_edit", "canEdit", data.can_edit);
+  if (data.can_export !== undefined) put("can_export", "canExport", data.can_export);
+  if (data.can_report !== undefined) put("can_report", "canReport", data.can_report);
+  if (data.school_scoped !== undefined) put("school_scoped", "schoolScoped", data.school_scoped);
+  if (data.is_admin !== undefined) put("is_admin", "isAdmin", data.is_admin);
+
+  if (set.length === 0) return existing;
+
+  // `updated_at` is set explicitly rather than left to a trigger: SQL Server
+  // declares a DEFAULT for it, and a DEFAULT does not fire on UPDATE.
+  set.push("updated_at = SYSUTCDATETIME()");
+
+  const rows = await execute<RoleRow>(
+    dialect().updateReturning({
+      table: "roles",
+      set: set.join(", "),
+      // Matched on the STORED spelling, not the caller's — role_key is
+      // COLLATE NOCASE on libSQL and case-sensitive on SQL Server, so comparing
+      // the caller's casing would work on one dialect and miss on the other.
+      where: "role_key = @roleKey",
+      returning: ROLE_COLUMNS.split(", "),
+    }),
+    params
+  );
+  return rows[0] ?? null;
+}
+
+// Delete a role.
+//
+// ⚠️ TWO guards, and neither is redundant:
+//   * `built_in` is refused here. The FK alone cannot cover this case: an
+//     installation whose only admin has been reassigned would let `admin` be
+//     deleted, and nothing could then grant it back.
+//   * `built_in = 0` is written into the WHERE clause rather than checked
+//     separately, so the guard cannot be lost by a caller that forgets to read
+//     the row first — a delete of a built-in simply matches nothing and returns
+//     null, which the route reports as "not deletable".
+//
+// The FK on `users.role` is what refuses a delete of an ASSIGNED role; SQL Server
+// raises error 547, which the route maps to a 409. That is the only automatic
+// protection — the four JSON stores are censused by `roleUsage` in the route.
+export async function deleteRole(roleKey: string): Promise<RoleRow | null> {
+  const rows = await execute<RoleRow>(
+    dialect().deleteReturning({
+      table: "roles",
+      where: "role_key = @roleKey AND built_in = 0",
+      returning: ROLE_COLUMNS.split(", "),
+    }),
+    { roleKey }
+  );
+  return rows[0] ?? null;
+}
+
+// Where a role is referenced. Counted, not just detected, because "in use" without
+// a number is unactionable — the admin cannot tell a stale experiment from 40
+// live accounts.
+export interface RoleUsage {
+  users: number;
+  form_fields: number;
+  system_messages: number;
+  menu_items: number;
+  documents_link: number;
+}
+
+/** Total references, i.e. whether the role may be deleted at all. */
+export function roleUsageTotal(usage: RoleUsage): number {
+  return (
+    usage.users +
+    usage.form_fields +
+    usage.system_messages +
+    usage.menu_items +
+    usage.documents_link
+  );
+}
+
+/**
+ * Count every reference to a role key across all five stores.
+ *
+ * ★ This exists because the FK only covers ONE of the five. `users.role` is
+ * constrained, but `form_fields.roles`, `system_messages.audience`, `menu_items`
+ * and `documents_link` hold arbitrary JSON arrays with no constraint at all — so
+ * deleting a role and recreating it "to fix a label" silently restores every
+ * grant that had been taken away, because each of those stores still names the
+ * key. The census is what makes that resurrection visible BEFORE the delete.
+ *
+ * The two JSON-heavy tables are censused in SQL with the same `%"key"%` LIKE the
+ * message audience query uses (see `audienceLikePattern`), so the pattern is
+ * defined in exactly one place. Both guard `IS NOT NULL`, because a NULL means
+ * UNRESTRICTED rather than "names this role" — counting NULLs would refuse every
+ * delete.
+ *
+ * The two app_settings rows are censused by raw JSON membership rather than
+ * through `parseMenuItems` / `parseDocumentRoles`. That is deliberate: the
+ * question is "does this stored value name the role", and a parser's
+ * normalisation (which is about what the value MEANS to a reader) is the wrong
+ * instrument. It also keeps this module from importing the routes layer.
+ */
+export async function roleUsage(roleKey: string): Promise<RoleUsage> {
+  const pattern = audienceLikePattern(roleKey);
+  const params = { pattern };
+  const countOf = (rows: { n: unknown }[], store: string): number => {
+    // ★ Throws rather than defaulting to 0. A `COUNT(*)` always returns exactly one
+    // row, so a missing row means the query shape changed — and this number is the
+    // gate on a DELETE. `Number(rows[0]?.n ?? 0)` would answer "nothing references
+    // this role", which is the one wrong answer that permits the delete the census
+    // exists to refuse. Fail loudly; the route's catch turns it into a 500.
+    if (rows.length === 0) throw new Error(`role usage census returned no row for ${store}`);
+    const n = Number(rows[0].n);
+    if (!Number.isFinite(n)) throw new Error(`role usage census returned a non-numeric count for ${store}`);
+    return n;
+  };
+
+  const userRows = await execute<{ n: unknown }>(
+    `SELECT COUNT(*) AS n FROM dbo.users WHERE role = @roleKey`,
+    { roleKey }
+  );
+  const fieldRows = await execute<{ n: unknown }>(
+    `SELECT COUNT(*) AS n FROM dbo.form_fields
+      WHERE roles IS NOT NULL AND roles LIKE @pattern ESCAPE '\\'`,
+    params
+  );
+  const messageRows = await execute<{ n: unknown }>(
+    `SELECT COUNT(*) AS n FROM dbo.system_messages
+      WHERE audience IS NOT NULL AND audience LIKE @pattern ESCAPE '\\'`,
+    params
+  );
+
+  const menuRaw = await getSetting("menu_items");
+  const documentsRaw = await getSetting("documents_link");
+
+  return {
+    users: countOf(userRows, "users.role"),
+    form_fields: countOf(fieldRows, "form_fields.roles"),
+    system_messages: countOf(messageRows, "system_messages.audience"),
+    menu_items: countJsonReferences(menuRaw, roleKey, "object"),
+    documents_link: countJsonReferences(documentsRaw, roleKey, "array"),
+  };
+}
+
+/**
+ * Whether a stored JSON blob names a role key. Returns 0 or 1 — these are single
+ * settings rows, not tables, so "how many" is either "this row names it" or not.
+ *
+ * `shape` is the container the key can appear under: `documents_link` is a flat
+ * array of role keys; `menu_items` is an object whose VALUES are arrays. A blob
+ * that does not parse, or has the wrong shape, counts as 0 — an unreadable value
+ * cannot be evidence that a role is referenced, and the route reports the two
+ * settings' counts separately so a 0 here is legible rather than ambiguous.
+ */
+function countJsonReferences(
+  raw: string | null | undefined,
+  roleKey: string,
+  shape: "array" | "object"
+): number {
+  if (raw === null || raw === undefined || raw.trim() === "") return 0;
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return 0;
+  }
+  const mentions = (v: unknown): boolean =>
+    Array.isArray(v) && v.some((r) => typeof r === "string" && r === roleKey);
+
+  if (shape === "array") return mentions(parsed) ? 1 : 0;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return 0;
+  return Object.values(parsed as Record<string, unknown>).some(mentions) ? 1 : 0;
+}
+
+// -----------------------------------------------------------------------------
 // Forms
 // -----------------------------------------------------------------------------
 export interface FormWithFields extends Form {
@@ -657,7 +954,14 @@ export interface FormWithFields extends Form {
 
 // Optional school + org filters. When provided, forms are narrowed to that org
 // (and optionally a single school). Omit both to return all forms (admin).
-export async function listForms(schoolId?: number | null, organizationId?: number | null): Promise<Form[]> {
+export async function listForms(
+  schoolId?: number | null,
+  organizationId?: number | null,
+  // The viewer, so the private-form rule is applied HERE — the one place every
+  // picker reads from (docs/plans/public-private-forms.md §7.2). Omitted means
+  // "unrestricted", which is what the admin management surfaces want.
+  viewer?: FormViewer | null
+): Promise<Form[]> {
   const params: Record<string, unknown> = {};
   const clauses: string[] = [];
   if (organizationId !== undefined && organizationId !== null) {
@@ -667,6 +971,13 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   if (schoolId !== undefined && schoolId !== null) {
     clauses.push("f.school_id = @schoolId");
     params.schoolId = schoolId;
+  }
+  // ★ AND-ed onto the org filter, never substituted for it. A grant must never be
+  // able to WIDEN a query — that is the hazard that leaks another tenant's rows.
+  if (viewer) {
+    const vis = formVisibilityClause(viewer, "f");
+    clauses.push(vis.sql);
+    Object.assign(params, vis.params);
   }
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
   // ⚠ `submission_count` counts EVERY submission including archived ones, and
@@ -682,7 +993,7 @@ export async function listForms(schoolId?: number | null, organizationId?: numbe
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
             f.status, f.pre_archive_status, f.view_columns, f.code, f.submission_seq,
-            f.doc_folder_id, f.google_form_url, f.created_at, f.updated_at,
+            f.doc_folder_id, f.google_form_url, f.visibility, f.created_at, f.updated_at,
             (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
@@ -716,6 +1027,13 @@ export async function countSubmissionsForForm(formId: number): Promise<number> {
 // Delete a form (org-scoped). Returns true when a row was deleted, false when no
 // matching form existed (or it belonged to another organization). Callers MUST
 // verify the form has zero submissions first — see countSubmissionsForForm.
+//
+// ★ The access rows go FIRST, and explicitly. Neither table has a foreign key to
+// `forms` (deliberately — see docs/plans/public-private-forms.md §5.2), so
+// nothing cascades: without these two deletes a deleted form would leave orphan
+// grants and a history naming a form that no longer exists. Children before the
+// parent, in one transaction, so a failure leaves the form intact rather than
+// half-deleted.
 export async function deleteForm(id: number, organizationId?: number | null): Promise<boolean> {
   const clauses: string[] = ["id = @id"];
   const params: Record<string, unknown> = { id };
@@ -723,15 +1041,27 @@ export async function deleteForm(id: number, organizationId?: number | null): Pr
     clauses.push("organization_id = @organizationId");
     params.organizationId = organizationId;
   }
-  const deleted = await execute<{ id: number }>(
-    dialect().deleteReturning({
-      table: "forms",
-      where: clauses.join(" AND "),
-      returning: ["id"],
-    }),
-    params
-  );
-  return deleted.length > 0;
+  return getClient().transaction(async (tx) => {
+    // Scoped to the same org as the delete, so a caller cannot remove another
+    // tenant's access rows by passing a foreign form id.
+    const owned = await tx.query<{ id: number }>(
+      `SELECT id FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
+      params
+    );
+    if (owned.length === 0) return false;
+
+    await tx.query(`DELETE FROM dbo.form_access_events WHERE form_id = @id`, { id });
+    await tx.query(`DELETE FROM dbo.form_access WHERE form_id = @id`, { id });
+    const deleted = await tx.query<{ id: number }>(
+      dialect().deleteReturning({
+        table: "forms",
+        where: clauses.join(" AND "),
+        returning: ["id"],
+      }),
+      params
+    );
+    return deleted.length > 0;
+  });
 }
 
 // Fetch a form that belongs to the provided organization (used for org-scoped
@@ -747,7 +1077,7 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
             pre_archive_status, view_columns, code, submission_seq, doc_folder_id,
-            google_form_url, created_at, updated_at
+            google_form_url, visibility, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -863,23 +1193,33 @@ function parseFormFieldOptions(raw: string[] | string | null | undefined): strin
 }
 
 // Deserialize a stored submission value for the API. Collections (checkbox /
-// any array-valued field type) are persisted via JSON.stringify on write, so
-// parse the JSON string back into an array on read; otherwise return the value
-// unchanged. NULL is passed through so callers treat empty exactly as "not set".
+// google_doc / any array-valued field type) are persisted via JSON.stringify on
+// write, so parse the JSON string back into an array on read; otherwise return the
+// value unchanged. NULL is passed through so callers treat empty exactly as "not
+// set".
+//
+// ★ The membership test is `COLLECTION_FIELD_TYPES` from schema.ts, NOT an inline
+// literal, and the distinction is load-bearing: the field TYPE is what decides
+// whether the stored string is decoded. A collection-shaped type missing from that
+// set is served as raw text and rendered with its brackets — which is precisely
+// what a google_doc answer looked like before it was listed there. Keeping the set
+// in one place is what lets a test assert every type is either in it or
+// deliberately excluded.
 function parseSubmissionValue(
   value: string | number | boolean | string[] | null,
   fieldType: string
 ): string | number | boolean | string[] | null {
   if (value == null) return null;
   if (Array.isArray(value)) return value.map(String); // already an array
-  const isCollection = fieldType === "checkbox" || fieldType === "multiselect";
-  if (!isCollection || typeof value !== "string") return value;
+  if (!COLLECTION_FIELD_TYPES.has(fieldType) || typeof value !== "string") return value;
   try {
     const parsed: unknown = JSON.parse(value);
     return Array.isArray(parsed) ? parsed.map(String) : value;
   } catch {
     // Not valid JSON (e.g. legacy data or a plain value stored for the field) —
     // return the raw string so callers still surface it rather than dropping it.
+    // A google_doc short-answer question lands here: the bare Drive id is not
+    // valid JSON, so it is returned as the single-id string it is.
     return value;
   }
 }
@@ -891,18 +1231,29 @@ export async function getFormWithFields(id: number, organizationId?: number | nu
   return { ...form, fields };
 }
 
+// Every form that has a prefix, with the id it belongs to. Two callers need the
+// same fact for different reasons: `generateFormCode` picks a collision-free
+// code from it, and `PUT /api/forms/:id` uses it to reject a duplicate prefix an
+// admin typed. The unique index (`UX_forms_code`, filtered to non-null) enforces
+// this too, but a raw index violation surfaces as a 500 whose message names an
+// index rather than the problem.
+export async function listFormCodes(): Promise<{ id: number; code: string }[]> {
+  return execute<{ id: number; code: string }>(
+    "SELECT id, code FROM dbo.forms WHERE code IS NOT NULL"
+  );
+}
+
 // Derive a short, globally-unique form code from a title (e.g. "Child Development
-// Monitor" => "CDM", "IEP" => "IEP"). The code is NOT editable by admins, so the
-// title is the only input. Uppercase, strip non-alphanumeric, truncate to 8 chars,
-// then append a numeric suffix on collision (CDM, CDM2, CDM3, ...) to preserve the
-// global-unique invariant enforced by UX_forms_code.
+// Monitor" => "CDM", "IEP" => "IEP"). This is the DEFAULT only: it runs when a
+// form is created, and an admin can replace the result in the designer's Form
+// Details card (an explicit prefix arrives through `updateForm`). Uppercase,
+// strip non-alphanumeric, truncate to 8 chars, then append a numeric suffix on
+// collision (CDM, CDM2, CDM3, ...) to preserve the global-unique invariant
+// enforced by UX_forms_code.
 export async function generateFormCode(title: string): Promise<string> {
   const base =
     title.trim().toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 8) || "FORM";
-  const existing = await execute<{ code: string }>(
-    "SELECT code FROM dbo.forms WHERE code IS NOT NULL"
-  );
-  const taken = new Set(existing.map((r) => r.code.toUpperCase()));
+  const taken = new Set((await listFormCodes()).map((r) => r.code.toUpperCase()));
   if (!taken.has(base)) return base;
   let n = 2;
   while (taken.has(`${base}${n}`)) n += 1;
@@ -918,6 +1269,7 @@ export async function createForm(
     organizationId,
     docFolderId,
     googleFormUrl,
+    visibility,
   }: {
     title: string;
     description: string | null;
@@ -926,6 +1278,10 @@ export async function createForm(
     organizationId: number;
     docFolderId: string | null;
     googleFormUrl: string | null;
+    // A form may be created already private. That is allowed and grants NOBODY:
+    // there is no account that "currently sees it", because it did not exist a
+    // moment ago (docs/plans/public-private-forms.md §6.4).
+    visibility?: FormVisibility;
   },
   fields: {
     label: string;
@@ -956,6 +1312,7 @@ export async function createForm(
         "submission_seq",
         "doc_folder_id",
         "google_form_url",
+        "visibility",
       ],
       returning: [
         "id",
@@ -969,13 +1326,14 @@ export async function createForm(
         "submission_seq",
         "doc_folder_id",
         "google_form_url",
+        "visibility",
         "created_at",
         "updated_at",
       ],
       values:
-        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl",
+        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl, @visibility",
     }),
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null }
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null, visibility: visibility ?? "public" }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -1006,6 +1364,7 @@ export async function updateForm(
     title?: string;
     description?: string | null;
     status?: string;
+    code?: string;
     doc_folder_id?: string | null;
     google_form_url?: string | null;
     fields?: {
@@ -1033,6 +1392,18 @@ export async function updateForm(
   // survive and a later Archive/Restore pair would restore the wrong status.
   // (The form designer never sends `status`, so in practice this preserves it.)
   const preArchiveStatus = status === "archived" ? existing.pre_archive_status : null;
+  // The submission-id prefix. `??` would be wrong here for the same reason it is
+  // wrong for `doc_folder_id` below — but the rule is the opposite one: an absent
+  // key AND a blank value both leave the stored prefix untouched, so only a real
+  // value writes. Blank arrives as `undefined` from `updateFormSchema`, which
+  // sanitizes the field to A-Z/0-9 and maps "nothing left" to undefined.
+  //
+  // Changing this re-prefixes only FUTURE ids: `createSubmission` mints each
+  // `public_id` from the form's code at the moment it allocates a sequence, so
+  // ids already issued keep the prefix they were issued with. Rewriting them
+  // would invalidate every link, Drive document name and Slack alert that quotes
+  // one, which is why nothing here touches `submissions`.
+  const code = data.code === undefined ? existing.code : data.code;
   // `doc_folder_id` is nullable: an explicitly-supplied null clears it, an absent
   // key leaves it unchanged. `??` would conflate null with "not provided", so
   // check presence explicitly.
@@ -1046,7 +1417,7 @@ export async function updateForm(
 
   await execute(
     `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
-            pre_archive_status=@preArchiveStatus,
+            pre_archive_status=@preArchiveStatus, code=@code,
             doc_folder_id=@docFolderId, google_form_url=@googleFormUrl,
             updated_at=SYSUTCDATETIME() WHERE id=@id`,
     {
@@ -1055,6 +1426,7 @@ export async function updateForm(
       description,
       status,
       preArchiveStatus,
+      code,
       docFolderId: docFolderId ?? null,
       googleFormUrl: googleFormUrl ?? null,
     }
@@ -1209,6 +1581,13 @@ export interface SubmissionListFilters {
   // school name, or ANY answer value. Applied in SQL so the preview grid and
   // every export format see exactly the same rows (WYSIWYG export).
   q?: string | null;
+  // The viewer, so the private-form rule narrows the rows (docs/plans/public-
+  // private-forms.md §7.2). ★ It lives HERE, in the shared filter object, rather
+  // than in the list handler alone: `submissionArchiveCounts` reads the same
+  // object, so the "N archived hidden" badge describes the same query as the
+  // rows underneath it. Adding it in one place only is the exact drift that
+  // shared reader exists to prevent.
+  viewer?: FormViewer | null;
 }
 
 /**
@@ -1250,6 +1629,13 @@ function buildSubmissionFilters(params: SubmissionListFilters): {
     clauses.push("s.submitted_at <= @to");
     p.to = params.to;
   }
+  // ★ The private-form rule, AND-ed onto the org filter — never substituted for
+  // it. `f` is already joined by every caller of this builder.
+  if (params.viewer) {
+    const vis = formVisibilityClause(params.viewer, "f");
+    clauses.push(vis.sql);
+    Object.assign(p, vis.params);
+  }
   if (params.q && params.q.trim()) {
     // Escape LIKE wildcards so a literal `%` or `_` in the search term matches
     // itself; the paired `ESCAPE '\'` clauses tell SQL Server about the escape.
@@ -1258,15 +1644,61 @@ function buildSubmissionFilters(params: SubmissionListFilters): {
     // `submission_values.value` is stored serialized (text/JSON), so this is a
     // textual match — checkbox arrays match their stored text representation.
     // An OPENJSON upgrade would give token-accurate array matching later.
+    //
+    // ★ The second disjunct exists because a google_doc answer stores the bare
+    // Drive id, so a staff member who copies the URL out of their browser would
+    // otherwise search for text the database does not hold. The fix normalises the
+    // SEARCH TERM rather than the stored value: extract an id from the query and
+    // match it against the stored value too. Normalising the stored value instead
+    // would mean re-parsing every row on every search, and would make the search
+    // disagree with what is actually stored.
+    const docId = driveDocumentIdFromQuery(params.q);
+    if (docId) {
+      p.qDocId = `%${docId.replace(/[\\%_\[]/g, (m) => `\\${m}`)}%`;
+    }
     clauses.push(
       `(s.public_id LIKE @q ESCAPE '\\'` +
         ` OR sch.name LIKE @q ESCAPE '\\'` +
         ` OR EXISTS (SELECT 1 FROM dbo.submission_values svq` +
         ` WHERE svq.submission_id = s.id` +
-        ` AND CAST(svq.value AS NVARCHAR(MAX)) LIKE @q ESCAPE '\\'))`
+        ` AND CAST(svq.value AS NVARCHAR(MAX)) LIKE @q ESCAPE '\\')` +
+        (docId
+          ? ` OR EXISTS (SELECT 1 FROM dbo.submission_values svd` +
+            ` WHERE svd.submission_id = s.id` +
+            ` AND CAST(svd.value AS NVARCHAR(MAX)) LIKE @qDocId ESCAPE '\\')`
+          : "") +
+        `)`
     );
   }
   return { clauses, p };
+}
+
+/**
+ * The Drive file id inside a pasted Google Drive URL, or null.
+ *
+ * A staff member searching for a document they have open will paste the whole URL
+ * (`https://drive.google.com/file/d/<id>/view`), but the stored answer is only the
+ * id. This pulls the id out of the term so the search can match it.
+ *
+ * ★ BOTH URL shapes are accepted, because they are both real and they differ by
+ * file type: a form-uploaded attachment is a Drive FILE
+ * (`drive.google.com/file/d/<id>/view`), while a Google Doc is
+ * `docs.google.com/document/d/<id>/edit`. The app links the first kind, but a
+ * reader may paste either — and a search that silently failed on one of them
+ * would look like the row is missing.
+ *
+ * ★ The pattern is deliberately permissive about what FOLLOWS the id (`/view`,
+ * `/edit`, `?usp=sharing`, `#heading`, or nothing) and strict about what a Drive
+ * id is (`[A-Za-z0-9_-]{10,}`). A term that merely contains a slash — a date, a
+ * path, a fraction — must NOT be treated as a document URL, so a `/d/` segment is
+ * required and a short trailing token is rejected.
+ *
+ * Returns null rather than a best guess, so the caller adds no clause at all and
+ * the ordinary textual search is unchanged.
+ */
+export function driveDocumentIdFromQuery(q: string): string | null {
+  const m = q.match(/\/(?:file|document)\/d\/([A-Za-z0-9_-]{10,})/);
+  return m ? m[1] : null;
 }
 
 export async function listSubmissions(
@@ -1500,7 +1932,7 @@ export async function listSubmissionValuesBatch(
 export async function getSubmissionDetail(
   publicId: string,
   organizationId?: number | null,
-  viewer: Role | "parent" = "admin"
+  viewer: string = "admin"
 ): Promise<SubmissionDetail | null> {
   const submission = await getSubmissionByPublicId(publicId, organizationId);
   if (!submission) return null;

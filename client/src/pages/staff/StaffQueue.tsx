@@ -12,6 +12,8 @@ import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 import { formLabel, selectableForms } from "../../lib/forms";
 import { ARCHIVE_TOGGLE_LABEL, archivedMatches, submissionNoun } from "../../lib/archive";
+import { LockedFormPanel } from "../../components/LockedFormPanel";
+import type { AvailableForm } from "../../types";
 
 // ---------------------------------------------------------------------------
 // The staff and School Contact queue.
@@ -64,6 +66,37 @@ export default function StaffQueue() {
   // Bumped by "Try again". The error box REPLACES the grid, so there is nothing
   // on screen to retry in place — the only way back is a fresh request.
   const [reloadKey, setReloadKey] = useState(0);
+
+  // The private forms this account cannot read (docs/plans/public-private-forms.md
+  // §10.1). Empty for staff and admin, because nothing is locked to them.
+  //
+  // ★ This is what makes the locked panel reachable at all. It used to render
+  // only from the zero-forms empty state — which a person with ANY other visible
+  // form never sees, so the request workflow was unreachable for exactly the
+  // person it was built for. `/staff/forms` (Available Forms) is the full list;
+  // this is the inline notice for a deep link straight to a locked form.
+  const [lockedForms, setLockedForms] = useState<AvailableForm[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .listLockedForms()
+      .then((l) => {
+        if (!cancelled) setLockedForms(l);
+      })
+      .catch(() => {
+        /* not fatal — the queue still works without the notice */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // The locked form the caller has explicitly asked for, if any. A deep link
+  // (`/staff?form_id=2`) or a saved view can name one.
+  const lockedHere = formFilter
+    ? lockedForms.find((f) => String(f.id) === formFilter) ?? null
+    : null;
 
   const formId = formFilter ? Number(formFilter) : 0;
 
@@ -324,6 +357,18 @@ export default function StaffQueue() {
             </span>
           </div>
         ) : null)}
+
+      {lockedHere && (
+        <LockedFormPanel
+          form={lockedHere}
+          onChanged={() => {
+            // Re-read both: the panel's state changed AND the form may now be
+            // readable, which changes what the queue can show.
+            void api.listLockedForms().then(setLockedForms).catch(() => undefined);
+            setReloadKey((k) => k + 1);
+          }}
+        />
+      )}
 
       {busy ? (
         <div className="loading-state">

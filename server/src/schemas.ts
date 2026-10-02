@@ -1,5 +1,30 @@
 import { z } from "zod";
-import { ROLES, FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES, REPORT_FORMATS } from "./db/schema.js";
+import { FORM_STATUS, SUBMISSION_STATUS, FIELD_TYPES, REPORT_FORMATS, FORM_VISIBILITY } from "./db/schema.js";
+
+// -----------------------------------------------------------------------------
+// Role keys
+// -----------------------------------------------------------------------------
+// A role key is a reference into `dbo.roles`, which is admin-managed data — so no
+// schema in this file can enumerate the valid values. Every `z.enum(ROLES)` that
+// used to sit on a role field was a claim baked in at MODULE LOAD, and the moment
+// an admin could add a role it became a rule that refused the feature working.
+//
+// What the schema still owns is the SHAPE: a non-empty key of at most 40
+// characters (the column width, and the FK's requirement), lowercased so a caller
+// cannot create a second spelling of an existing key. Whether the key EXISTS is a
+// database question, asked by the handler that needs the answer — see
+// `getRoleByKey`. That split is deliberate: zod answering "no such role" would
+// report it as `VALIDATION_FAILED`, a 400 about the body's shape, when the body's
+// shape was fine and the value was simply not something the catalog holds.
+export const roleKeySchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(40)
+  .transform((s) => s.toLowerCase())
+  .refine((s) => /^[a-z][a-z0-9_]*$/.test(s), {
+    message: "role keys must start with a letter and contain only a-z, 0-9 and _",
+  });
 
 // -----------------------------------------------------------------------------
 // Auth
@@ -67,7 +92,10 @@ export const createUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8).max(100),
   display_name: z.string().min(1).max(120),
-  role: z.enum(ROLES).default("staff"),
+  // A catalog key, checked by the route against `dbo.roles` so an unknown one is a
+  // 400 naming the value rather than an FK violation the error handler turns into
+  // a 500.
+  role: roleKeySchema.default("staff"),
   school_id: z.number().int().positive().optional().nullable(),
   organization_id: z.number().int().positive().optional().nullable(),
   // Whether the account is offered in the select-mode ("Test") login dropdown.
@@ -81,10 +109,60 @@ export const updateUserSchema = z
     display_name: z.string().min(1).max(120).optional(),
     email: z.string().email().optional(),
     active: z.boolean().optional(),
-    role: z.enum(ROLES).optional(),
+    role: roleKeySchema.optional(),
     school_id: z.number().int().positive().optional().nullable(),
     organization_id: z.number().int().positive().optional().nullable(),
     show_on_test_screen: z.boolean().optional(),
+  })
+  .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
+
+// -----------------------------------------------------------------------------
+// Roles (admin Settings → Roles panel)
+// -----------------------------------------------------------------------------
+// `role_key` is optional on create: when it is absent the route derives one from
+// the label. The rules the route then applies, and which this schema cannot:
+//   * `ADMIN` normalises to `admin` BEFORE the uniqueness check (roleKeySchema
+//     lowercases), because "is this key taken?" has to be asked about the form
+//     that will actually be stored or the check passes and the INSERT fails;
+//   * `built_in` is NOT a parameter at any layer. Only the boot seed can create a
+//     built-in, so an admin cannot mint a role that is then undeletable — the flag
+//     would be a way to make your own row permanent.
+//
+// The four capability booleans and `school_scoped` default to their restrictive
+// value (false), so a role created by a half-filled form cannot read or edit
+// anything by accident. `is_admin` is deliberately NOT defaulted false-and-hidden:
+// it is an explicit opt-in with a schema default of false, and the route refuses
+// to SET it true on an existing role through the update path, so granting
+// administrator power stays a create-time decision an admin makes on purpose.
+export const createRoleSchema = z.object({
+  role_key: roleKeySchema.optional(),
+  label: z.string().trim().min(1).max(60),
+  description: z.string().trim().max(400).default(""),
+  badge: z.string().trim().max(40).default("blue"),
+  can_view: z.boolean().default(false),
+  can_edit: z.boolean().default(false),
+  can_export: z.boolean().default(false),
+  can_report: z.boolean().default(false),
+  school_scoped: z.boolean().default(false),
+  is_admin: z.boolean().default(false),
+});
+
+// Update. `role_key` is intentionally absent — renaming a key would orphan every
+// reference to it, and it would do so SILENTLY in the four JSON stores, which have
+// no foreign key to fail. `built_in` is absent for the same reason it is absent on
+// create. At least one field must be supplied, so an empty body is a 400 rather
+// than a no-op that reads as success.
+export const updateRoleSchema = z
+  .object({
+    label: z.string().trim().min(1).max(60).optional(),
+    description: z.string().trim().max(400).optional(),
+    badge: z.string().trim().max(40).optional(),
+    can_view: z.boolean().optional(),
+    can_edit: z.boolean().optional(),
+    can_export: z.boolean().optional(),
+    can_report: z.boolean().optional(),
+    school_scoped: z.boolean().optional(),
+    is_admin: z.boolean().optional(),
   })
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
@@ -166,9 +244,27 @@ export const fieldSchema = z.object({
   sort_order: z.number().int().min(0).default(0),
   placeholder: z.string().max(200).optional().nullable(),
   // Roles that may access an internal (staff_only) field. Absent for
-  // parent-facing fields. Stored as-is; the server resolves defaults.
-  roles: z.array(z.enum(ROLES)).optional().nullable(),
+  // parent-facing fields. `null` means UNRESTRICTED (see `fieldAccessRoles`),
+  // which is why this must accept null and must not coerce it to an array.
+  roles: z.array(roleKeySchema).max(64).optional().nullable(),
 });
+
+// The submission-id prefix, e.g. "GOVS" so a form's ids read `GOVS-00001`.
+// Sanitized rather than rejected: the value is uppercased and stripped to
+// A-Z/0-9 because those are the only characters `formatSubmissionPublicId`
+// keeps, and a prefix the admin can see is a prefix they can predict. The 8
+// character ceiling matches `generateFormCode`'s title-derived fallback, so a
+// typed prefix can never be longer than an automatic one.
+//
+// A value that sanitizes away to nothing — a blank box, or punctuation only —
+// becomes `undefined`, which every writer reads as "leave the stored prefix
+// alone". Clearing the box is therefore non-destructive: it can never silently
+// drop a form back to the `SUB` fallback and re-prefix ids that already exist.
+const formCodeSchema = z
+  .string()
+  .transform((s) => s.trim().toUpperCase().replace(/[^A-Z0-9]/g, ""))
+  .refine((s) => s.length <= 8, { message: "Use 8 characters or fewer" })
+  .transform((s) => (s.length > 0 ? s : undefined));
 
 export const createFormSchema = z.object({
   title: z.string().min(1).max(200),
@@ -176,6 +272,10 @@ export const createFormSchema = z.object({
   school_id: z.number().int().positive().optional().nullable(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
+  // A form may be created already private. That is allowed and grants NOBODY:
+  // there is no account that "currently sees it", because it did not exist a
+  // moment ago (docs/plans/public-private-forms.md §6.4). Omitted -> 'public'.
+  visibility: z.enum(FORM_VISIBILITY).optional(),
   generate_form_fields: z.boolean().optional(),
   // Optional on create. The New Form modal collects a title and an optional
   // school and nothing else — the admin lands in the designer and adds fields
@@ -190,10 +290,66 @@ export const updateFormSchema = z.object({
   title: z.string().min(1).max(200).optional(),
   description: z.string().optional().nullable(),
   status: z.enum(FORM_STATUS).optional(),
+  // Editable here but not on create: a new form's prefix is derived from its
+  // title, and the designer's Form Details card is where an admin replaces it
+  // with the one they actually want. Changing it re-prefixes only future ids —
+  // see the PUT handler, which deliberately never rewrites `public_id`s that
+  // have already been issued.
+  code: formCodeSchema.optional(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
   generate_form_fields: z.boolean().optional(),
   fields: z.array(fieldSchema).optional(),
+});
+
+// -----------------------------------------------------------------------------
+// Form access — public/private forms (docs/plans/public-private-forms.md §8)
+// -----------------------------------------------------------------------------
+
+/**
+ * Ask for access to a private form. Only the form id — the USER comes from the
+ * session, never the body, so a caller cannot request on someone else's behalf.
+ */
+export const requestAccessSchema = z.object({
+  form_id: z.number().int().positive(),
+});
+
+/** Withdraw the caller's own pending request. Same shape, same reason. */
+export const withdrawAccessSchema = z.object({
+  form_id: z.number().int().positive(),
+});
+
+/**
+ * An administrator's decision on one account's row.
+ *
+ * ★ `event` is NOT accepted from the body — the server derives it from
+ * `decision`. A caller must not be able to label their own action in the audit
+ * log, and `revoke` reaching the same `denied` state as `decline` is exactly the
+ * case where a caller-supplied label would make the history wrong.
+ */
+export const decideAccessSchema = z.object({
+  user_id: z.number().int().positive(),
+  form_id: z.number().int().positive(),
+  decision: z.enum(["approve", "decline", "revoke"]),
+  // A decline carries a reason and the requester sees it (§15 Q5). 400 is the
+  // per-field bound; it is deliberately generous rather than derived from a
+  // narrower business rule, so a future per-decision limit can still speak.
+  note: z.string().max(400).optional().nullable(),
+});
+
+/** Set a form's visibility. The backfill side effect is in the handler. */
+export const setVisibilitySchema = z.object({
+  visibility: z.enum(FORM_VISIBILITY),
+});
+
+/**
+ * Remove one account's access to one form, from the admin's Edit User drawer.
+ *
+ * Only the form id — the USER comes from the path, so the body cannot redirect
+ * the removal to a different account than the one the admin has open.
+ */
+export const removeAccessSchema = z.object({
+  form_id: z.number().int().positive(),
 });
 
 // -----------------------------------------------------------------------------
@@ -325,12 +481,14 @@ export const updateReportViewSchema = z
 // -----------------------------------------------------------------------------
 // System Messages
 // -----------------------------------------------------------------------------
-// The audience list. `.max(ROLES.length)` is a pure abuse guard, not a business
-// rule: it is deliberately LOOSER than the set of roles that exist, so that a
-// payload naming an unknown role is rejected by `z.enum(ROLES)` — which names the
-// offending value in its message — rather than by a length check that would fire
-// first on a three-item array and say something useless.
-const audienceSchema = z.array(z.enum(ROLES)).max(ROLES.length);
+// The audience list. `.max(64)` is a pure abuse guard at a generous absolute
+// bound, deliberately not derived from the number of roles that exist — deriving
+// it made the cap equal to the widest legitimate value, so at four roles and up
+// the length check fired before anything could name the offending entry, and the
+// caller was told "too many roles" for a list of four. Existence is a handler
+// question (the route looks each key up), not a schema one, because a schema
+// cannot answer it: the valid set is a database table.
+const audienceSchema = z.array(roleKeySchema).max(64);
 
 // Create. `body` defaults to "" because the column is NOT NULL and the UI makes
 // the description optional; the read path in `queries.ts` relies on that "" being

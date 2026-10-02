@@ -45,13 +45,31 @@ export const ROUTES: RouteEntry[] = [
   { method: "post", path: "/api/schools/import", auth: "admin", tags: "Schools" },
   { method: "get", path: "/api/forms", auth: "admin", tags: "Forms" },
   { method: "post", path: "/api/forms", auth: "admin", tags: "Forms" },
+  // Public/Private forms (docs/plans/public-private-forms.md). `/available` is
+  // declared BEFORE `/{id}` so the literal is matched first — Express matches in
+  // registration order, and a dynamic route registered earlier would swallow it.
+  { method: "get", path: "/api/forms/available", auth: "staff", tags: "Forms" },
   { method: "get", path: "/api/forms/public", auth: "none", tags: "Forms" },
   { method: "get", path: "/api/forms/{id}/public", auth: "none", tags: "Forms" },
   { method: "get", path: "/api/forms/{id}", auth: "admin", tags: "Forms" },
   { method: "put", path: "/api/forms/{id}", auth: "admin", tags: "Forms" },
   { method: "patch", path: "/api/forms/{id}/status", auth: "admin", tags: "Forms" },
+  { method: "patch", path: "/api/forms/{id}/visibility", auth: "admin", tags: "Forms" },
   { method: "get", path: "/api/forms/{id}/columns", auth: "staff", tags: "Forms" },
   { method: "put", path: "/api/forms/{id}/columns", auth: "staff", tags: "Forms" },
+  // Form access — requests, decisions and grants. `staff` in this vocabulary
+  // means "staff, School Contacts and admins"; the admin-only routes are marked
+  // `admin` individually (there is no router-level guard, by design).
+  { method: "get", path: "/api/form-access/mine", auth: "staff", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/requests", auth: "staff", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/requests/withdraw", auth: "staff", tags: "Form Access" },
+  { method: "get", path: "/api/form-access/requests", auth: "admin", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/requests/decide", auth: "admin", tags: "Form Access" },
+  { method: "get", path: "/api/form-access/grants", auth: "admin", tags: "Form Access" },
+  { method: "get", path: "/api/form-access/summary", auth: "admin", tags: "Form Access" },
+  // Per-account access, for the admin's Edit User drawer.
+  { method: "get", path: "/api/form-access/user/{userId}", auth: "admin", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/user/{userId}/remove", auth: "admin", tags: "Form Access" },
   { method: "post", path: "/api/submissions", auth: "none", tags: "Submissions" },
   { method: "get", path: "/api/submissions", auth: "staff", tags: "Submissions" },
   // Archive line. `counts` is two-segment on purpose so it cannot be captured by

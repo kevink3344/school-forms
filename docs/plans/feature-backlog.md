@@ -229,6 +229,25 @@ miss means either a broken login or a **silent security hole**. The plan propose
 **Judgement:** worth doing *before* the fourth role is actually needed, because the cost of
 the manual change rises with every new role-check added in the meantime.
 
+> **Status 2026-09-30 — planned.** [`roles-settings.md`](./roles-settings.md) now specifies this
+> (Option B, *runtime admin-authored roles*), with [`reviewer-role.md`](./reviewer-role.md)
+> retained for its census. Two corrections to the estimate above, both measured:
+>
+> - **"~12 places" is low.** The real census is **21 `requireRoles("staff","cdm_contact","admin")`
+>   sites** (submissions 12, documents 4, forms 3, export 2, plus the `REPORT_ROLES` constant in
+>   `routes/reports.ts` L40), **~14 admin-only sites**, **9 `cdm_contact` sites in `server/src/swagger.ts`**,
+>   and the client's own gates. The judgement stands and is now better supported: the cost per new
+>   role-check is higher than this entry assumed.
+> - **The mechanism is not "make `ROLES` data-driven" — that cannot be done.** `ROLES` is a *type*;
+>   four consumers read it without database access (`fieldAccessRoles()` `schema.ts` L140,
+>   `messageAudienceRoles()` L1309, `defaultMenuItems()` `routes/settings.ts` L68) or at module load
+>   (`z.enum(ROLES)` in `schemas.ts`). The plan replaces the *snapshot* those functions return with a
+>   `null` sentinel meaning "unrestricted", resolved where the viewer's role is known — see
+>   `roles-settings.md` §2. That part is **independently shippable with no schema change** (its P2).
+>
+> Also found while measuring: `audienceSchema` in `schemas.ts` L356 carries a **latent 3-role cap**
+> (`.max(ROLES.length)`), which becomes a real bug the moment a fourth role exists.
+
 ### 7.5 Form open / close windows — **Effort M, Risk low**
 
 `PATCH /api/forms/{id}/status` controls publish state (`draft`/`published`/`archived`) but

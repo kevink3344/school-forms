@@ -131,21 +131,29 @@ function functionNamed(file: string, name: string): FunctionSlice {
 // 1. Audience semantics — the pure rule, no database involved.
 // -----------------------------------------------------------------------------
 describe("messageAudienceRoles — what an audience means", () => {
-  it("treats an unset audience as every role", () => {
-    // The convention is copied from fieldAccessRoles(): NULL/unset means "unset",
-    // and an unset audience must resolve to EVERY role. Inverting this is not a
-    // visible error anywhere — it just silently narrows a pre-existing message to
-    // nobody, and the first person to notice is a user who never saw the notice.
-    expect(messageAudienceRoles(null)).toEqual([...ROLES]);
-    expect(messageAudienceRoles(undefined)).toEqual([...ROLES]);
+  it("treats an unset audience as every role, as the NULL sentinel", () => {
+    // ★ This expectation used to be `.toEqual([...ROLES])`, and it was WRONG the
+    // moment an admin could create a role. `[...ROLES]` is a snapshot of the four
+    // built-ins taken at module load, so "everyone" would have meant "everyone who
+    // existed when this file was written" — a notice the admin addressed to all
+    // roles would be invisible to a role created afterwards, and nothing anywhere
+    // would report it. The contract is now `null` = UNRESTRICTED, resolved where
+    // the viewer's role is known (see `canSeeField`), which is the only form of
+    // "everyone" that stays true when the role set changes.
+    //
+    // The direction of the failure is what makes this worth a comment: narrowing a
+    // pre-existing message to nobody is silent, and the first person to notice is a
+    // user who never saw the notice.
+    expect(messageAudienceRoles(null)).toBeNull();
+    expect(messageAudienceRoles(undefined)).toBeNull();
   });
 
   it("treats an empty string as unset rather than as a role list", () => {
     // `${roles.join(",")}` on an empty list is "", and "" is not JSON — so this
     // is the shape a form that never got a selection can store. It has to mean
     // "unset", because the alternative (nobody) hides the message from everyone.
-    expect(messageAudienceRoles("")).toEqual([...ROLES]);
-    expect(messageAudienceRoles("   ")).toEqual([...ROLES]);
+    expect(messageAudienceRoles("")).toBeNull();
+    expect(messageAudienceRoles("   ")).toBeNull();
   });
 
   it("keeps an explicit empty array as NOBODY, and it is a different answer from unset", () => {
@@ -180,7 +188,7 @@ describe("messageAudienceRoles — what an audience means", () => {
         `the corrupt audience ${JSON.stringify(corrupt)} no longer degrades to every role. ` +
           "A parse failure must fail OPEN — see schema.ts; failing closed hides the notice " +
           "from everybody and nothing reports it."
-      ).toEqual([...ROLES]);
+      ).toBeNull();
     }
   });
 
@@ -331,6 +339,60 @@ const SCOPE_SITES: Record<string, ScopedSite> = {
       "The `EXISTS` on the message's organization and the `NOT EXISTS` on (message, user) are " +
       "both inside the one INSERT ... SELECT, so there is no window between checking and acting, " +
       "and a double-clicked close is a no-op rather than a duplicate-key error.",
+  },
+  // ★ The ONE deliberate exception, and it is not a System Messages statement at
+  // all — it is the role-delete census, which reaches this table because
+  // `system_messages.audience` is one of the five places a role key can be
+  // referenced. It is declared HERE rather than exempted, because the discovery
+  // scan is deliberately dumb ("does this function's SQL name either table") and an
+  // exemption list would be the thing that goes stale.
+  //
+  // org: false is the point. Counted installation-wide ON PURPOSE: the FK that
+  // makes `DELETE FROM dbo.roles` fail is global, so an organization-scoped count
+  // would under-report and offer a delete that then cannot succeed — and the panel
+  // reads this same function to decide whether to offer the button at all. A
+  // count scoped to one tenant would make the button and the 409 disagree.
+  //
+  // It returns a COUNT, never a row: no message body, title or author crosses the
+  // tenant line, and the only routes that call it are `requireAdmin()`.
+  roleUsage: {
+    org: false,
+    user: false,
+    why:
+      "Deliberately installation-wide: it counts references to a role key across five stores " +
+      "to decide whether the role may be deleted, and the constraint that refuses the delete " +
+      "(FK_users_role) is installation-wide too. Scoping this to one organization would " +
+      "under-report, permit the button, and then fail with a 409 — the mismatch this census " +
+      "exists to remove. Returns an integer count, never a row.",
+  },
+  // The next two are NOT statement scopes — neither function contains a single
+  // SQL character. They are artifacts of the SLICER, declared so the pinned set
+  // stays exact rather than exempted, for the same reason as `roleUsage` above.
+  //
+  // `DECLARATION` recognises `function` and `const x = (` at column 0, and
+  // nothing else — so `export interface RoleUsage { … }` is invisible to it and
+  // the interface lands inside the slice of the function BEFORE it (`deleteRole`,
+  // whose slice then runs on to `roleUsageTotal`). The interface's field list
+  // spells `system_messages: number`, and `roleUsageTotal` adds those same fields
+  // up, so the dumb scan sees the table name in both.
+  //
+  // Pinned `org: false, user: false` because there is nothing to scope: the SQL
+  // that actually touches the table is `roleUsage` above, and that is where the
+  // scope decision is stated and checked.
+  deleteRole: {
+    org: false,
+    user: false,
+    why:
+      "Slicer artifact, not a statement: its slice absorbs the `RoleUsage` interface declared " +
+      "after it, whose field list names `system_messages`. The statement it really contains — " +
+      "the deleteReturning — touches `roles` only.",
+  },
+  roleUsageTotal: {
+    org: false,
+    user: false,
+    why:
+      "Slicer artifact, not a statement: a pure sum of the `RoleUsage` fields, so it names " +
+      "`system_messages` as a property rather than as a table. No SQL, no scope to declare.",
   },
 };
 

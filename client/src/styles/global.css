@@ -1113,6 +1113,99 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .field .f-value.inline { display: inline-flex; flex-wrap: wrap; gap: 6px; }
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 
+/* Google Document answers — the Drive id rendered as a Docs link.
+   ★ `word-break: break-all` is load-bearing: a Drive id is a 33-character
+   unbroken token, and in a grid cell or a narrow detail column it would
+   otherwise set the column's min-content width and push the table wider than
+   its scroll container. Breaking mid-token is the lesser evil for an id. */
+/* ★ `--accent`, not a `--link` token: this app declares no `--link` variable (and
+   no `[data-theme]` block), so `var(--link, var(--accent))` would be a fallback
+   that never fires and reads as though a themed token existed. Use the real one. */
+.doc-link { color: var(--accent); text-decoration: underline; word-break: break-all; }
+.doc-link:hover { text-decoration: none; }
+
+/* Numbered list for a multi-document answer. Reset the UA list styling so the
+   numbers sit close to the links rather than indenting them across the cell. */
+.doc-link-list { margin: 0; padding-left: 18px; display: flex; flex-direction: column; gap: 2px; }
+.doc-link-list li { word-break: break-all; }
+
+/* The editor pairs the raw-id input with the resolved link beneath it. */
+.doc-edit { display: flex; flex-direction: column; gap: 6px; align-items: flex-start; }
+.doc-edit .edit-input { width: 100%; }
+
+/* ---------------------------------------------------------------------------
+   Locked forms — the "there is something here and you are not in it" state
+   (docs/plans/public-private-forms.md §10.1).
+
+   ★ `display: flex` with `gap` needs the prose WRAPPED in a child element, or
+   each bare text node becomes its own flex item and the gap lands between the
+   fragments — a note that renders ragged while every number in it is correct.
+   `.locked-body` is that wrapper.
+   --------------------------------------------------------------------------- */
+.locked-panel {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--tint-line, var(--border));
+  border-radius: var(--radius);
+  background: var(--tint);
+  margin-bottom: 16px;
+}
+.locked-panel--compact { padding: 10px 12px; margin-bottom: 10px; }
+.locked-icon { flex: 0 0 auto; color: var(--text-muted); margin-top: 2px; }
+.locked-body {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  align-items: flex-start;
+}
+.locked-text { font-size: 0.875rem; color: var(--text); line-height: 1.45; }
+.locked-note { color: var(--text-muted); }
+.locked-error { font-size: 0.8125rem; color: var(--danger, #b3261e); }
+
+/* Available Forms page — group headings and secondary cell text. */
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9375rem;
+  font-weight: 600;
+  margin: 0 0 12px;
+  color: var(--text);
+}
+.empty-note {
+  margin: 0;
+  padding: 6px 0;
+  font-size: 0.875rem;
+  color: var(--text-muted);
+}
+.cell-sub { font-size: 0.75rem; color: var(--text-muted); margin-top: 2px; }
+
+/* An account's access history, in the Access Requests panel. Compact and
+   unstyled beyond the marker, because it is a timeline rather than a list. */
+.event-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+
+/* A titled block inside a drawer body, separated from the form fields above it.
+   The drawer body is a plain flow container, so this is the boundary — a bare
+   <h3> would sit flush against the last field. */
+.drawer-section {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid var(--border);
+}
+
 /* Ad-hoc staff-only field composer + controls */
 .adhoc-composer {
   border: 1px dashed var(--border); border-radius: var(--radius); padding: 14px 16px; margin-top: 16px;
@@ -1543,7 +1636,7 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   border: none; background: transparent; box-shadow: none;
 }
 /* The sign-in card is capped at 400px, but a <select> renders its WIDEST OPTION
-   as its min-content — "Sammy Watkins · swatkins@gmail.com · School Contact"
+   as its min-content — the Test User label ("<name> · <email> · <role>")
    measures 417px — and every flex ancestor takes an automatic minimum size from
    it, so the card's min-content became 459px and the controls were laid out past
    the right edge, where .login-card's overflow:hidden sliced them off. Allowing

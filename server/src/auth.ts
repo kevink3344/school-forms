@@ -2,14 +2,32 @@ import jwt, { type SignOptions } from "jsonwebtoken";
 import type { Request, Response, NextFunction } from "express";
 import { env } from "./config/env.js";
 import type { Role } from "./db/schema.js";
+import {
+  roleHasCapability,
+  schoolScopedFromCache,
+  findRoleByKey,
+  type RoleCapability,
+} from "./db/roles-cache.js";
 
 // -----------------------------------------------------------------------------
 // Token payloads
 // -----------------------------------------------------------------------------
+//
+// ⚠ `role` is a plain `string`, not the `Role` union, and that is a deliberate
+// consequence of roles becoming admin-managed data (Settings → Roles). The union
+// still names the BUILT-INS (it is what the boot seed writes and what a UI
+// labels), but a token can carry any key an admin has created, and a claim is
+// unvalidated text until something checks it against the catalog. Typing it as
+// the union would have been a claim the compiler could not keep — it would have
+// silently rejected every custom role at the first function boundary that used
+// `Role`, with a type error rather than a permission decision.
+//
+// Validation happens once, at the authorization boundary: an unknown key holds
+// NO capability (see `requireCapability` and roles-cache.ts).
 export interface AccessPayload {
   sub: number; // user id
   email: string;
-  role: Role;
+  role: string;
   school_id: number | null;
   organization_id: number | null; // the user's single org (tenant boundary)
   type: "access";
@@ -23,7 +41,7 @@ export interface RefreshPayload {
 interface JwtUser {
   id: number;
   email: string;
-  role: Role;
+  role: string;
   school_id: number | null;
   organization_id: number | null;
 }
@@ -41,7 +59,7 @@ declare global {
 export function signAccessToken(user: {
   id: number;
   email: string;
-  role: Role;
+  role: string;
   school_id: number | null;
   organization_id: number | null;
 }): string {
@@ -136,7 +154,19 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 }
 
-export function requireRoles(...roles: Role[]) {
+// Named-role guard. Kept for the routes whose membership genuinely is a fixed
+// set — `admin` is not a capability (it is the `is_admin` flag), and the public
+// self-registration route hard-codes its own list.
+//
+// ⚠ Do NOT reach for this to gate a new feature. A list of role keys is a
+// snapshot of the roles that existed when the line was written, so a custom role
+// can never be granted access by it and — worse — nothing fails when that
+// happens; the new role simply sees a 403 nobody can explain. Use
+// `requireCapability("view" | "edit" | "export" | "report")` instead, which asks
+// what the role MAY DO and therefore covers roles that did not exist yet.
+//
+// `role` is read as a string so a catalog key flows through without a cast.
+export function requireRoles(...roles: readonly string[]) {
   return (req: Request, res: Response, next: NextFunction): void => {
     if (!req.user) {
       res.status(401).json({ error: "Unauthenticated" });
@@ -151,6 +181,71 @@ export function requireRoles(...roles: Role[]) {
 }
 
 // -----------------------------------------------------------------------------
+// Capability guards
+// -----------------------------------------------------------------------------
+//
+// Capabilities are what a role MAY DO, resolved from the catalog in
+// `dbo.roles` and cached in memory (see db/roles-cache.ts for the TTL and the
+// invalidation story). These are the guards a new route should use.
+//
+// `async` on purpose: the middleware awaits the catalog rather than reading a
+// stale snapshot, and Express accepts an async middleware happily. Any error
+// from the catalog load goes to `next(err)` so it becomes the app's normal 500
+// rather than a silently-allowed request.
+//
+// ⚠️ An UNKNOWN role holds NO capability. This is the opposite of the old
+// named-role guard in one important way: there, a role nobody listed was denied
+// by omission; here it would be denied by an explicit `false`. Either way the
+// answer is "no" — the point of writing it down is that a typo in a role key, a
+// half-finished delete, or a token minted before a role was removed must not
+// become a working account.
+export function requireCapability(capability: RoleCapability) {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    try {
+      const row = await findRoleByKey(req.user.role);
+      if (!roleHasCapability(row, capability)) {
+        res.status(403).json({
+          error: `Forbidden: your role does not have the "${capability}" capability`,
+        });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+// Administrator-only. Reads the catalog's `is_admin` flag rather than the string
+// "admin", so granting administrator power to a second role (an operations
+// account, say) is a settings change and not a code change.
+//
+// The built-in `admin` role always carries `is_admin = 1` and the boot ladder
+// re-derives that flag on every start, so this cannot be locked out by an edit.
+export function requireAdmin() {
+  return async (req: Request, res: Response, next: NextFunction): Promise<void> => {
+    if (!req.user) {
+      res.status(401).json({ error: "Unauthenticated" });
+      return;
+    }
+    try {
+      const row = await findRoleByKey(req.user.role);
+      if (!row?.is_admin) {
+        res.status(403).json({ error: "Forbidden: administrator access required" });
+        return;
+      }
+      next();
+    } catch (err) {
+      next(err);
+    }
+  };
+}
+
+// -----------------------------------------------------------------------------
 // School scoping
 // -----------------------------------------------------------------------------
 // The identity fields the scoping helpers need. `JwtUser` satisfies this.
@@ -160,11 +255,19 @@ export interface ScopedUser {
   organization_id?: number | null;
 }
 
-// Roles restricted to a single school. Deliberately NOT staff: a staff member
-// sees every submission in their organization regardless of the school they
-// registered under. A School Contact stays scoped to their own school.
+// Roles restricted to a single school.
+//
+// ★ Read from the role CATALOG (`school_scoped`), not from the role's name. This
+// used to be `role === "cdm_contact"`, which meant a custom role an admin
+// created as a School Contact could not be school-scoped — the setting existed,
+// was settable in the panel, and did nothing. Falls back to the historical
+// answer when the catalog has not loaded yet, so the boot window behaves exactly
+// as the app did before roles were data. See roles-cache.ts.
+//
+// Deliberately NOT staff: a staff member sees every submission in their
+// organization regardless of the school they registered under.
 export function isSchoolScoped(role: string): boolean {
-  return role === "cdm_contact";
+  return schoolScopedFromCache(role);
 }
 
 // The school filter a listing endpoint should apply for this user. Returns the

@@ -1,8 +1,67 @@
 // -----------------------------------------------------------------------------
 // Enum values (kept in TS; validated at the app layer)
 // -----------------------------------------------------------------------------
-export const ROLES = ["admin", "staff", "cdm_contact"] as const;
+// The BUILT-IN roles — the four rows the boot seed guarantees exist in
+// `dbo.roles` (see docs/plans/roles-settings.md §3.3). This is NO LONGER the
+// complete set of roles: an admin can create more, and they live only in the
+// database.
+//
+// ⚠️ Anything that expands `ROLES` into an access list is therefore making a
+// claim about "the roles that exist today" that will silently become false the
+// moment a fifth role is created. `fieldAccessRoles` and `messageAudienceRoles`
+// below used to do exactly that; they now return a `null` SENTINEL meaning
+// "unrestricted" instead, and the sentinel is resolved where the viewer's role
+// is known (see the long note above `messageAudienceRoles`).
+//
+// Legitimate remaining uses of `ROLES`: seeding the catalog, naming the
+// built-ins in a UI, and defaulting a brand-new installation. NOT: deciding who
+// may see something.
+//
+// ★ This array must list every built-in the boot seed inserts. It had drifted a
+// row behind — `reviewer` was seeded (see both dialects' seed ladder) while this
+// still named three, so `knownRoleKeys()`' cold-cache fallback rejected the
+// newest role until the catalog finished loading. A hand-kept copy of a
+// machine-maintained set is only ever as good as the gate that compares them.
+export const ROLES = ["admin", "staff", "cdm_contact", "reviewer"] as const;
 export const FORM_STATUS = ["draft", "published", "archived"] as const;
+// Who may READ a form's results (docs/plans/public-private-forms.md).
+//
+// ★ `public` is the DEFAULT and the value of every row that predates the column,
+// which is what makes shipping it a behaviour-preserving change: nothing narrows
+// until an administrator deliberately marks one form private.
+//
+// ★ This is about READING, not submitting. The parent path is untouched — a
+// private form still serves its questions publicly and still accepts answers.
+export const FORM_VISIBILITY = ["public", "private"] as const;
+export type FormVisibility = (typeof FORM_VISIBILITY)[number];
+// The status a form_access row may hold. One row per (user, form); the PK is the
+// idempotency mechanism.
+//
+// ★ `denied` covers BOTH "declined" and "revoked" — the requester's experience is
+// identical (no access, no self-service way back) and dbo.form_access_events is
+// what tells the two apart afterwards. Do not add a fourth state for a revoke.
+export const FORM_ACCESS_STATUS = ["pending", "approved", "denied"] as const;
+export type FormAccessStatus = (typeof FORM_ACCESS_STATUS)[number];
+// HOW a row came to exist — never what the person wants. `backfill` is the
+// grandfathered grant written when a form is switched to private, and it must
+// stay distinguishable from a grant an administrator made deliberately, or "why
+// does this person have access?" has no answer that comes from the data.
+//
+// ★ `backfill` must NEVER be read as consent. A future "notify everyone with a
+// grant" feature that treats it as an opt-in would message people who never asked.
+export const FORM_ACCESS_SOURCE = ["request", "backfill", "direct"] as const;
+export type FormAccessSource = (typeof FORM_ACCESS_SOURCE)[number];
+// The append-only audit event. Written by the server, never accepted from a
+// request body — a caller must not be able to label their own action in the log.
+export const FORM_ACCESS_EVENT = [
+  "requested",
+  "withdrawn",
+  "approved",
+  "declined",
+  "revoked",
+  "backfilled",
+] as const;
+export type FormAccessEvent = (typeof FORM_ACCESS_EVENT)[number];
 export const SUBMISSION_STATUS = [
   "submitted",
   "in_review",
@@ -18,7 +77,30 @@ export const FIELD_TYPES = [
   "checkbox",
   "radio",
   "email",
+  "google_doc",
 ] as const;
+
+// Field types whose stored value is a JSON-encoded ARRAY.
+//
+// ★ This is the ONE place that decides whether a stored answer string is decoded
+// as JSON. `parseSubmissionValue` (db/queries.ts) reads it, and it is keyed on the
+// field TYPE rather than on the shape of the string, because a plain string is
+// not valid JSON and a JSON string that parses to a non-array must survive.
+//
+// `google_doc` belongs here because a Google Forms file-upload question answers
+// with an ARRAY of Drive file ids, and the write path JSON.stringify's any array.
+// Omit it and the raw text '["1qcUzz…"]' is served to every renderer and printed
+// with its brackets and quotes — which is exactly what the submission detail page
+// showed before this type existed.
+//
+// `multiselect` is listed even though it is not in FIELD_TYPES: it was a
+// historical spelling that may still appear in stored rows, and dropping it would
+// silently stop decoding those.
+export const COLLECTION_FIELD_TYPES: ReadonlySet<string> = new Set([
+  "checkbox",
+  "multiselect",
+  "google_doc",
+]);
 
 export type Role = (typeof ROLES)[number];
 export type FormStatus = (typeof FORM_STATUS)[number];
@@ -40,6 +122,45 @@ export interface Organization {
   created_at: Date;
 }
 
+// A row of the admin-managed role catalog (`dbo.roles`, Settings → Roles).
+//
+// `role_key` is the value stored in `users.role` and in the four JSON stores
+// (`form_fields.roles`, `system_messages.audience`, `menu_items`,
+// `documents_link`), so it is IMMUTABLE once created — renaming it would orphan
+// every one of those references with no error anywhere. The label is the part
+// an admin edits.
+//
+// The seven flags are deliberately flat booleans rather than a JSON blob: the
+// capability guard reads them on every request, and a JSON column would have to
+// be parsed (and could be malformed) on that path.
+export interface RoleRow {
+  id: number;
+  role_key: string;
+  label: string;
+  description: string | null;
+  badge: string | null;
+  /** May read submissions, forms, documents and the ad-hoc read routes. */
+  can_view: boolean;
+  /** May write: status changes, archive/restore, field values, retries. */
+  can_edit: boolean;
+  /** May take the deliberately binary exports (/export/csv, a document PDF). */
+  can_export: boolean;
+  /** May reach /api/reports. */
+  can_report: boolean;
+  /** Narrowed to their own school, exactly as `cdm_contact` is today. */
+  school_scoped: boolean;
+  /** Full access, including users, schools, form authoring and settings. */
+  is_admin: boolean;
+  /**
+   * Seeded by the boot ladder and therefore never deletable and never
+   * capability-editable. Guards the `admin` role in an installation with zero
+   * admin users, which the foreign key alone cannot.
+   */
+  built_in: boolean;
+  created_at: Date;
+  updated_at: Date;
+}
+
 export interface School {
   id: number;
   source_id: number | null;
@@ -54,7 +175,17 @@ export interface User {
   id: number;
   email: string;
   password_hash: string;
-  role: Role;
+  // A key into `dbo.roles`, enforced by FK_users_role.
+  //
+  // ⚠️ Deliberately `string`, not the `Role` union. Roles are admin-managed rows
+  // now, so an account can hold a key that did not exist when this file was
+  // written. Typing it as the union would not have made the value safe — it would
+  // only have made every custom role a compile error at the first boundary that
+  // mentioned `Role`, which is a build failure where a permission decision is
+  // wanted. The FK is the real validator; the capability guards refuse an unknown
+  // key. `Role` still names the BUILT-INS, which is what the boot seed and the
+  // UI labels are written against.
+  role: string;
   school_id: number | null;
   organization_id: number;
   display_name: string;
@@ -105,6 +236,20 @@ export interface Form {
   // Optional link to the source Google Form this form mirrors. Purely
   // informational — shown to staff so they can open it. No API integration.
   google_form_url: string | null;
+  // Who may READ this form's results (docs/plans/public-private-forms.md).
+  //
+  // `public` (the default, and what every existing form is) means every internal
+  // member of the organization sees it, exactly as before this column existed.
+  // `private` means the organization's School Contacts (`cdm_contact`) do not see
+  // it unless they hold an approved row in dbo.form_access. **Administrators and
+  // `staff` are unaffected either way** — the predicate's first disjunct exempts
+  // them — which is what keeps this a role carve-out rather than a general
+  // permission system.
+  //
+  // ★ This narrows READING only. The parent submission path is untouched: a
+  // private form still serves its questions publicly and still accepts answers
+  // (see docs/plans/public-private-forms.md §3.2).
+  visibility: FormVisibility;
   // Number of submissions attached to this form. Populated by listForms (computed
   // subquery) so the admin Forms list can gate the Delete action. A form with any
   // submissions is NOT deletable (submissions.form_id cascades on delete).
@@ -123,38 +268,48 @@ export interface FormField {
   placeholder: string | null;
   // Roles that can access this field when it is internal (staff_only). Stored as
   // a JSON string array (e.g. '["admin","staff"]'); NULL for parent-facing fields.
-  // When NULL/empty on a staff_only field, it defaults to all current roles
-  // (admin + staff) so existing rows behave as they did before. Future roles are
-  // expressed by simply adding them to this array — no schema change needed.
+  // When NULL on a staff_only field it means UNRESTRICTED — every role, including
+  // ones created later — so existing rows keep behaving as they always did. An
+  // empty array is the distinct "granted to nobody" state. See fieldAccessRoles.
   roles: string[] | null;
 }
 
 // Resolve the roles that may access an internal (staff_only) field.
 //
-// NULL/undefined roles means "unset" and defaults to every current role, which
-// keeps legacy rows (created before per-field access existed) behaving as they
-// always did. An explicitly EMPTY array means the admin deliberately granted no
-// role access, so it must resolve to [] — NOT back to all roles. Conflating the
-// two is what made removing the last role in the designer snap every access
-// button back on. Parent-facing fields (staff_only=0) always return null.
+// ★ `null` means UNRESTRICTED — every role, including roles created later.
+// This used to return `[...ROLES]`, which was the same thing only while `ROLES`
+// was the complete set of roles. It is not any more (an admin can add roles in
+// Settings → Roles), so expanding the list would have FROZEN every unset field
+// at the roles that happened to exist when the row was written — silently
+// excluding every role created afterwards, with nothing failing anywhere.
+// Returning the sentinel keeps the promise this function always documented.
+//
+// The three states, kept deliberately distinct:
+//   null  -> unset, meaning "every current role and every future one"
+//   []    -> the admin granted nobody access (do NOT fall back to all roles)
+//   [..]  -> exactly those roles
+//
+// Parent-facing fields (staff_only=0) always return null.
 export function fieldAccessRoles(field: Pick<FormField, "staff_only" | "roles">): string[] | null {
   if (!field.staff_only) return null;
-  if (field.roles === null || field.roles === undefined) return [...ROLES];
+  if (field.roles === null || field.roles === undefined) return null;
   return field.roles.filter(Boolean);
 }
 
-// Decide whether a given viewer can see a field. `viewer` is a role string, or
+// Decide whether a given viewer can see a field. `viewer` is a role key, or
 // "parent" for anonymous submissions. Admins are superusers and see every field.
-// Staff see internal fields only when "staff" is in the field's access roles.
-// Parents never see any internal (staff_only) field.
+// A viewer sees an internal field when the field's access list is unrestricted
+// (null — see above) or explicitly names their role. Parents never see any
+// internal (staff_only) field.
 export function canSeeField(
   field: Pick<FormField, "staff_only" | "roles">,
-  viewer: Role | "parent"
+  viewer: string
 ): boolean {
   if (viewer === "admin") return true;
   if (!field.staff_only) return true;
   if (viewer === "parent") return false;
-  return (fieldAccessRoles(field) ?? []).includes(viewer);
+  const allowed = fieldAccessRoles(field);
+  return allowed === null || allowed.includes(viewer);
 }
 
 // Entry that composes a field with its resolved access roles for API payloads.
@@ -601,12 +756,107 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
    IF NOT EXISTS (SELECT 1 FROM dbo.organizations WHERE slug = N'technology-services')
      INSERT INTO dbo.organizations (slug, name) VALUES (N'technology-services', N'Technology Services');`,
 
+  // ---------------------------------------------------------------------
+  // Role catalog — the mutable list of roles behind Settings → Roles.
+  //
+  // Roles used to be a compile-time constant (`ROLES`, top of this file). They
+  // are now a TABLE, because an admin has to be able to add one at runtime while
+  // the route guards, the designer's per-field access, the system-message
+  // audience and the menu/doc-link settings all keep working.
+  //
+  // `role_key` is what `users.role` stores AND what every existing JSON-array
+  // store already holds (`form_fields.roles`, `system_messages.audience`,
+  // `menu_items`, `documents_link`) — so none of those four needed a schema
+  // change: storage was never the obstacle, ENUMERATION was.
+  //
+  // Its UNIQUE index is load-bearing, not decoration: the foreign key on
+  // `users.role` (added below) is what turns "a role that has been assigned
+  // cannot be deleted" into a DATABASE rule instead of a convention the next
+  // write path can forget. A key needs a unique index to be an FK target.
+  //
+  // `built_in` marks the four roles the code itself depends on. Their SECURITY
+  // flags (the four capabilities, `school_scoped`, `is_admin`) are re-derived
+  // from code on EVERY boot — see the re-derivation batch below — so a hand-run
+  // `UPDATE dbo.roles SET can_edit = 1 WHERE role_key = 'staff'` cannot survive a
+  // restart. `label`, `description` and `badge` are deliberately NOT re-derived:
+  // they are display-only, carry no authority, and an admin may rename one.
+  //
+  // Declared in its OWN batch, before dbo.users. SQL Server compiles a batch
+  // before running it, so an INSERT naming dbo.roles in the same batch that
+  // creates it fails with "Invalid object name" — the same reason
+  // UX_schools_name is split out of the schools CREATE above. The index rides
+  // this batch because it is a SIBLING statement, not part of the CREATE TABLE's
+  // `IF` body: on a database that already has the table the CREATE is skipped and
+  // the index statement still runs.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.roles', 'U') IS NULL
+   CREATE TABLE dbo.roles (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     role_key      NVARCHAR(40) NOT NULL,
+     label         NVARCHAR(80) NOT NULL,
+     description   NVARCHAR(200) NULL,
+     badge         NVARCHAR(30) NULL,
+     can_view      BIT NOT NULL CONSTRAINT DF_roles_can_view DEFAULT 1,
+     can_edit      BIT NOT NULL CONSTRAINT DF_roles_can_edit DEFAULT 0,
+     can_export    BIT NOT NULL CONSTRAINT DF_roles_can_export DEFAULT 0,
+     can_report    BIT NOT NULL CONSTRAINT DF_roles_can_report DEFAULT 0,
+     school_scoped BIT NOT NULL CONSTRAINT DF_roles_school_scoped DEFAULT 0,
+     is_admin      BIT NOT NULL CONSTRAINT DF_roles_is_admin DEFAULT 0,
+     built_in      BIT NOT NULL CONSTRAINT DF_roles_built_in DEFAULT 0,
+     created_at    DATETIME2 NOT NULL CONSTRAINT DF_roles_created_at DEFAULT SYSUTCDATETIME(),
+     updated_at    DATETIME2 NOT NULL CONSTRAINT DF_roles_updated_at DEFAULT SYSUTCDATETIME()
+   );
+   ${indexGuard("UX_roles_key", "roles", ["role_key"])}
+     CREATE UNIQUE INDEX UX_roles_key ON dbo.roles(role_key);`,
+
+  // Seed the four built-in roles, one row at a time and only when absent.
+  //
+  // Separate batch from the CREATE for the compile-order reason above. `reviewer`
+  // is seeded rather than left for an admin to create, and that is a deliberate
+  // architectural choice, not a convenience: capabilities only ever ADD (a role
+  // is checked with `is_admin || can_x`, and nothing subtracts), so a restrictive
+  // role cannot be expressed by granting one alongside `staff` — the union wins.
+  // A role whose whole purpose is to see LESS therefore has to be a first-class
+  // row in the mutually exclusive `users.role` channel, reviewed in code once.
+  //
+  // `can_report = 1` on all four because `routes/reports.ts` already holds
+  // `REPORT_ROLES = ["staff", "cdm_contact", "admin"] as const` — every current
+  // role has report access, so seeding anything less would be a behaviour change.
+  `IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE role_key = N'admin')
+     INSERT INTO dbo.roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     VALUES (N'admin', N'Administrator', N'Full access, including users, schools and system settings.', 1, 1, 1, 1, 0, 1, 1);
+   IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE role_key = N'staff')
+     INSERT INTO dbo.roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     VALUES (N'staff', N'Staff', N'Day-to-day form work: read, edit and export submissions.', 1, 1, 1, 1, 0, 0, 1);
+   IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE role_key = N'cdm_contact')
+     INSERT INTO dbo.roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     VALUES (N'cdm_contact', N'School Contact', N'Staff access, limited to their own school.', 1, 1, 1, 1, 1, 0, 1);
+   IF NOT EXISTS (SELECT 1 FROM dbo.roles WHERE role_key = N'reviewer')
+     INSERT INTO dbo.roles (role_key, label, description, can_view, can_edit, can_export, can_report, school_scoped, is_admin, built_in)
+     VALUES (N'reviewer', N'Reviewer', N'Read, export and report. Cannot change submissions.', 1, 0, 1, 1, 0, 0, 1);`,
+
+  // Re-derive the built-ins' SECURITY flags from code, every boot.
+  //
+  // This is the whole reason `built_in` exists. Without it the seed above would
+  // only ever run once, and a direct `UPDATE dbo.roles SET can_edit = 1 WHERE
+  // role_key = 'staff'` — or a bug in the Roles panel — would permanently grant
+  // write access to a role the guards trust. Re-deriving means the worst case is
+  // "reverts at the next restart" rather than "escalated forever".
+  //
+  // `updated_at` is deliberately NOT touched: these values are derived, so a
+  // timestamp on them would only record when the app last booted, which is noise
+  // in a column an admin reads to answer "when did this role change".
+  `UPDATE dbo.roles SET can_view = 1, can_edit = 1, can_export = 1, can_report = 1, school_scoped = 0, is_admin = 1, built_in = 1 WHERE role_key = N'admin';
+   UPDATE dbo.roles SET can_view = 1, can_edit = 1, can_export = 1, can_report = 1, school_scoped = 0, is_admin = 0, built_in = 1 WHERE role_key = N'staff';
+   UPDATE dbo.roles SET can_view = 1, can_edit = 1, can_export = 1, can_report = 1, school_scoped = 1, is_admin = 0, built_in = 1 WHERE role_key = N'cdm_contact';
+   UPDATE dbo.roles SET can_view = 1, can_edit = 0, can_export = 1, can_report = 1, school_scoped = 0, is_admin = 0, built_in = 1 WHERE role_key = N'reviewer';`,
+
   `IF OBJECT_ID('dbo.users', 'U') IS NULL
    CREATE TABLE dbo.users (
      id            INT IDENTITY(1,1) PRIMARY KEY,
      email         NVARCHAR(320) NOT NULL,
      password_hash NVARCHAR(255) NOT NULL,
-     role          NVARCHAR(20) NOT NULL CHECK (role IN ('admin','staff','cdm_contact')),
+     role          NVARCHAR(40) NOT NULL,
      school_id     INT NULL,
      display_name  NVARCHAR(120) NOT NULL,
      active        BIT NOT NULL CONSTRAINT DF_users_active DEFAULT 1,
@@ -665,6 +915,77 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      ALTER TABLE dbo.users ADD CONSTRAINT CK_users_role
        CHECK (role IN ('admin','staff','cdm_contact'));
    END;`,
+
+  // ★ Remove the role CHECK constraint.
+  //
+  // The constraint above WIDENED a fixed three-role list into a fixed four-role
+  // list, and that is now the wrong shape: the set of valid roles is data. So the
+  // constraint is DROPPED rather than widened a third time, and the referential
+  // integrity that replaces it is the FK further down, which is strictly
+  // stronger — a CHECK can only test membership in a list written into the DDL,
+  // while an FK tests membership in the actual table an admin edits.
+  //
+  // This sits AFTER the widening block above on purpose. On a database still
+  // carrying the original three-role constraint, the widening block replaces it
+  // and this drops the replacement; on one already carrying the four-role
+  // version the widening block's guard (which looks for a constraint that does
+  // NOT mention cdm_contact) does not fire and this drops it directly. Either
+  // order would work, but this one keeps the older, more specific migration
+  // first, so the batch that is being made redundant is visibly still intact.
+  //
+  // Found by WHAT IT CONSTRAINS, never by name: the original was declared inline
+  // on the column and the replacement was added as CK_users_role, so both
+  // spellings have to be caught — and every match is dropped, not the first,
+  // because a database that has been through both revisions can carry either.
+  // The `role` word in the predicate is the same one the widening block uses.
+  `DECLARE @drop_role_checks nvarchar(max) = N'';
+   SELECT @drop_role_checks = @drop_role_checks
+        + N'ALTER TABLE dbo.users DROP CONSTRAINT ' + QUOTENAME(name) + N';' + CHAR(10)
+     FROM sys.check_constraints
+    WHERE parent_object_id = OBJECT_ID('dbo.users')
+      AND definition LIKE '%role%';
+   IF @drop_role_checks <> N'' EXEC sp_executesql @drop_role_checks;`,
+
+  // Widen `users.role` from NVARCHAR(20) to NVARCHAR(40) so it can be a foreign
+  // key target against dbo.roles.role_key — an FK requires the two columns to
+  // agree on type AND length.
+  //
+  // Guarded on the ACTUAL width (40 nvarchar characters = 80 bytes) rather than
+  // on "has this migration run", so it is a no-op both on a fresh database (where
+  // the CREATE TABLE already declares 40) and on every boot after the first. It
+  // must run AFTER the batch above: a CHECK constraint on the column blocks
+  // ALTER COLUMN, which is why these are three separate batches rather than one.
+  //
+  // Widening nvarchar is a metadata-only change in SQL Server — it does not
+  // rewrite the table — so this is safe against a live table. The `>= 1700`
+  // case (a column copied from a foreign database as nvarchar(max)) narrows
+  // instead, which DOES move data, but every value here is a role key well
+  // under 40 characters or the foreign key below could not be satisfied anyway.
+  `IF COL_LENGTH('dbo.users', 'role') IS NOT NULL
+     AND EXISTS (SELECT 1 FROM sys.columns
+                  WHERE object_id = OBJECT_ID('dbo.users')
+                    AND name = 'role'
+                    AND max_length <> 80)
+     ALTER TABLE dbo.users ALTER COLUMN role NVARCHAR(40) NOT NULL;`,
+
+  // The foreign key that makes "a role that has been assigned cannot be deleted"
+  // a rule the DATABASE enforces, rather than a check `routes/roles.ts` performs
+  // and some future write path forgets to.
+  //
+  // No `ON DELETE` clause, deliberately — the default NO ACTION is the mechanism,
+  // not an omission. Deleting an assigned role raises SQL Server error 547, which
+  // the DELETE handler catches and answers as a 409 naming how many users hold
+  // the role. A `ON DELETE SET NULL` would silently unassign every holder, and a
+  // `CASCADE` would delete the accounts.
+  //
+  // Note what this does NOT cover: `users.role` is the only reference the
+  // database knows about. `form_fields.roles`, `system_messages.audience`,
+  // `menu_items` and `documents_link` all store role keys inside JSON, where no
+  // FK can reach them — so the delete guard ALSO runs a census over those four,
+  // and `routes/roles.ts` is the only place that knows both halves exist.
+  `${fkGuard("users", "role", "roles")}
+     ALTER TABLE dbo.users ADD CONSTRAINT FK_users_role
+       FOREIGN KEY (role) REFERENCES dbo.roles(role_key) ON DELETE NO ACTION;`,
 
   // ---------------------------------------------------------------------
   // Organizations — users.organization_id (1:1 tenant boundary).
@@ -825,7 +1146,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      id          INT IDENTITY(1,1) PRIMARY KEY,
      form_id     INT NOT NULL,
      label       NVARCHAR(200) NOT NULL,
-     type        NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email')),
+     type        NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc')),
      options     NVARCHAR(MAX) NULL,
      required    BIT NOT NULL CONSTRAINT DF_form_fields_required DEFAULT 0,
      staff_only  BIT NOT NULL CONSTRAINT DF_form_fields_staff_only DEFAULT 0,
@@ -952,7 +1273,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      id            INT IDENTITY(1,1) PRIMARY KEY,
      submission_id INT NOT NULL,
      label         NVARCHAR(200) NOT NULL,
-     type          NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email')),
+     type          NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc')),
      options       NVARCHAR(MAX) NULL,
      value         NVARCHAR(MAX) NULL,
      sort_order    INT NOT NULL CONSTRAINT DF_adhoc_fields_sort_order DEFAULT 0,
@@ -964,6 +1285,63 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
    );
    IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name='IX_adhoc_fields_submission')
      CREATE INDEX IX_adhoc_fields_submission ON dbo.submission_adhoc_fields(submission_id);`,
+
+  // Widen the `type` CHECK on BOTH field tables to accept 'google_doc'.
+  //
+  // ★ The CREATE TABLE above only runs when the table is brand new, so an existing
+  // deployment keeps its original eight-value constraint and REFUSES the new type
+  // at the INSERT — SQL Server error 547, which this app does not translate (it
+  // inspects no DB error codes), so it surfaces as a 500 naming a generated
+  // constraint name. The declaration is not the fix; this batch is.
+  //
+  // ★ Both constraints are declared INLINE and therefore auto-named, so the drop
+  // is found by WHAT IT CONSTRAINS, never by name — the same technique the
+  // CK_users_role migration above uses. `definition LIKE '%textarea%'` identifies
+  // a type-list constraint (textarea is in the list and in no other CHECK on these
+  // tables), and `NOT LIKE '%google_doc%'` is the guard that makes the batch
+  // idempotent: after the first run the replacement contains google_doc, so it is
+  // not selected and nothing is dropped.
+  //
+  // ★ TWO tables, and both matter: `submission_adhoc_fields` holds the per-
+  // submission staff-only fields, which are created from the same designer type
+  // list, so a google_doc ad-hoc field would 547 on exactly the same INSERT.
+  //
+  // ★ WITH CHECK (not NOCHECK) on the re-add. NOCHECK would add the constraint
+  // WITHOUT validating existing rows, so a table that had somehow acquired a bad
+  // value would keep it while the constraint claimed otherwise. Every existing row
+  // is in the old list by construction, so the validating add cannot fail.
+  //
+  // The re-added constraint is given an EXPLICIT name so a future widening has a
+  // stable thing to look for — and so this batch's own guard keeps working.
+  `IF EXISTS (SELECT 1 FROM sys.check_constraints
+               WHERE parent_object_id = OBJECT_ID('dbo.form_fields')
+                 AND definition LIKE '%textarea%'
+                 AND definition NOT LIKE '%google_doc%')
+   BEGIN
+     DECLARE @ck_ff nvarchar(128) = (SELECT TOP 1 name FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.form_fields')
+         AND definition LIKE '%textarea%'
+         AND definition NOT LIKE '%google_doc%');
+     IF @ck_ff IS NOT NULL
+       EXEC(N'ALTER TABLE dbo.form_fields DROP CONSTRAINT ' + @ck_ff);
+     ALTER TABLE dbo.form_fields ADD CONSTRAINT CK_form_fields_type
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc'));
+   END;`,
+
+  `IF EXISTS (SELECT 1 FROM sys.check_constraints
+               WHERE parent_object_id = OBJECT_ID('dbo.submission_adhoc_fields')
+                 AND definition LIKE '%textarea%'
+                 AND definition NOT LIKE '%google_doc%')
+   BEGIN
+     DECLARE @ck_ah nvarchar(128) = (SELECT TOP 1 name FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.submission_adhoc_fields')
+         AND definition LIKE '%textarea%'
+         AND definition NOT LIKE '%google_doc%');
+     IF @ck_ah IS NOT NULL
+       EXEC(N'ALTER TABLE dbo.submission_adhoc_fields DROP CONSTRAINT ' + @ck_ah);
+     ALTER TABLE dbo.submission_adhoc_fields ADD CONSTRAINT CK_submission_adhoc_fields_type
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc'));
+   END;`,
 
   // Generic app-wide key/value settings (login_mode, maintenance_message, ...).
   // This is the storage for the Login Mode feature (Settings → Login Mode).
@@ -1108,6 +1486,91 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
                          WHERE u.user_id = f.designer_id AND u.form_id = f.id);`,
 
   // ---------------------------------------------------------------------
+  // Public / Private forms — per-form visibility + access requests
+  // (docs/plans/public-private-forms.md).
+  //
+  // ★ THREE batches for the column, and the split is not cosmetic:
+  //   - a statement referencing `visibility` needs its OWN batch (error 207),
+  //   - and a CHECK cannot be added in the batch that adds its column.
+  // ---------------------------------------------------------------------
+
+  // ★ `DEFAULT 'public'` IS THE WHOLE DEPLOY STORY. Every existing form, and
+  // every form an admin creates without touching the field, is public — so
+  // shipping this changes no behaviour for anyone. The narrowing happens only
+  // when an administrator deliberately marks a specific form private.
+  `IF COL_LENGTH('dbo.forms', 'visibility') IS NULL
+     ALTER TABLE dbo.forms ADD visibility NVARCHAR(10) NOT NULL
+       CONSTRAINT DF_forms_visibility DEFAULT 'public';`,
+
+  // Own batch (see above). Guarded on the CONSTRAINT by name, not on the column,
+  // so it is a no-op once present and still runs on a database that somehow has
+  // the column without the constraint.
+  `IF NOT EXISTS (SELECT 1 FROM sys.check_constraints WHERE name = 'CK_forms_visibility')
+     ALTER TABLE dbo.forms WITH CHECK ADD CONSTRAINT CK_forms_visibility
+       CHECK (visibility IN ('public','private'));`,
+
+  // The request AND the grant, in ONE table.
+  //
+  // ★ PRIMARY KEY (user_id, form_id) IS the idempotency mechanism: "request
+  // access" twice is one row, and approve-then-decline is an UPDATE rather than a
+  // second row a careless query would double-count. Same shape as
+  // dbo.system_message_dismissals, which exists for the same reason.
+  //
+  // ★ NO FOREIGN KEYS, deliberately — matching system_message_dismissals and
+  // webhook_events. A deleted user or form must not be blocked by its access
+  // rows (they are removed explicitly when the parent goes), and it avoids SQL
+  // Server's one-cascade-path rule (error 1785), which has bitten this schema
+  // twice already.
+  //
+  // ★ No index beyond the PK. The self-lookup seeks the PK in its own column
+  // order and the admin queue is a scan of a table holding tens of rows — an
+  // index here would be a claim, not a performance fix, AND it would oblige a
+  // matching entry in expectedIndexNames() and the Turso DDL (libsql.test.ts
+  // asserts the two dialects disagree on nothing).
+  `IF OBJECT_ID('dbo.form_access', 'U') IS NULL
+   CREATE TABLE dbo.form_access (
+     user_id      INT           NOT NULL,
+     form_id      INT           NOT NULL,
+     status       NVARCHAR(20)  NOT NULL
+         CONSTRAINT CK_form_access_status CHECK (status IN ('pending','approved','denied')),
+     source       NVARCHAR(20)  NOT NULL
+         CONSTRAINT CK_form_access_source CHECK (source IN ('request','backfill','direct')),
+     requested_at DATETIME2     NOT NULL CONSTRAINT DF_form_access_requested DEFAULT SYSUTCDATETIME(),
+     decided_at   DATETIME2     NULL,
+     decided_by   INT           NULL,
+     note         NVARCHAR(400) NULL,
+     CONSTRAINT PK_form_access PRIMARY KEY (user_id, form_id)
+   );`,
+
+  // The append-only audit log.
+  //
+  // ★ Its own table rather than columns on form_access, and the split is the
+  // point: form_access answers "may this person read this form NOW?" and is what
+  // the visibility predicate reads (a single-row seek), while this table answers
+  // "who changed this, when, and on whose authority?" and is NEVER consulted by
+  // the visibility rule. A history cannot be folded into a table whose primary
+  // key is "one row per person per form".
+  //
+  // ★ APPEND-ONLY: no UPDATE, no DELETE anywhere in the code.
+  //
+  // ★ `actor_id` is NULLABLE on purpose — it is NULL for a self-service request,
+  // because nobody DECIDED anything. A NOT NULL would force a fabricated actor
+  // onto requests and make "who approved this?" unanswerable in exactly the case
+  // where the answer is "the requester asked".
+  `IF OBJECT_ID('dbo.form_access_events', 'U') IS NULL
+   CREATE TABLE dbo.form_access_events (
+     id         INT IDENTITY(1,1) PRIMARY KEY,
+     user_id    INT           NOT NULL,
+     form_id    INT           NOT NULL,
+     event      NVARCHAR(20)  NOT NULL
+         CONSTRAINT CK_form_access_events_event
+         CHECK (event IN ('requested','withdrawn','approved','declined','revoked','backfilled')),
+     actor_id   INT           NULL,
+     note       NVARCHAR(400) NULL,
+     created_at DATETIME2     NOT NULL CONSTRAINT DF_form_access_events_created DEFAULT SYSUTCDATETIME()
+   );`,
+
+  // ---------------------------------------------------------------------
   // Inbound webhook intake log (docs/plans/webhook-log.md).
   //
   // DELIBERATELY HAS NO FOREIGN KEYS. A cascade from dbo.forms would delete the
@@ -1190,11 +1653,12 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   //
   // `audience` is the JSON array of roles that may be SHOWN the message (the
   // "Target Audience" toggles in the admin panel), stored exactly the way
-  // form_fields.roles is: a JSON string, NULL meaning "unset". The unset case
-  // resolves to every role, which is the convention fieldAccessRoles() already
-  // established for a staff-only field. An explicit '[]' means nobody and must
-  // NOT be collapsed back to NULL — that distinction is the whole reason the
-  // column is nullable.
+  // form_fields.roles is: a JSON string, NULL meaning "unrestricted". The unset
+  // case covers EVERY role — including one an admin creates later — which is the
+  // convention fieldAccessRoles() already established for a staff-only field, and
+  // which the list query implements directly as `m.audience IS NULL`. An explicit
+  // '[]' means nobody and must NOT be collapsed back to NULL — that distinction
+  // is the whole reason the column is nullable.
   `IF OBJECT_ID('dbo.system_messages', 'U') IS NULL
    CREATE TABLE dbo.system_messages (
      id              INT IDENTITY(1,1) PRIMARY KEY,
@@ -1282,13 +1746,17 @@ export type ReportFormat = (typeof REPORT_FORMATS)[number];
 // like `FormField.roles` above. `toSystemMessage` in queries.ts is the only thing
 // that turns one into the other, so every reader that goes through it sees a real
 // array and nothing downstream re-parses.
+//
+// `null` means unrestricted — the same sentinel `fieldAccessRoles` uses, and the
+// same one the SQL predicate already implements (`m.audience IS NULL`). See
+// `messageAudienceRoles` for why an unset audience is no longer materialised.
 export interface SystemMessage {
   id: number;
   organization_id: number;
   title: string;
   body: string;
   active: boolean;
-  audience: string[];
+  audience: string[] | null;
   created_by: number | null;
   created_at: Date;
   updated_at: Date;
@@ -1299,17 +1767,30 @@ export interface SystemMessage {
 // Deliberately the same shape as `fieldAccessRoles`, because the admin picks the
 // audience with the same control the form designer uses for a staff-only field's
 // access, and two controls that look identical must not mean subtly different
-// things. NULL/undefined = unset, which resolves to every current role (so a
-// message authored before audiences existed is shown to everybody, and a role
-// added later is included rather than silently excluded). An explicitly EMPTY
-// array means the admin granted nobody access and must resolve to [] — never back
-// to all roles.
+// things.
+//
+// ★ Returns `null` for "unrestricted" — every role, including ones that do not
+// exist yet. This function used to return `[...ROLES]`, which meant an unset
+// audience was frozen at the roles that existed when it was written: a message
+// authored today would be invisible to a role created tomorrow, and nothing
+// would report it. The comment on the old version already promised the opposite
+// ("a role added later is included rather than silently excluded") — `[...ROLES]`
+// was the line that broke that promise.
+//
+// The three states:
+//   null  -> unset, i.e. everyone including future roles
+//   []    -> the admin granted nobody access (never falls back to all roles)
+//   [..]  -> exactly those roles; unknown keys are PRESERVED, not filtered, so a
+//            role that is temporarily missing from the catalog does not have its
+//            audience rewritten out from under it
 //
 // Exported because the routes need the resolved list, not just the storage layer.
-export function messageAudienceRoles(raw: string[] | string | null | undefined): string[] {
-  if (raw === null || raw === undefined) return [...ROLES];
+export function messageAudienceRoles(
+  raw: string[] | string | null | undefined
+): string[] | null {
   if (Array.isArray(raw)) return raw.map(String).filter(Boolean);
-  if (typeof raw !== "string" || raw.trim() === "") return [...ROLES];
+  if (raw === null || raw === undefined) return null;
+  if (typeof raw !== "string" || raw.trim() === "") return null;
   try {
     const parsed: unknown = JSON.parse(raw);
     if (Array.isArray(parsed)) return parsed.map(String).filter(Boolean);
@@ -1318,7 +1799,7 @@ export function messageAudienceRoles(raw: string[] | string | null | undefined):
     // a reader can act on is a notice they did not expect to see, not a notice
     // that silently exists and is shown to no one.
   }
-  return [...ROLES];
+  return null;
 }
 
 // -----------------------------------------------------------------------------

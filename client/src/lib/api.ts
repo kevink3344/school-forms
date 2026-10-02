@@ -3,9 +3,13 @@ import type {
   AdhocField,
   AdminUser,
   AppSettingKey,
+  AccessGrantRow,
+  AccessRequestRow,
+  AvailableForm,
   DocumentRow,
   ExportPreview,
   Form,
+  FormVisibility,
   FormWithFields,
   LoginMode,
   LoginUser,
@@ -19,6 +23,8 @@ import type {
   ReportViewInput,
   ResetPasswordResult,
   Role,
+  RoleRow,
+  RoleUsageReport,
   School,
   SchoolPage,
   SubmissionAnswer,
@@ -27,6 +33,7 @@ import type {
   SubmissionStatus,
   SystemMessage,
   User,
+  UserAccessRow,
   ViewColumnsConfig,
   WebhookBulkReplayResult,
   WebhookEventDetail,
@@ -515,6 +522,102 @@ export const api = {
     return request<Form[]>("/api/forms", { auth: true });
   },
 
+  // Every published form in the org, with the caller's relationship to it.
+  // ★ NOT a replacement for listForms: that answers "what may I read?" and is
+  // what the pickers use; this answers "what exists, and what is my relationship
+  // to it?" (docs/plans/public-private-forms.md §16.4).
+  async listAvailableForms(): Promise<AvailableForm[]> {
+    return request<AvailableForm[]>("/api/forms/available", { auth: true });
+  },
+
+  // Set a form's visibility. Switching to private grandfathers every School
+  // Contact that could see it; the response reports how many.
+  async setFormVisibility(
+    id: number,
+    visibility: FormVisibility
+  ): Promise<FormWithFields & { granted: number }> {
+    return request<FormWithFields & { granted: number }>(`/api/forms/${id}/visibility`, {
+      method: "PATCH",
+      auth: true,
+      body: { visibility },
+    });
+  },
+
+  // --- Form access (docs/plans/public-private-forms.md §8) -----------------
+
+  /** The private forms I cannot read, with my status on each. */
+  async listLockedForms(): Promise<AvailableForm[]> {
+    return request<AvailableForm[]>("/api/form-access/mine", { auth: true });
+  },
+
+  /** Ask for access to a private form. Refused (400) for a declined row. */
+  async requestFormAccess(formId: number): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>("/api/form-access/requests", {
+      method: "POST",
+      auth: true,
+      body: { form_id: formId },
+    });
+  },
+
+  /** Withdraw my own pending request. 409 when there is none. */
+  async withdrawFormAccess(formId: number): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>("/api/form-access/requests/withdraw", {
+      method: "POST",
+      auth: true,
+      body: { form_id: formId },
+    });
+  },
+
+  /** Admin: the request queue. */
+  async listAccessRequests(
+    status: "pending" | "approved" | "denied" = "pending"
+  ): Promise<AccessRequestRow[]> {
+    return request<AccessRequestRow[]>(`/api/form-access/requests?status=${status}`, { auth: true });
+  },
+
+  /** Admin: approve, decline or revoke. */
+  async decideFormAccess(input: {
+    user_id: number;
+    form_id: number;
+    decision: "approve" | "decline" | "revoke";
+    note?: string | null;
+  }): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>("/api/form-access/requests/decide", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  /** Admin: who has access to this form, with each account's history. */
+  async listAccessGrants(formId: number): Promise<AccessGrantRow[]> {
+    return request<AccessGrantRow[]>(`/api/form-access/grants?form_id=${formId}`, { auth: true });
+  },
+
+  /** Admin: the pending count for the Settings section title. */
+  async getAccessRequestSummary(): Promise<{ pending: number }> {
+    return request<{ pending: number }>("/api/form-access/summary", { auth: true });
+  },
+
+  /** Admin: one account's access rows, for the Edit User drawer. */
+  async listUserAccess(userId: number): Promise<UserAccessRow[]> {
+    return request<UserAccessRow[]>(`/api/form-access/user/${userId}`, { auth: true });
+  },
+
+  /**
+   * Admin: remove one account's access to one form.
+   *
+   * Refused with 409 when the form is PUBLIC — everyone can read it regardless,
+   * so the removal would appear to work while changing nothing.
+   */
+  async removeUserAccess(userId: number, formId: number): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/form-access/user/${userId}/remove`, {
+      method: "POST",
+      auth: true,
+      body: { form_id: formId },
+    });
+  },
+
   async getForm(id: number): Promise<FormWithFields> {
     return request<FormWithFields>(`/api/forms/${id}`, { auth: true });
   },
@@ -548,6 +651,9 @@ export const api = {
       title?: string;
       description?: string | null;
       status?: string;
+      // Submission-id prefix. Omit it (or send a blank string) to leave the
+      // stored prefix untouched — the server reads both as "no change".
+      code?: string;
       doc_folder_id?: string | null;
       google_form_url?: string | null;
       fields: {
@@ -1232,6 +1338,124 @@ export const api = {
   async dismissSystemMessage(id: number): Promise<{ dismissed: boolean }> {
     return request<{ dismissed: boolean }>(`/api/system-messages/${id}/dismiss`, {
       method: "POST",
+      auth: true,
+    });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Roles (Settings → Roles).
+  //
+  // The catalog is ADMIN-MANAGED DATA, not a fixed list: a role is a row in
+  // `dbo.roles` and an administrator can add one. Two consequences that shape
+  // these five methods:
+  //   * roles are INSTALLATION-WIDE. There is no per-organization role, because
+  //     `users.role` is a foreign key onto a globally unique key — so creating a
+  //     role in one organization makes its key available to every organization,
+  //     and the delete guard censuses references across all of them.
+  //   * DELETE is guarded by an integrity rule rather than being unconditional.
+  //     `GET /:key/usage` is the same census the delete runs, exposed so the UI
+  //     can disable the button with a reason instead of letting the admin click
+  //     and read a refusal.
+  // ---------------------------------------------------------------------------
+
+  /**
+   * The whole role catalog.
+   *
+   * This is the ONE endpoint in this group that wraps its payload (`{ roles }`),
+   * and the only one any authenticated account may read — a role's label is a
+   * display string, and every screen that names a role needs it to render. The
+   * usage census below is the exception: it aggregates over accounts and is
+   * administrator-only.
+   */
+  async listRoles(): Promise<RoleRow[]> {
+    const res = await request<{ roles: RoleRow[] }>("/api/roles", { auth: true });
+    return res.roles;
+  },
+
+  /**
+   * Where one role is referenced, counted across all five channels, plus a total
+   * and whether the role is a built-in.
+   *
+   * Call this to explain WHY a delete is unavailable, not merely to decide that
+   * it is: the count is what turns "in use" into "in use by 3 user accounts, 1
+   * form field access list" — the difference between a stale experiment and 40
+   * live accounts. Administrator-only, because it aggregates over accounts.
+   */
+  async getRoleUsage(key: string): Promise<RoleUsageReport> {
+    return request<RoleUsageReport>(`/api/roles/${encodeURIComponent(key)}/usage`, { auth: true });
+  },
+
+  /**
+   * Create a role. Administrator-only.
+   *
+   * `role_key` may be omitted, in which case the server derives it from the label
+   * — send it only when the derived key is wrong. `built_in` is deliberately NOT
+   * a parameter here: only the boot seed can create a built-in, so an
+   * administrator cannot mint a role that is then undeletable.
+   */
+  async createRole(input: {
+    role_key?: string;
+    label: string;
+    description?: string;
+    badge?: string;
+    can_view?: boolean;
+    can_edit?: boolean;
+    can_export?: boolean;
+    can_report?: boolean;
+    school_scoped?: boolean;
+    is_admin?: boolean;
+  }): Promise<RoleRow> {
+    return request<RoleRow>("/api/roles", { method: "POST", auth: true, body: input });
+  },
+
+  /**
+   * Update a role's label, description, badge or capabilities. Administrator-only.
+   *
+   * `role_key` is intentionally not accepted: renaming a key would orphan every
+   * reference to it, and it would do so SILENTLY in the four JSON stores, which
+   * have no foreign key to fail. Set `is_admin` true through `createRole` if that
+   * is the intent — the update path refuses to GRANT administrator power, so the
+   * decision stays a create-time one an admin makes on purpose.
+   *
+   * On a built-in, only `label`, `description` and `badge` are accepted; the six
+   * security flags are re-derived at every server start, so the API refuses to
+   * change them rather than accepting an edit that would silently revert.
+   */
+  async updateRole(
+    key: string,
+    input: {
+      label?: string;
+      description?: string;
+      badge?: string;
+      can_view?: boolean;
+      can_edit?: boolean;
+      can_export?: boolean;
+      can_report?: boolean;
+      school_scoped?: boolean;
+      is_admin?: boolean;
+    }
+  ): Promise<RoleRow> {
+    return request<RoleRow>(`/api/roles/${encodeURIComponent(key)}`, {
+      method: "PUT",
+      auth: true,
+      body: input,
+    });
+  },
+
+  /**
+   * Delete a role. Administrator-only.
+   *
+   * Refused with 409 in two cases, and the refusal carries the census, so prefer
+   * calling `getRoleUsage` first and disabling the button with the reason: a
+   * built-in role is never deletable, and a role still referenced anywhere in the
+   * installation is held back until those references are reassigned. The check
+   * covers five stores because the foreign key covers only one of them — a
+   * delete-then-recreate would silently restore every grant held inside the four
+   * JSON stores, so those count too.
+   */
+  async deleteRole(key: string): Promise<{ deleted: RoleRow }> {
+    return request<{ deleted: RoleRow }>(`/api/roles/${encodeURIComponent(key)}`, {
+      method: "DELETE",
       auth: true,
     });
   },

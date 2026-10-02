@@ -8,6 +8,7 @@ import cookieParser from "cookie-parser";
 import swaggerUi from "swagger-ui-express";
 import { env } from "./config/env.js";
 import { initDb, isDbReady } from "./db/pool.js";
+import { loadRolesCache } from "./db/roles-cache.js";
 import { authRouter } from "./routes/auth.js";
 import { schoolsRouter } from "./routes/schools.js";
 import { usersRouter } from "./routes/users.js";
@@ -20,6 +21,8 @@ import { webhookRouter } from "./routes/webhook.js";
 import { webhookEventsRouter } from "./routes/webhookEvents.js";
 import { documentsRouter } from "./routes/documents.js";
 import { systemMessagesRouter } from "./routes/systemMessages.js";
+import { formAccessRouter } from "./routes/formAccess.js";
+import { rolesRouter } from "./routes/roles.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
 import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
@@ -127,6 +130,13 @@ app.use("/api/webhook/events", webhookEventsRouter);
 app.use("/api/webhook", webhookRouter);
 app.use("/api/documents", documentsRouter);
 app.use("/api/system-messages", systemMessagesRouter);
+// Public/Private forms (docs/plans/public-private-forms.md). Mounted BEFORE
+// /api/forms so nothing under it can be shadowed by the forms router's `/:id`.
+app.use("/api/form-access", formAccessRouter);
+// Roles are admin-managed rows now, so the guards that used to compare a role
+// string ask this catalog instead. Mounted alongside the other settings
+// surfaces because the panel that manages it lives in Settings.
+app.use("/api/roles", rolesRouter);
 
 // -----------------------------------------------------------------------------
 // Serve the built client (SPA) so a single URL hosts BOTH the API and the app.
@@ -201,6 +211,25 @@ async function warmDb() {
     if (ok) {
       // eslint-disable-next-line no-console
       console.log("[server] DB is ready.");
+      // Pre-load the role catalog so the capability guards and the synchronous
+      // `isSchoolScoped` snapshot answer from memory on the first request.
+      //
+      // Failure is non-fatal on purpose: `getRolesCache()` loads on demand, so an
+      // unloaded catalog costs one query rather than breaking authorization, and
+      // `schoolScopedFromCache` falls back to its historical answer in the
+      // meantime. Making this fatal would turn a transient read failure into a
+      // server that refuses to finish starting.
+      try {
+        const roles = await loadRolesCache();
+        // eslint-disable-next-line no-console
+        console.log(`[server] Role catalog loaded (${roles.size} roles).`);
+      } catch (err) {
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[server] Could not preload the role catalog; it will load on first use:",
+          err instanceof Error ? err.message : err
+        );
+      }
       return;
     }
     if (attempt % 5 === 0) {

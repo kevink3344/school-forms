@@ -8,19 +8,26 @@ import {
   updateUser,
   updateUserPassword,
 } from "../db/queries.js";
-import { requireAuth, requireRoles } from "../auth.js";
+import { requireAuth, requireAdmin } from "../auth.js";
 import { createUserSchema, updateUserSchema } from "../schemas.js";
 import { generateTemporaryPassword } from "../security/temp-password.js";
 import { sendSlackAlert } from "../notify/slack.js";
-import type { Role } from "../db/schema.js";
+import { findRoleByKey } from "../db/roles-cache.js";
 
 export const usersRouter = Router();
 
 // -----------------------------------------------------------------------------
 // GET /api/users — list users within the admin's org (admin). Returns each user
 // with the school name and org name via LEFT JOINs.
+//
+// ★ `requireAdmin()` rather than `requireRoles("admin")` throughout this file.
+// The two differ exactly where it matters: the literal guard asks "is this token's
+// role string 'admin'", which answers no for a role an admin created and granted
+// administrator power to; this one asks the catalog's `is_admin` flag, which is
+// the flag the panel actually sets. `admin` still carries `is_admin = 1` and the
+// boot ladder re-derives it, so nothing is lost.
 // -----------------------------------------------------------------------------
-usersRouter.get("/", requireAuth, requireRoles("admin"), async (req, res, next) => {
+usersRouter.get("/", requireAuth, requireAdmin(), async (req, res, next) => {
   try {
     const users = await listUsers(req.user!.organization_id);
     // Strip the password hash before it ever reaches the client.
@@ -52,7 +59,7 @@ usersRouter.get("/", requireAuth, requireRoles("admin"), async (req, res, next) 
 // POST /api/users — create a user within the admin's org (admin). Supports
 // staff/admins, optional school. Organization defaults to the admin's org.
 // -----------------------------------------------------------------------------
-usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next) => {
+usersRouter.post("/", requireAuth, requireAdmin(), async (req, res, next) => {
   try {
     const parsed = createUserSchema.safeParse(req.body);
     if (!parsed.success) {
@@ -60,6 +67,16 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
       return;
     }
     const { email, password, display_name, role, school_id, organization_id, show_on_test_screen } = parsed.data;
+
+    // The role must exist in the catalog. The schema can only check its SHAPE —
+    // the valid set is a table an admin edits — so this is the lookup that answers
+    // it, and it answers with a 400 naming the value. Letting the FK refuse it
+    // instead would surface SQL Server error 547 through the shared error handler
+    // as a 500: "Server error" for a typo, with the offending value never named.
+    if (!(await findRoleByKey(role))) {
+      res.status(400).json({ error: `Unknown role: ${role}` });
+      return;
+    }
 
     const existing = await getUserByEmail(email);
     if (existing) {
@@ -72,7 +89,7 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
     const user = await createUser(
       email,
       passwordHash,
-      role as Role,
+      role,
       school_id ?? null,
       display_name,
       true,
@@ -103,7 +120,7 @@ usersRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
 // name/email/role/school, and toggles the active flag. Attempting to deactivate
 // your OWN account is blocked so an admin can't accidentally lock themselves out.
 // -----------------------------------------------------------------------------
-usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
+usersRouter.put("/:id", requireAuth, requireAdmin(), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {
@@ -155,6 +172,13 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
     }
     if (target.organization_id !== req.user!.organization_id) {
       res.status(403).json({ error: "You can only assign users within your own organization" });
+      return;
+    }
+
+    // Same catalog lookup as POST above: a role key that names no row is a 400
+    // that says which value, not an FK violation presented as a server error.
+    if (data.role !== undefined && !(await findRoleByKey(data.role))) {
+      res.status(400).json({ error: `Unknown role: ${data.role}` });
       return;
     }
 
@@ -239,7 +263,7 @@ usersRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
 // user until they have replaced it. That is what keeps the feature honest: an
 // administrator has seen this credential, so it must not stay usable.
 // -----------------------------------------------------------------------------
-usersRouter.post("/:id/reset-password", requireAuth, requireRoles("admin"), async (req, res, next) => {
+usersRouter.post("/:id/reset-password", requireAuth, requireAdmin(), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isInteger(id) || id <= 0) {

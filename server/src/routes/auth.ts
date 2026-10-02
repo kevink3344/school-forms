@@ -30,7 +30,12 @@ import {
   selectUsersQuerySchema,
   changePasswordSchema,
 } from "../schemas.js";
-import type { Role } from "../db/schema.js";
+import {
+  findRoleByKey,
+  roleHasCapability,
+  schoolScopedFromCache,
+  type RoleCapability,
+} from "../db/roles-cache.js";
 
 export const authRouter = Router();
 
@@ -48,15 +53,47 @@ const changePasswordLimiter = rateLimit({
 // Helper: build the client-facing user DTO, resolving the org slug so the
 // frontend can construct org-scoped public URLs (e.g. /org/:slug/forms/:id)
 // and the school's display name so the sidebar can show it under the user.
-async function toUserDto(user: { id: number; email: string; role: Role; school_id: number | null; organization_id: number; display_name: string; must_change_password: boolean }) {
-  const [org, school] = await Promise.all([
+//
+// ★ `capabilities` is RESOLVED HERE rather than left for the client to derive
+// from `role`. A role is a row an admin can edit, so `role === "admin"` on the
+// client was a copy of a rule that lives in the catalog — and a second copy of a
+// permission rule is a permission rule that drifts. Worse, the client's copy was
+// the one that decided where a signed-in account LANDED, so a custom role sent the
+// browser to /login and the router bounced it back: an infinite redirect loop.
+// The server answers the question once, in the same place every guard asks it.
+//
+// `is_admin` is included because the client needs it to choose a landing route;
+// the four action capabilities are included because the nav and the action
+// buttons gate on them.
+async function capabilitiesFor(role: string) {
+  const row = await findRoleByKey(role);
+  const caps: Record<RoleCapability, boolean> = {
+    view: roleHasCapability(row, "view"),
+    edit: roleHasCapability(row, "edit"),
+    export: roleHasCapability(row, "export"),
+    report: roleHasCapability(row, "report"),
+  };
+  return {
+    ...caps,
+    // Unknown role → not an administrator, and not school-scoped. Both of these
+    // are the RESTRICTIVE answer, matching `requireCapability`'s rule that an
+    // unknown key holds no capability.
+    is_admin: row?.is_admin === true,
+    school_scoped: schoolScopedFromCache(role),
+  };
+}
+
+async function toUserDto(user: { id: number; email: string; role: string; school_id: number | null; organization_id: number; display_name: string; must_change_password: boolean }) {
+  const [org, school, capabilities] = await Promise.all([
     getOrganizationById(user.organization_id),
     user.school_id ? getSchool(user.school_id) : Promise.resolve(null),
+    capabilitiesFor(user.role),
   ]);
   return {
     id: user.id,
     email: user.email,
     role: user.role,
+    capabilities,
     school_id: user.school_id,
     school_name: school?.name ?? null,
     organization_id: user.organization_id,

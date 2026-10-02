@@ -10,7 +10,7 @@ import { createPortal } from "react-dom";
 import { Pencil, Trash2 } from "lucide-react";
 import type { ExportColumn, FormField, SubmissionRow } from "../types";
 import { StatusBadge } from "./layout";
-import { renderEditor, toStr, displayValue, type AnswerValue } from "./FieldValue";
+import { renderEditor, renderValue, toStr, displayValue, type AnswerValue } from "./FieldValue";
 
 // ---------------------------------------------------------------------------
 // Shared Submissions grid — used by the admin dashboard and the staff queue.
@@ -468,7 +468,7 @@ export function StaffCell({
          rather than inline here, so the mobile card view can wrap a long value
          such as a Parent/Guardian name instead of clipping it at the cell edge. */
       <td data-label={column.label} className="grid-field-cell">
-        {displayValue(value, type)}
+        {renderValue(value, type)}
       </td>
     );
   }
@@ -557,7 +557,7 @@ export function StaffCell({
           }
         }}
       >
-        {displayValue(value, type)}
+        {renderValue(value, type)}
         <Pencil size={12} className="cell-edit-hint" />
       </span>
     </td>

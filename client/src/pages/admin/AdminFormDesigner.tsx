@@ -2,9 +2,10 @@ import { useEffect, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { AlertTriangle, ArrowDown, ArrowUp, Check, CheckCircle2, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
-import type { FormField, FieldType, FormWithFields } from "../../types";
+import type { FormField, FieldType, FormVisibility, FormWithFields, RoleRow } from "../../types";
 import { PageHead, formStatusBadge } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
+import { useRoleCatalog, roleLabelFor, BUILT_IN_ROLES } from "../../lib/roles";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -12,26 +13,34 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "number", label: "Number" },
   { value: "date", label: "Date" },
   { value: "email", label: "Email" },
+  // A Google Drive document id, rendered as a clickable Docs link. Placed with
+  // the single-value types (text/number/date/email) rather than with the choice
+  // types, because it has no option list — the options editor below is an
+  // ALLOWLIST (select/radio/checkbox), so this type correctly shows none.
+  { value: "google_doc", label: "Google Document" },
   { value: "select", label: "Select" },
   { value: "radio", label: "Radio" },
   { value: "checkbox", label: "Checkbox" },
 ];
 
-// Roles that may access a staff-only field. Extend this array (and the server's
-// `ROLES`) to add future roles; the toggle badges render from it automatically.
-const ROLES = ["admin", "staff", "cdm_contact"] as const;
-
-// Human-facing label for a role in the access toggles. Falls back to the raw
-// role string so future roles still render (just less pretty).
-function roleLabel(role: string): string {
-  if (role === "cdm_contact") return "School Contact";
-  return role;
-}
-
-// Most-recently-viewed role set is used to seed a new staff-only field so it
-// defaults to being visible to every current role (backward-compatible).
-function defaultFieldRoles(): string[] {
-  return [...ROLES];
+// The roles a staff-only field can be granted to.
+//
+// ★ This list is read from the LIVE role catalog, not from a constant here. It
+// used to be `const ROLES = ["admin", "staff", "cdm_contact"]`, so a role an
+// administrator created in Settings → Roles got no toggle at all: the Reviewer
+// role could not be granted on any field, and neither could any role added
+// afterwards. `lib/roles.ts` is the same catalog every other role-aware screen
+// reads, so a newly created role appears in this row the moment it exists.
+//
+// `BUILT_IN_ROLES` is only the first-paint fallback, for the moment before the
+// catalog request returns, so the row is never briefly empty. Any key the field
+// already names is UNIONED IN even when the catalog does not list it: a grant
+// written before a role was renamed or deleted — or read before the catalog
+// loads — must stay visible and removable rather than silently hidden.
+function accessRoleKeys(field: FormField, catalog: readonly RoleRow[]): string[] {
+  const base = catalog.length > 0 ? catalog.map((r) => r.role_key) : [...BUILT_IN_ROLES];
+  const extra = (field.roles ?? []).filter((key) => !base.includes(key));
+  return [...base, ...extra];
 }
 
 export default function AdminFormDesigner() {
@@ -59,9 +68,12 @@ export default function AdminFormDesigner() {
   // Editor state for the field list
   const [fields, setFields] = useState<FormField[]>([]);
 
-  // Editable form-level metadata (title / description)
+  // Editable form-level metadata (prefix / title / description). The prefix is
+  // the form's submission-id code, so `GOVS` makes the next response
+  // `GOVS-00001`.
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
+  const [prefix, setPrefix] = useState("");
 
   // Per-form Google Drive folder override + live validation. `null` = not yet
   // checked; `true`/`false` reflect a valid/invalid folder id.
@@ -76,6 +88,40 @@ export default function AdminFormDesigner() {
   const [generateFormFields, setGenerateFormFields] = useState(false);
   const [generating, setGenerating] = useState(false);
   const [generateMsg, setGenerateMsg] = useState("");
+  // Visibility is saved on its own (it has a side effect on form_access), so it
+  // carries its own busy flag and message rather than joining the form's dirty
+  // state — a pending change here must never look like an unsaved form edit.
+  const [visibilityBusy, setVisibilityBusy] = useState(false);
+  const [visibilityMsg, setVisibilityMsg] = useState("");
+
+  /**
+   * Set the form's visibility and report the grandfather count.
+   *
+   * ★ NOT optimistic and NOT part of `handleSave`: the server writes a grant row
+   * for every School Contact who could see the form a moment ago, and the count
+   * is the only evidence that happened. A wrong count here is wrong in the
+   * direction of locking someone out, so it is shown rather than assumed.
+   */
+  const changeVisibility = async (visibility: FormVisibility) => {
+    setVisibilityBusy(true);
+    setVisibilityMsg("");
+    setError("");
+    try {
+      const updated = await api.setFormVisibility(formId, visibility);
+      setForm(updated);
+      setVisibilityMsg(
+        visibility === "private"
+          ? updated.granted > 0
+            ? `Now private. ${updated.granted} account${updated.granted === 1 ? "" : "s"} kept access.`
+            : "Now private. No existing accounts needed to keep access."
+          : "Now public. Everyone in the organization can read it."
+      );
+    } catch (err) {
+      setError(err instanceof ApiError ? err.message : "Could not change visibility");
+    } finally {
+      setVisibilityBusy(false);
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -87,6 +133,7 @@ export default function AdminFormDesigner() {
         setFields(f.fields || []);
         setTitle(f.title || "");
         setDescription(f.description ?? "");
+        setPrefix(f.code ?? "");
         setDocFolderId(f.doc_folder_id ?? "");
         setGoogleFormUrl(f.google_form_url ?? "");
       })
@@ -203,9 +250,11 @@ export default function AdminFormDesigner() {
         options: null,
         required: false,
         staff_only: isStaff,
-        // Seed a staff-only field with access for every current role so it is
-        // visible to admin + staff by default (matching pre-existing behavior).
-        roles: isStaff ? defaultFieldRoles() : null,
+        // `null` means UNRESTRICTED — every role, including ones created later —
+        // and the Access row renders that with every button on. Writing an
+        // explicit list of today's roles here is what froze a field against
+        // every role added afterwards (see `fieldAccessRoles` on the server).
+        roles: null,
         sort_order: prev.length,
         placeholder: null,
       },
@@ -242,6 +291,10 @@ export default function AdminFormDesigner() {
       await api.updateForm(formId, {
         title: title || "Untitled",
         description: description || null,
+        // Omitted when blank so the stored prefix is left alone rather than
+        // dropped to the `SUB` fallback (an empty string means the same thing
+        // server-side, but omitting the key states the intent at the call site).
+        ...(prefix.trim() ? { code: prefix.trim() } : {}),
         doc_folder_id: docFolderId.trim() || null,
         google_form_url: googleFormUrl.trim() || null,
         fields: fields.map((f, i) => ({
@@ -251,10 +304,13 @@ export default function AdminFormDesigner() {
           options: f.options,
           required: f.required,
           staff_only: f.staff_only,
-          // Preserve the explicit selection. Only fall back to the default when
-          // roles is genuinely unset (null/undefined) — an empty array is a
-          // deliberate "no access" and must survive the round-trip.
-          roles: f.staff_only ? (f.roles ?? defaultFieldRoles()) : null,
+          // Preserve the selection exactly, including BOTH sentinel states:
+          // `null` stays null (unrestricted, so a role created later is still
+          // admitted) and `[]` stays `[]` (a deliberate "no access" that must
+          // survive the round-trip). Materialising the role list here would
+          // silently narrow an unrestricted field to the roles that happened to
+          // exist at save time.
+          roles: f.staff_only ? (f.roles ?? null) : null,
           sort_order: i,
           placeholder: f.placeholder,
         })),
@@ -265,6 +321,7 @@ export default function AdminFormDesigner() {
       setFields(fresh.fields || []);
       setTitle(fresh.title || "");
       setDescription(fresh.description ?? "");
+      setPrefix(fresh.code ?? "");
       setDocFolderId(fresh.doc_folder_id ?? "");
       setGoogleFormUrl(fresh.google_form_url ?? "");
       setDirty(false);
@@ -318,6 +375,24 @@ export default function AdminFormDesigner() {
   const headerMeta = [form && formStatusBadge(form.status).label, user?.organization_slug]
     .filter((part): part is string => Boolean(part))
     .join(" · ");
+
+  // Mirror of the server's `formCodeSchema` in schemas.ts: trimmed, uppercased,
+  // stripped to A–Z/0–9, and capped at 8. It has to sanitise the SAME way or the
+  // preview would promise an id the API stores differently. Over-length is an
+  // error rather than a silent truncation, again matching the server, which
+  // rejects it — silently slicing here would show "GOVSCHOO" while the save
+  // failed with "Use 8 characters or fewer".
+  const sanitizedPrefix = prefix.trim().toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const prefixTooLong = sanitizedPrefix.length > 8;
+
+  // A blank box omits `code` from the payload, so the stored prefix is kept —
+  // that is `form.code`, NOT the `SUB` fallback (which only applies to a form
+  // that has never had a prefix). Falling back to "SUB" here would describe a
+  // re-prefixing this save does not perform.
+  const effectivePrefix = sanitizedPrefix || form?.code || "SUB";
+  const nextSubmissionId = `${effectivePrefix}-${String(
+    (form?.submission_seq ?? 0) + 1
+  ).padStart(5, "0")}`;
 
   return (
     <div>
@@ -415,6 +490,42 @@ export default function AdminFormDesigner() {
         <div className="card-body">
           <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
             <div className="filter-group" style={{ minWidth: 0 }}>
+              <label>Prefix</label>
+              <input
+                type="text"
+                value={prefix}
+                placeholder="e.g. GOVS"
+                maxLength={12}
+                onChange={(e) => {
+                  setPrefix(e.target.value);
+                  setDirty(true);
+                }}
+              />
+              {prefixTooLong ? (
+                <div style={{ fontSize: "0.75rem", color: "var(--danger, #b93040)", marginTop: 4 }}>
+                  Use 8 characters or fewer (A–Z and 0–9 only).
+                </div>
+              ) : (
+                <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                  The next submission will be{" "}
+                  {/* The id is the actionable part of this caption, so it gets
+                      --text rather than the caption's --text-muted (~3.7:1 at
+                      this size, under the 4.5:1 floor) — the same call made for
+                      .badge.sysmsg-audience in global.css. */}
+                  <span
+                    style={{
+                      fontFamily: "var(--font-mono)",
+                      fontWeight: 600,
+                      color: "var(--text)",
+                    }}
+                  >
+                    {nextSubmissionId}
+                  </span>
+                  . Existing submissions keep the prefix they were created with.
+                </div>
+              )}
+            </div>
+            <div className="filter-group" style={{ minWidth: 0 }}>
               <label>Title</label>
               <input
                 type="text"
@@ -501,6 +612,39 @@ export default function AdminFormDesigner() {
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
                 Optional link to the source Google Form. Shown to staff so they can open it.
               </div>
+
+              {/* Visibility — its OWN control, not part of the form's save.
+                  ★ Switching to private has a SIDE EFFECT on a different table
+                  (it grandfathers every School Contact who can see the form), so
+                  it goes through PATCH /api/forms/:id/visibility rather than
+                  riding along on a general form edit. The confirmation names the
+                  count, because a wrong number here locks people out. */}
+              <label style={{ marginTop: 12, display: "block" }}>Visibility</label>
+              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                <select
+                  className="edit-select"
+                  value={form?.visibility ?? "public"}
+                  disabled={visibilityBusy}
+                  onChange={(e) => void changeVisibility(e.target.value as FormVisibility)}
+                >
+                  <option value="public">Public — everyone in the organization</option>
+                  <option value="private">Private — School Contacts need a grant</option>
+                </select>
+                {visibilityBusy && <span className="cell-sub">Saving…</span>}
+              </div>
+              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                A private form is hidden from School Contacts unless an administrator grants access.
+                Administrators and staff always see it. Families can still submit either way.
+              </div>
+              {visibilityMsg && (
+                <div
+                  className="cell-sub"
+                  style={{ marginTop: 4, color: "var(--text)" }}
+                  role="status"
+                >
+                  {visibilityMsg}
+                </div>
+              )}
 
               <label
                 style={{
@@ -671,6 +815,13 @@ function FieldRow({
     }
   }, [field.options, field.type]);
 
+  // Subscribing here (rather than passing the list down) is what makes the
+  // Access row pick up a role created in another tab without a reload. A hook
+  // cannot be called inside the `field.staff_only &&` block below, which is
+  // why it sits at the top of the component.
+  const { roles: roleCatalog } = useRoleCatalog();
+  const roleKeys = accessRoleKeys(field, roleCatalog);
+
   return (
     <div
       style={{
@@ -776,18 +927,26 @@ function FieldRow({
             >
               Access
             </span>
-            {ROLES.map((role) => {
-              const has = (field.roles ?? defaultFieldRoles()).includes(role);
+            {roleKeys.map((role) => {
+              // Three states, rendered distinctly:
+              //   null -> unrestricted, so every role reads as granted
+              //   []   -> granted to nobody, so no role reads as granted
+              //   [..] -> exactly those roles
+              const granted = Array.isArray(field.roles) ? field.roles : null;
+              const has = granted === null || granted.includes(role);
               return (
                 <button
                   key={role}
                   type="button"
-                  title={`${has ? "Remove" : "Grant"} ${roleLabel(role)} access to this field`}
+                  title={`${has ? "Remove" : "Grant"} ${roleLabelFor(role)} access to this field`}
                   onClick={() => {
-                    // Base the toggle on the CURRENT selection. When roles is
-                    // unset we start from the default set, so the first click
-                    // flips just that one role instead of resetting everything.
-                    const current = field.roles?.length ? field.roles : defaultFieldRoles();
+                    // Base the toggle on the CURRENT selection, keeping the two
+                    // sentinels apart: an unrestricted field (null) starts from
+                    // "every role", while an explicit empty array stays empty.
+                    // `field.roles?.length` collapsed those two — on a field
+                    // granted to nobody, re-granting one role snapped every
+                    // other button back on.
+                    const current = Array.isArray(field.roles) ? field.roles : roleKeys;
                     const next = has ? current.filter((r) => r !== role) : [...current, role];
                     // Persist the explicit selection. An empty array is a valid
                     // value ("no role may access this field") and must NOT be
@@ -813,7 +972,7 @@ function FieldRow({
                   }}
                 >
                   {has ? <Check size={14} /> : <Plus size={14} />}
-                  <span>{roleLabel(role)}</span>
+                  <span>{roleLabelFor(role)}</span>
                 </button>
               );
             })}

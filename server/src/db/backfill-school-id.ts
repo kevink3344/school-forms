@@ -31,10 +31,39 @@
  *
  * It never invents a school. An answer that matches nothing ("Test School",
  * "Option 23") is left exactly as it is and listed under "unresolved" — those
- * rows are legitimately still on the form's fallback.
+ * rows are legitimately still on the form's fallback. An answer that matches no
+ * school EXACTLY but is a listed spelling of one (`SCHOOL_NAME_ALIASES` below)
+ * is resolved through that table, which is explicit and reviewed rather than
+ * fuzzy, and every such change is marked in the output.
  */
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
+
+/**
+ * Answers that name a real school in this database but not by its imported
+ * spelling. Each entry is an EXPLICIT, reviewed pairing — there is no fuzzy
+ * matching here and never should be, because a wrong guess silently grants a
+ * School Contact access to another school's submissions.
+ *
+ * Every one of these is unambiguous by grade level: the district list contains
+ * an Elementary and a Middle "Herbert Akins Road" and a High and an Elementary
+ * "Southeast Raleigh", so the grade in the typed answer picks exactly one.
+ *
+ * The alternative to this table is not "no decision" — it is leaving the row on
+ * `form.school_id` forever. Measured on 2026-10-01 that stranded 9 real
+ * submissions on the Sample School placeholder, where nobody could open them. It
+ * also silently orphaned 3 rows from the two contacts whose own school_id was
+ * being corrected at the same time.
+ */
+const SCHOOL_NAME_ALIASES: Record<string, string> = {
+  // "Moore Square Magnet Middle School" -> the only Moore Square school.
+  "moore square magnet middle school": "moore square middle school",
+  // "&"/"and" — the form's own wording vs the district feed's.
+  "vernon malone college & career academy": "vernon malone college and career academy",
+  // Grade level picks the Middle over the Elementary.
+  "herbert akins middle school": "herbert akins road middle school",
+  "southeast raleigh magnet high school": "southeast raleigh high school",
+};
 
 interface DeclaredRow {
   id: number;
@@ -51,6 +80,8 @@ interface Change {
   to: number;
   toName: string;
   declared: string;
+  /** True when the answer only matched through SCHOOL_NAME_ALIASES. */
+  viaAlias: boolean;
 }
 
 async function main(): Promise<void> {
@@ -93,7 +124,18 @@ async function main(): Promise<void> {
 
   for (const r of rows) {
     const declared = String(r.declared_school ?? "").trim();
-    const match = byName.get(declared.toLowerCase());
+    const key = declared.toLowerCase();
+    // Exact name first; the alias table is only a fallback, so adding an alias
+    // can never change the meaning of an answer that already resolves.
+    let match = byName.get(key);
+    let viaAlias = false;
+    if (!match) {
+      const canonical = SCHOOL_NAME_ALIASES[key];
+      if (canonical !== undefined) {
+        match = byName.get(canonical);
+        viaAlias = match !== undefined;
+      }
+    }
     if (!match) {
       unresolved.push({ id: Number(r.id), public_id: r.public_id, declared });
       continue;
@@ -110,6 +152,7 @@ async function main(): Promise<void> {
       to: match.id,
       toName: match.name,
       declared,
+      viaAlias,
     });
   }
 
@@ -123,11 +166,20 @@ async function main(): Promise<void> {
     for (const d of duplicates) console.log(`[backfill]   ${d}`);
   }
 
+  const aliasedCount = changes.filter((c) => c.viaAlias).length;
   // eslint-disable-next-line no-console
   console.log(`[backfill] ${changes.length} to change, ${alreadyCorrect} already correct, ${unresolved.length} unresolved:`);
   for (const c of changes) {
     // eslint-disable-next-line no-console
     console.log(`[backfill]   #${c.id} ${c.public_id} ${c.from ?? "null"} -> ${c.to} (${c.toName})  [answer: ${c.declared}]`);
+    if (c.viaAlias) {
+      // eslint-disable-next-line no-console
+      console.log(`[backfill]     ^ resolved through SCHOOL_NAME_ALIASES, not an exact name match`);
+    }
+  }
+  if (aliasedCount > 0) {
+    // eslint-disable-next-line no-console
+    console.log(`[backfill] ${aliasedCount} of the above resolved through an alias (the typed answer spells the school differently from the imported name)`);
   }
   for (const u of unresolved) {
     // eslint-disable-next-line no-console
