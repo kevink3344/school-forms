@@ -73,9 +73,9 @@ function onFormSubmit(e) {
 // The public endpoint only returns non staff_only fields, so title-case matching
 // applies to the parent-facing questions only.
 //
-// BEST-EFFORT on purpose: this map is a nicety, not a requirement. A form with
-// no designer fields legitimately returns { fields: [] } (every title is then
-// captured as text), and a lookup failure must not stop the response from being
+// BEST-EFFORT on purpose: this map is a nicety, not a requirement. A PUBLISHED
+// form with no designer fields legitimately returns { fields: [] } (every title
+// is then captured as text), and a lookup failure must not stop the response from being
 // sent — the webhook is what records the attempt in the Webhook Log. So any
 // problem here yields an empty map and the answers are forwarded by title only.
 function getFieldMap(formId) {
@@ -85,9 +85,21 @@ function getFieldMap(formId) {
       contentType: 'application/json',
       muteHttpExceptions: true,
     });
-    if (res.getResponseCode() !== 200) {
-      console.warn('No field map for form ' + formId + ' (HTTP ' + res.getResponseCode() +
-        ') — question titles will be captured as text fields.');
+    const code = res.getResponseCode();
+    if (code !== 200) {
+      // ★ NOT the harmless "form has no fields" case. A PUBLISHED form with zero
+      // fields answers 200 with { fields: [] } and falls through to the empty map
+      // below — it never reaches this branch. So a non-200 here means the
+      // /api/webhook/google POST below will be REJECTED for the same reason
+      // (routes/forms.ts returns 400 for a non-published form; intake.ts enforces
+      // the same gate), and nothing will be captured until it is fixed.
+      console.warn('Field map for form ' + formId + ' unavailable (HTTP ' + code + ') — ' +
+        (code === 404
+          ? 'no such form id; check FORM_ID.'
+          : code === 400
+            ? 'the form is NOT PUBLISHED; the webhook will reject the submission too.'
+            : 'check API_BASE and that the server is reachable.') +
+        ' Forwarding the answers by title anyway.');
       return {};
     }
     const form = JSON.parse(res.getContentText());
@@ -95,7 +107,7 @@ function getFieldMap(formId) {
     (form.fields || []).forEach(function (field) { map[field.label] = field.id; });
     return map;
   } catch (err) {
-    console.warn('Field map lookup failed — question titles will be captured as text fields: ' + err);
+    console.warn('Field map lookup failed (network/parse) — forwarding the answers by title: ' + err);
     return {};
   }
 }

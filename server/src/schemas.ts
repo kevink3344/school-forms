@@ -375,6 +375,39 @@ export const createSubmissionSchema = z.object({
   answers: z.array(submissionAnswerSchema).min(1),
 });
 
+// -----------------------------------------------------------------------------
+// Webhook-only answer shape (docs/plans/google-form-undefined-fields.md §5)
+// -----------------------------------------------------------------------------
+// A Google Form that was never defined in this app's designer can only identify
+// its questions by TITLE, so the webhook accepts `label` as an alternative to
+// `field_id`: a title that matches a defined field is stored against it, and a
+// title that matches nothing becomes a per-submission text field.
+//
+// ★ Deliberately NOT a change to `submissionAnswerSchema` above. That schema is
+// shared by `POST /api/submissions` (the in-app parent path, which always has
+// real fields) and by `updateSubmissionValuesSchema` (the staff edit path).
+// Loosening it would let a parent's answer belong to no field at all — a
+// designer mistake that is a loud 400 today and must stay one.
+//
+// `label` carries no `.max()` on purpose: a question title longer than the
+// column is TRUNCATED on capture (plan §8 case 8), not rejected, so a
+// too-long title still lands rather than 400-ing the whole submission.
+export const webhookAnswerSchema = z
+  .object({
+    field_id: z.coerce.number().int().positive().nullable().optional(),
+    label: z.string().nullable().optional(),
+    value: answerValue,
+  })
+  .refine((a) => a.field_id != null || (a.label ?? "").trim() !== "", {
+    message: "An answer must carry a field_id or a non-empty label",
+    path: ["field_id"],
+  });
+
+export const createWebhookSubmissionSchema = z.object({
+  form_id: z.coerce.number().int().positive(),
+  answers: z.array(webhookAnswerSchema).min(1),
+});
+
 export const updateSubmissionStatusSchema = z.object({
   status: z.enum(SUBMISSION_STATUS),
 });

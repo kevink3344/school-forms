@@ -1,6 +1,7 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
+import { planSubmissionFields, type IncomingAnswer } from "../webhook/field-mapping.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES } from "./schema.js";
 import type { FormVisibility } from "./schema.js";
 import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
@@ -2000,30 +2001,45 @@ export async function resolveSubmissionSchoolId(
     const fieldId = Number(a.field_id);
     if (!Number.isFinite(fieldId) || !schoolFieldIds.has(fieldId)) continue;
     if (typeof a.value !== "string" || !a.value.trim()) continue;
-    const name = a.value.trim();
-    // Match case-insensitively in the QUERY rather than relying on the
-    // database's default collation: Azure SQL's is case-insensitive but
-    // libSQL's `=` is not, so the same answer would resolve in production and
-    // silently fall back on a Turso workspace.
-    const rows = await execute<Pick<School, "id">>(
-      "SELECT id FROM dbo.schools WHERE LOWER(name) = LOWER(@name) ORDER BY id",
-      { name }
-    );
-    // `rows[0].id` is a string too (same driver behaviour as above). Convert it
-    // so the declared `Promise<number | null>` is a fact rather than a claim —
-    // this value is written to `submissions.school_id` and then compared with
-    // `===` by `canAccessSchool`.
-    if (rows[0]?.id !== undefined && rows[0].id !== null) {
-      const resolved = Number(rows[0].id);
-      if (Number.isFinite(resolved)) return resolved;
-    }
+    const resolved = await findSchoolIdByName(a.value.trim());
+    if (resolved !== null) return resolved;
   }
   return fallback;
 }
 
+// The ONE case-insensitive school lookup.
+//
+// Match in the QUERY rather than relying on the database's default collation:
+// Azure SQL's is case-insensitive but libSQL's `=` is not, so the same answer
+// would resolve in production and silently fall back on a Turso workspace.
+//
+// Two callers need it now — `resolveSubmissionSchoolId` above, and
+// `createSubmission` for the captured-title path that a form with no defined
+// fields depends on (plan §5.3) — and they must never disagree about which
+// school matched, so the comparison lives here once.
+async function findSchoolIdByName(name: string): Promise<number | null> {
+  const rows = await execute<Pick<School, "id">>(
+    "SELECT id FROM dbo.schools WHERE LOWER(name) = LOWER(@name) ORDER BY id",
+    { name }
+  );
+  // `id` arrives as a STRING from the driver even though the column is numeric
+  // (same behaviour the note above describes). Convert it so the declared
+  // `Promise<number | null>` is a fact rather than a claim — this value is
+  // written to `submissions.school_id` and then compared with `===` by
+  // `canAccessSchool`.
+  const raw = rows[0]?.id;
+  if (raw === undefined || raw === null) return null;
+  const resolved = Number(raw);
+  return Number.isFinite(resolved) ? resolved : null;
+}
+
 export async function createSubmission(
   form: Form,
-  answers: { field_id: number; value: string | number | boolean | string[] | null }[],
+  // ★ Widened for the webhook (docs/plans/google-form-undefined-fields.md §5): an
+  // answer may now identify its field by `label` ALONE, so `field_id` is
+  // optional. The in-app parent path always sends one; `planSubmissionFields`
+  // resolves the rest below.
+  answers: IncomingAnswer[],
   // Replay only (docs/plans/webhook-log.md Q7): the school year derived from the
   // ORIGINAL webhook `received_at`. Without it a response captured in July and
   // replayed in September is filed under the NEW school year, because the
@@ -2056,7 +2072,23 @@ export async function createSubmission(
   const submissionSeq: number = allocation;
   const publicId = formatSubmissionPublicId(form.code, submissionSeq);
 
-  const schoolId = await resolveSubmissionSchoolId(form, answers);
+  // ★ Resolve every answer against THIS form's fields before anything is written
+  // (docs/plans/google-form-undefined-fields.md §5). One call yields both halves
+  // of the outcome: the answers that belong to a defined field, and the answers
+  // that name a field this form does not have. That second set is what lets a
+  // Google Form nobody has designed in this app land instead of 400.
+  const formFields = await listFormFields(form.id);
+  const plan = planSubmissionFields(formFields, answers, SCHOOL_FIELD_LABELS);
+
+  // School routing. A CAPTURED `School` answer is the only way a form with no
+  // defined fields can ever be scoped to a school, because
+  // `resolveSubmissionSchoolId` inspects defined fields only (plan §5.3): it is
+  // handed `plan.values`, i.e. the answers that did resolve. Falls back to the
+  // form's own school inside `resolveSubmissionSchoolId`.
+  const schoolId = plan.schoolName
+    ? (await findSchoolIdByName(plan.schoolName)) ??
+      (await resolveSubmissionSchoolId(form, plan.values))
+    : await resolveSubmissionSchoolId(form, plan.values);
   const schoolYear = opts.schoolYear ?? schoolYearForDate(new Date());
   const subs = await execute<Submission>(
     dialect().insertReturning({
@@ -2088,20 +2120,39 @@ export async function createSubmission(
     { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq, schoolYear }
   );
   const submission = subs[0];
-  for (const a of answers) {
+  // Only the answers that resolved to a field THIS form defines. A captured
+  // answer has no field id and must never be written here — `submission_values
+  // .field_id` is a foreign key to `form_fields(id)`.
+  for (const v of plan.values) {
     await execute(
       `INSERT INTO dbo.submission_values (submission_id, field_id, value)
        VALUES (@submissionId, @fieldId, @value)`,
       {
         submissionId: submission.id,
-        fieldId: a.field_id,
-        value: a.value === null ? null :
-          typeof a.value === "string" ? a.value :
-          typeof a.value === "number" ? String(a.value) :
-          typeof a.value === "boolean" ? (a.value ? "1" : "0") :
-          JSON.stringify(a.value),
+        fieldId: v.field_id,
+        value: v.value === null ? null :
+          typeof v.value === "string" ? v.value :
+          typeof v.value === "number" ? String(v.value) :
+          typeof v.value === "boolean" ? (v.value ? "1" : "0") :
+          JSON.stringify(v.value),
       }
     );
+  }
+
+  // Captured fields: a question the Google Form asked that this form does not
+  // define. Stored per-submission as `text`, so nothing is dropped. `created_by`
+  // is null — which is exactly what the detail page reads to say a row came from
+  // the Google Form rather than from a staff member.
+  for (const c of plan.captured) {
+    await createAdhocField({
+      submissionId: submission.id,
+      label: c.label,
+      type: "text",
+      options: null,
+      value: c.value,
+      sortOrder: c.sort_order,
+      createdBy: null,
+    });
   }
   const detail = await getSubmissionDetail(publicId, form.organization_id);
   if (!detail) throw new Error("Failed to read back created submission");

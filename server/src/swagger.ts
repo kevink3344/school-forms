@@ -1211,7 +1211,11 @@ export function buildSwaggerSpec(req?: Request) {
           description:
             "Public intake endpoint for a Google Apps Script webhook. Guards the call with the " +
             "X-Webhook-Secret header set via GOOGLE_FORMS_WEBHOOK_SECRET. Accepts the same body " +
-            "as POST /api/submissions.",
+            "as POST /api/submissions, EXCEPT that an answer may be identified by the Google Form " +
+            "question title in `label` instead of a field_id. That is what lets a form whose " +
+            "questions were never defined in this app's designer still be captured: a title that " +
+            "matches a defined field is stored against it, and a title that matches nothing is " +
+            "stored as a per-submission text field, so an answer is never dropped.",
           security: [],
           parameters: [
             {
@@ -1235,8 +1239,23 @@ export function buildSwaggerSpec(req?: Request) {
                       type: "array",
                       items: {
                         type: "object",
+                        description:
+                          "An answer identified by `field_id`, or by the Google Form question title " +
+                          "in `label` when the form was never defined in this app's designer. At " +
+                          "least one of the two is required.",
                         properties: {
-                          field_id: { type: "integer" },
+                          field_id: {
+                            type: "integer",
+                            nullable: true,
+                            description:
+                              "Server-side form field id. Wins over `label` when both are present; when it is not a field on this form, `label` is used instead.",
+                          },
+                          label: {
+                            type: "string",
+                            nullable: true,
+                            description:
+                              "The Google Form question title, sent verbatim by the Apps Script. Required when `field_id` is absent. A title longer than the 200-character field label is truncated on capture.",
+                          },
                           value: { type: "object", nullable: true },
                         },
                       },

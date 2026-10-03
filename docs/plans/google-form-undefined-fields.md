@@ -63,6 +63,16 @@ Google Form submitted
 > Webhook Log (`dbo.webhook_events`) records **nothing** for these failures. After this change the
 > script always posts, so every Google submission — matched or captured — becomes a logged arrival.
 
+> ★ **Prerequisite: the form must be PUBLISHED.** Both the field-map fetch
+> (`GET /api/forms/:id/public`, `server/src/routes/forms.ts:71`) and the webhook itself
+> (`server/src/webhook/intake.ts:120`) answer **400** for any form whose `status` is not
+> `'published'` (draft or archived). So this whole plan only applies to a **published** form —
+> and a published form *may* legitimately have zero fields: `createFormSchema.fields` defaults to
+> `[]` (`schemas.ts:286`) and `PATCH /:id/status` (`routes/forms.ts:302`) has **no field-count
+> guard**. A published zero-field form answers **200** with `{ fields: [] }`; only an *unpublished*
+> one answers 400. Conflating those two is the single easiest way to misdiagnose this feature, so
+> the Apps Script's warning text names the cause explicitly (§6).
+
 ---
 
 ## 3. The storage vehicle already exists — no migration

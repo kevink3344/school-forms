@@ -1,4 +1,4 @@
-import { createSubmissionSchema } from "../schemas.js";
+import { createWebhookSubmissionSchema } from "../schemas.js";
 import { getForm, createSubmission } from "../db/queries.js";
 import { sendSlackAlert } from "../notify/slack.js";
 import type { WebhookErrorCode, WebhookEventStatus } from "../db/schema.js";
@@ -91,7 +91,13 @@ export async function handleGoogleWebhookPayload(
     schoolYear: opts.schoolYear ?? null,
   };
 
-  const parsed = createSubmissionSchema.safeParse(body);
+  // ★ The WEBHOOK schema, not the in-app one. A Google Form that was never
+  // defined in this app's designer can only identify its questions by TITLE, so
+  // this schema accepts a label-only answer. `createSubmission` then resolves
+  // each answer to a real field or captures it as a per-submission text field
+  // (docs/plans/google-form-undefined-fields.md §5). The in-app parent schema is
+  // deliberately untouched and still requires a `field_id`.
+  const parsed = createWebhookSubmissionSchema.safeParse(body);
   if (!parsed.success) {
     const details = parsed.error.flatten();
     return {

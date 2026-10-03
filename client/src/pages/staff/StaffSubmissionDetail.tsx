@@ -498,6 +498,58 @@ export default function StaffSubmissionDetail() {
         </section>
       </div>
 
+      {/* Captured fields (docs/plans/google-form-undefined-fields.md §7).
+
+          A question a Google Form asked that was never defined in this form's
+          designer is stored as a per-submission text field, so the answer lands
+          instead of being rejected. Nothing else in the app renders these —
+          grids and reports build their columns from the form definition — so
+          without this card the captured data would be invisible.
+
+          Read-only on purpose: these rows are the parent's own words preserved
+          verbatim, not a staff working area (the form's own staff-only fields,
+          below, are that). `created_by === null` is what marks a row as captured
+          rather than authored here, which is why the note can name its source
+          honestly instead of implying a colleague typed it. */}
+      {detail.adhocFields.length > 0 && (
+        <div style={{ marginTop: 18 }}>
+          <div className="card">
+            <div className="card-head">
+              <h3>Additional fields</h3>
+              <span className="sub">Extra questions captured from the Google Form</span>
+              <span className="lock-tag" style={{ marginLeft: "auto" }}>
+                <Lock size={12} />
+                Staff only
+              </span>
+            </div>
+            <div className="card-body">
+              <div className="field-list">
+                {detail.adhocFields.map((f) => (
+                  <FieldValue
+                    key={f.id}
+                    v={{
+                      field_id: f.id,
+                      field_label: f.label,
+                      field_type: f.type,
+                      options: f.options,
+                    }}
+                    editing={false}
+                    value={f.value}
+                    onChange={() => {}}
+                  />
+                ))}
+              </div>
+              {detail.adhocFields.some((f) => f.created_by === null) && (
+                <div className="muted-note" style={{ marginTop: 12 }}>
+                  Captured from the Google Form — these questions have no matching field in this
+                  form&rsquo;s design, so their answers are kept here on this submission.
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Staff-only fields — always editable (the form's staff_only form fields) */}
       <div style={{ marginTop: 18 }}>
         <div className="card">

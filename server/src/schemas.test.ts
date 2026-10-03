@@ -1,5 +1,10 @@
 import { describe, it, expect } from "vitest";
-import { createSubmissionSchema, submissionAnswerSchema, updateSubmissionValuesSchema } from "./schemas.js";
+import {
+  createSubmissionSchema,
+  createWebhookSubmissionSchema,
+  submissionAnswerSchema,
+  updateSubmissionValuesSchema,
+} from "./schemas.js";
 
 // -----------------------------------------------------------------------------
 // The webhook's inbound contract.
@@ -128,5 +133,93 @@ describe("updateSubmissionValuesSchema — shares the same answer shape", () => 
       );
     }
     expect(typeof parsed.data.answers[0].field_id).toBe("number");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// The WEBHOOK-only answer shape (docs/plans/google-form-undefined-fields.md §5).
+//
+// A Google Form that was never defined in this app's designer can only identify
+// its questions by TITLE, so the webhook accepts `label` as an alternative to
+// `field_id`. The last control below is the important one: the IN-APP parent
+// schema must still refuse a label-only answer, because loosening that path
+// would let a parent's answer belong to no field at all — a designer mistake
+// that is a loud 400 today and has to stay one.
+// -----------------------------------------------------------------------------
+
+describe("createWebhookSubmissionSchema — label is an acceptable identity", () => {
+  it("accepts a label-only answer (the whole point: a form with no defined fields)", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ label: "Student Name", value: "Ada" }],
+    });
+    if (!parsed.success) {
+      throw new Error(
+        `a label-only answer was rejected: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`
+      );
+    }
+    expect(parsed.data.answers[0].label).toBe("Student Name");
+    expect(parsed.data.answers[0].field_id).toBeUndefined();
+  });
+
+  it("accepts an answer carrying BOTH field_id and label, and still coerces the id", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ field_id: "9", label: "Student Name", value: "Ada" }],
+    });
+    if (!parsed.success) throw new Error("an answer with both identities was rejected");
+    // Coercion still applies, so the handler receives numbers and its `===`
+    // comparisons against database values keep working.
+    expect(typeof parsed.data.answers[0].field_id).toBe("number");
+    expect(parsed.data.answers[0].field_id).toBe(9);
+  });
+
+  it("accepts an explicit null field_id alongside a label", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ field_id: null, label: "Grade", value: "9" }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("ACCEPTS a 300-char title — truncation is the capture path's job", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ label: "x".repeat(300), value: "v" }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  // --- failing controls ------------------------------------------------------
+
+  it("CONTROL: rejects an answer with NEITHER field_id nor label", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ value: "Ada" }],
+    });
+    // If this ever passes, the webhook accepts an answer nothing can be written
+    // against: no field to match, and no title to capture.
+    expect(parsed.success).toBe(false);
+  });
+
+  it("CONTROL: rejects a whitespace-only label with no field_id", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({
+      form_id: 11,
+      answers: [{ label: "   ", value: "Ada" }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("CONTROL: still rejects an empty answers array", () => {
+    const parsed = createWebhookSubmissionSchema.safeParse({ form_id: 11, answers: [] });
+    expect(parsed.success).toBe(false);
+  });
+
+  it("CONTROL: the IN-APP parent schema still REFUSES a label-only answer", () => {
+    const parsed = createSubmissionSchema.safeParse({
+      form_id: 2,
+      answers: [{ label: "Student Name", value: "Ada" }],
+    });
+    expect(parsed.success).toBe(false);
   });
 });
