@@ -31,6 +31,7 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 
 const ROUTES = readFileSync(join(HERE, "routes", "submissions.ts"), "utf8");
 const GOOGLE_DOCS = readFileSync(join(HERE, "google", "docs.ts"), "utf8");
+const QUERIES = readFileSync(join(HERE, "db", "queries.ts"), "utf8");
 
 describe("ad-hoc route id comparisons (routes/submissions.ts)", () => {
   it("never compares a raw row id with a url-parsed one using ===", () => {
@@ -58,5 +59,39 @@ describe("google/docs.ts id comparison", () => {
 
   it("has no uncoerced field_id comparison left", () => {
     expect(/a\.field_id === gen\.id/.test(GOOGLE_DOCS)).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// The same rule inside a SET — the one place the trap is silent to TypeScript.
+// `Set<string>.has(5)` is a compile error, but a `Set<number>` built from rows
+// that are really strings type-checks perfectly and matches nothing.
+//
+// `reconcileFormFields` is where that would hurt most. It decides UPDATE-vs-INSERT
+// for every field of a form, and its delete loop then removes "the fields that
+// went away". Uncoerced, EVERY field takes the INSERT branch and every existing
+// field is treated as removed: the form is renumbered — which breaks the
+// persisted `field_N` keys that user view columns, reports and exports are keyed
+// by — or, where the FK guard blocks the delete, every column is duplicated.
+//
+// A source guard, because reaching this needs a live database and the defect is
+// the shape of one expression. It was UNREACHABLE while `fieldSchema.id` was
+// strict (the request 400'd first), which is exactly why it had to be fixed in
+// the same commit as the schema: repairing the validation alone would have traded
+// a loud 400 for silent duplication.
+// -----------------------------------------------------------------------------
+describe("db/queries.ts field reconciliation id set", () => {
+  it("builds the existing-id set from NUMBERS", () => {
+    expect(QUERIES).toContain("new Set(existingRows.map((r) => Number(r.id)))");
+    expect(/new Set\(existingRows\.map\(\(r\) => r\.id\)\)/.test(QUERIES)).toBe(false);
+  });
+
+  it("compares the incoming field id after coercing it", () => {
+    expect(QUERIES).toContain("const fieldId = Number(f.id);");
+    expect(QUERIES).toContain("existingIds.has(fieldId)");
+    // Negative control. This comment deliberately does NOT quote the forbidden
+    // expression: the assertions above and below grep the raw source, so writing
+    // it here would fail the very test that documents it. (Learned by doing it.)
+    expect(/existingIds\.has\(f\.id\)/.test(QUERIES)).toBe(false);
   });
 });

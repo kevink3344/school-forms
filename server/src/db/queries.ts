@@ -1464,7 +1464,7 @@ async function reconcileFormFields(
     `SELECT id FROM dbo.form_fields WHERE form_id = @formId`,
     { formId }
   );
-  const existingIds = new Set(existingRows.map((r) => r.id));
+  const existingIds = new Set(existingRows.map((r) => Number(r.id)));
   const incomingIds = new Set<number>();
 
   for (let i = 0; i < fields.length; i++) {
@@ -1473,15 +1473,30 @@ async function reconcileFormFields(
     const options = f.options && f.options.length ? JSON.stringify(f.options) : null;
     // Preserve [] as '[]' (explicit "no access") rather than NULL ("unset").
     const roles = f.roles ? JSON.stringify(f.roles) : null;
-    if (f.id && existingIds.has(f.id)) {
-      incomingIds.add(f.id);
+    // ★ `Number(f.id)`, and note that BOTH sides must be numbers. `form_fields.id`
+    // arrives as TEXT (the driver returns numeric columns as strings — see
+    // `routes/users.ts` for the measurement) while `f.id` reaches here already
+    // coerced to a NUMBER by `fieldSchema`. `Set.has` compares with SameValueZero,
+    // so a Set holding "37" can never match 37: EVERY field took the INSERT branch
+    // and the delete loop below then treated every existing field as removed —
+    // renumbering the whole form (which breaks the persisted `field_N` view and
+    // report keys) or, where submission values blocked the delete, leaving every
+    // column duplicated.
+    //
+    // This was unreachable while `z.number()` rejected the request before it got
+    // here, so the two fixes have to land together: repairing the validation alone
+    // would have traded a 400 for silent duplication. Same trap as
+    // `resolveSubmissionSchoolId` — do not "simplify" it back to `has(f.id)`.
+    const fieldId = Number(f.id);
+    if (Number.isInteger(fieldId) && fieldId > 0 && existingIds.has(fieldId)) {
+      incomingIds.add(fieldId);
       await execute(
         `UPDATE dbo.form_fields
          SET label=@label, type=@type, options=@options, required=@required,
              staff_only=@staffOnly, sort_order=@sortOrder, placeholder=@placeholder, roles=@roles
          WHERE id=@id AND form_id=@formId`,
         {
-          id: f.id,
+          id: fieldId,
           formId,
           label: f.label,
           type: f.type,

@@ -235,7 +235,19 @@ export const updateOrganizationSchema = z
 const fieldTypeEnum = z.enum(FIELD_TYPES);
 
 export const fieldSchema = z.object({
-  id: z.number().int().positive().optional(),
+  // ★ `z.coerce`, for the same reason `submissionAnswerSchema` below uses it: this
+  // is a TRANSMITTED id. The designer loads a form, holds each field's id, and
+  // sends the whole list back on save (AdminFormDesigner `id: f.id || undefined`)
+  // — and on a driver that returns numeric columns as TEXT that id is `"37"`.
+  // `z.number()` answered with one "Expected number, received string" per field,
+  // all collapsed under the single key `fields` (Zod's `flatten()` keys by
+  // `path[0]`), so a description edit reported 13 identical failures that named
+  // no field at all.
+  //
+  // This path was previously exempted as "server-minted, so strict is fine". That
+  // reasoning confused WHO MINTED the id with WHAT THE WIRE CARRIES: a value the
+  // API served and the API must accept is a transmitted id, whatever its origin.
+  id: z.coerce.number().int().positive().optional(),
   label: z.string().min(1).max(200),
   type: fieldTypeEnum,
   options: z.array(z.string().min(1).max(200)).optional().nullable(),

@@ -4,6 +4,7 @@ import {
   createWebhookSubmissionSchema,
   promoteAdhocFieldSchema,
   submissionAnswerSchema,
+  updateFormSchema,
   updateSubmissionValuesSchema,
 } from "./schemas.js";
 
@@ -22,8 +23,17 @@ import {
 //
 // reproduced live with 11 identical entries: the production webhook rejected
 // every single answer of a submission. JSON has no integer type, so a
-// transmitted id must be read with `z.coerce`. The server-minted ids elsewhere
-// (form_fields.id on the admin design path) legitimately stay strict.
+// transmitted id must be read with `z.coerce`.
+//
+// ★ CORRECTION (2026-10-03). This header used to end "the server-minted ids
+// elsewhere (form_fields.id on the admin design path) legitimately stay strict."
+// That exemption was wrong, and it is the reason the same bug shipped a second
+// time: saving a form description in staging failed with 13 identical entries
+// under the key `fields`. The designer does not mint those ids — it LOADS them
+// from `GET /api/forms/:id` and sends them back, so on a driver that returns
+// numeric columns as text they arrive as `"37"` and the API refused ids it had
+// just served. Who mints an id says nothing about what the wire carries.
+// `fieldSchema.id` is `z.coerce` for that reason; see the note there.
 // -----------------------------------------------------------------------------
 
 const STRING_IDS = {
@@ -224,6 +234,83 @@ describe("createWebhookSubmissionSchema — label is an acceptable identity", ()
     expect(parsed.success).toBe(false);
   });
 });
+
+// -----------------------------------------------------------------------------
+// The same contract for a FORM's fields — the admin design path.
+//
+// The header above used to exempt this path. It is not exempt. `AdminFormDesigner`
+// loads a form with `GET /api/forms/:id` and sends `fields[].id` straight back on
+// save, so on a driver that returns numeric columns as text every id is `"37"`.
+//
+// What that looked like in staging while editing only the DESCRIPTION (the whole
+// field list rides along with the request, which is why an unrelated edit failed):
+//
+//   400 "Validation failed — fields: Expected number, received string" × 13
+//
+// 13 is the form's field count, and every entry is identical, because Zod's
+// `flatten()` keys `fieldErrors` by `issue.path[0]` ALONE — so `fields.0.id` …
+// `fields.12.id` all collapse into one key, `fields`, and the message cannot name
+// the field that was rejected. Worth knowing when reading any 400 of this shape.
+// -----------------------------------------------------------------------------
+
+const FORM_PAYLOAD = {
+  title: "CDM",
+  description: "District form",
+  fields: [
+    { id: "37", label: "Student Name", type: "text", required: true, staff_only: false, sort_order: 0 },
+    { id: "38", label: "School", type: "text", required: true, staff_only: false, sort_order: 1 },
+  ],
+};
+
+describe("updateFormSchema — transmitted field ids", () => {
+  it("accepts numeric field ids (must keep working)", () => {
+    const parsed = updateFormSchema.safeParse({
+      ...FORM_PAYLOAD,
+      fields: FORM_PAYLOAD.fields.map((f) => ({ ...f, id: Number(f.id) })),
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("accepts field ids that arrive as text (the staging save bug)", () => {
+    const parsed = updateFormSchema.safeParse(FORM_PAYLOAD);
+    if (!parsed.success) {
+      throw new Error(
+        `a string field id was rejected: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`
+      );
+    }
+    expect(parsed.success).toBe(true);
+  });
+
+  it("coerces a text field id to a real NUMBER, so the UPDATE-vs-INSERT match works", () => {
+    // Not merely "no longer 400". `reconcileFormFields` compares these ids against
+    // a set built from database rows using `Set.has`, which matches nothing across
+    // a type boundary — so the handler has to receive real numbers, or it renumbers
+    // every field on save. See server/src/id-comparison.test.ts.
+    const parsed = updateFormSchema.parse(FORM_PAYLOAD);
+    expect(parsed.fields?.map((f) => f.id)).toEqual([37, 38]);
+    expect(typeof parsed.fields?.[0]?.id).toBe("number");
+  });
+
+  it("still accepts an OMITTED id — that is how a newly added field arrives", () => {
+    const parsed = updateFormSchema.safeParse({ fields: [{ label: "Notes", type: "textarea" }] });
+    if (!parsed.success) {
+      throw new Error(
+        `an id-less field was rejected: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`
+      );
+    }
+    expect(parsed.data.fields?.[0]?.id).toBeUndefined();
+  });
+
+  it("CONTROL: still REJECTS an id that is not a number at all", () => {
+    // The coercion must not become a rubber stamp: `z.coerce.number()` turns
+    // "abc" into NaN, which `.int()` refuses.
+    const parsed = updateFormSchema.safeParse({
+      fields: [{ id: "abc", label: "Notes", type: "textarea" }],
+    });
+    expect(parsed.success).toBe(false);
+  });
+});
+
 
 // -----------------------------------------------------------------------------
 // Promoting a captured field to a real form field
