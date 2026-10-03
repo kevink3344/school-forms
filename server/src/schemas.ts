@@ -438,6 +438,27 @@ export const updateAdhocFieldSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// Promote a captured field to a real form field
+// (docs/plans/google-form-undefined-fields.md §11 — the escalation path)
+// -----------------------------------------------------------------------------
+// Every key is optional, because the plain action — "make this captured question
+// a real field" — is the empty body: the ad-hoc row already knows its label, and
+// its type is always `text`.
+export const promoteAdhocFieldSchema = z.object({
+  // Defaults to the captured row's own type.
+  type: fieldTypeEnum.optional(),
+  options: z.array(z.string().min(1).max(200)).optional().nullable(),
+  required: z.boolean().optional(),
+  // ★ Defaults to FALSE (parent-facing) in the handler: the question arrived from
+  // a Google Form a parent filled in, so promoting it must not retroactively hide
+  // it from the parents who will answer it next time.
+  staff_only: z.boolean().optional(),
+  // Migrate the same question title on the form's OTHER submissions too.
+  // Default true. The escape hatch is for correcting one submission only.
+  backfill: z.boolean().optional(),
+});
+
+// -----------------------------------------------------------------------------
 // Export / query filters
 // -----------------------------------------------------------------------------
 export const exportQuerySchema = z.object({

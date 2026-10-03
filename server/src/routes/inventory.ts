@@ -90,6 +90,10 @@ export const ROUTES: RouteEntry[] = [
   { method: "post", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },
   { method: "delete", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },
+  // Admin-only, unlike the ad-hoc CRUD above it: promoting writes the form's
+  // DEFINITION (`form_fields`) and rewrites the same question on the form's other
+  // submissions, so it is a form-design action rather than a queue action.
+  { method: "post", path: "/api/submissions/{publicId}/adhoc/{fieldId}/promote", auth: "admin", tags: "Submissions" },
   { method: "get", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "post", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "put", path: "/api/users/{id}", auth: "admin", tags: "Users" },

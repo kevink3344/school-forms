@@ -172,6 +172,7 @@ export function buildSwaggerSpec(req?: Request) {
 | POST | `/api/submissions/{publicId}/adhoc` | staff/admin | AdhocField |
 | PUT | `/api/submissions/{publicId}/adhoc/{fieldId}` | staff/admin | AdhocField |
 | DELETE | `/api/submissions/{publicId}/adhoc/{fieldId}` | staff/admin | AdhocField |
+| POST | `/api/submissions/{publicId}/adhoc/{fieldId}/promote` | admin | PromoteAdhocResult |
 | GET | `/api/users` | admin | User |
 | POST | `/api/users` | admin | User |
 | PUT | `/api/users/{id}` | admin | User |
@@ -493,6 +494,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "post", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },
   { method: "delete", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },
+  { method: "post", path: "/api/submissions/{publicId}/adhoc/{fieldId}/promote", auth: "admin", tags: "Submissions" },
   { method: "get", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "post", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "put", path: "/api/users/{id}", auth: "admin", tags: "Users" },

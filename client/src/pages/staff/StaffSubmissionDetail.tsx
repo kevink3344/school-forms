@@ -1,8 +1,8 @@
 import { useEffect, useState, type CSSProperties, type FormEvent } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { Lock, Archive, X } from "lucide-react";
+import { Lock, Archive, Plus, X } from "lucide-react";
 import { api, ApiError } from "../../lib/api";
-import type { SubmissionDetail, SubmissionStatus, SubmissionValueRow } from "../../types";
+import type { AdhocField, SubmissionDetail, SubmissionStatus, SubmissionValueRow } from "../../types";
 import { useAuth } from "../../context/AuthContext";
 import { useDocumentsEnabled } from "../../lib/useDocumentsEnabled";
 import { PdfViewerDrawer } from "../../components/PdfViewer";
@@ -69,6 +69,18 @@ export default function StaffSubmissionDetail() {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
+
+  // Promote a captured question to a REAL form field (docs/plans/
+  // google-form-undefined-fields.md §11). It writes the form's definition AND
+  // rewrites the same question on the form's other submissions, so it gets the
+  // same treatment as permanent delete: its own confirm step and its own error
+  // slot, so a failure renders inside the dialog that asked the question rather
+  // than behind it. `promoteNotice` is the success message, and it carries the
+  // migrated count — the number that makes the action worth taking after the fact.
+  const [promoteTarget, setPromoteTarget] = useState<AdhocField | null>(null);
+  const [promoting, setPromoting] = useState(false);
+  const [promoteError, setPromoteError] = useState("");
+  const [promoteNotice, setPromoteNotice] = useState("");
 
   // Edit state
   const [editing, setEditing] = useState(false);
@@ -186,6 +198,37 @@ export default function StaffSubmissionDetail() {
       if (err instanceof ApiError && err.status === 409) load();
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // Promote one captured question into the form's definition. The server also
+  // migrates the SAME question title on the form's other submissions and answers
+  // with the count — which is the number worth reporting, because it is the whole
+  // reason to define the field after the fact rather than upfront.
+  //
+  // No optimistic path: the captured row disappears and a real value appears,
+  // which is two changes to two arrays in the payload. The response carries the
+  // re-read submission, so the page is rebuilt from the server's answer rather
+  // than from a guess about what moved.
+  const handlePromote = async () => {
+    if (!publicId || !promoteTarget) return;
+    setPromoting(true);
+    setPromoteError("");
+    try {
+      const result = await api.promoteAdhocField(publicId, promoteTarget.id);
+      setDetail(result.submission);
+      setDraft(valuesToDraft(result.submission.values));
+      setStaffDraft(valuesToDraft(result.submission.values));
+      const n = result.migrated_submissions;
+      setPromoteNotice(
+        `"${result.field.label}" is now a form field. ${n} submission${n === 1 ? "" : "s"} ` +
+          `migrated. Future responses with this question title will be stored in it automatically.`
+      );
+      setPromoteTarget(null);
+    } catch (err) {
+      setPromoteError(err instanceof ApiError ? err.message : "Could not promote the field");
+    } finally {
+      setPromoting(false);
     }
   };
 
@@ -523,20 +566,54 @@ export default function StaffSubmissionDetail() {
               </span>
             </div>
             <div className="card-body">
+              {promoteNotice && (
+                <div className="alert-success" role="status">
+                  {promoteNotice}
+                </div>
+              )}
               <div className="field-list">
                 {detail.adhocFields.map((f) => (
-                  <FieldValue
+                  // A row rather than bare FieldValues: promoting is per-question,
+                  // so the control has to belong to exactly one row. The flex
+                  // wrapper is inline because there is no `.adhoc-row` in the
+                  // stylesheet and this needs no more than that.
+                  <div
                     key={f.id}
-                    v={{
-                      field_id: f.id,
-                      field_label: f.label,
-                      field_type: f.type,
-                      options: f.options,
-                    }}
-                    editing={false}
-                    value={f.value}
-                    onChange={() => {}}
-                  />
+                    style={{ display: "flex", alignItems: "flex-start", gap: 12 }}
+                  >
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <FieldValue
+                        v={{
+                          field_id: f.id,
+                          field_label: f.label,
+                          field_type: f.type,
+                          options: f.options,
+                        }}
+                        editing={false}
+                        value={f.value}
+                        onChange={() => {}}
+                      />
+                    </div>
+                    {/* Admin-only: this writes the form's DEFINITION, which every
+                        other route guards with `admin`. The server enforces it too,
+                        so hiding the button is a courtesy, not the control. */}
+                    {isAdmin && (
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        style={{ flexShrink: 0 }}
+                        onClick={() => {
+                          setPromoteError("");
+                          setPromoteNotice("");
+                          setPromoteTarget(f);
+                        }}
+                        title="Add this question to the form as a real field, so future responses are stored in it"
+                      >
+                        <Plus size={14} />
+                        Promote
+                      </button>
+                    )}
+                  </div>
                 ))}
               </div>
               {detail.adhocFields.some((f) => f.created_by === null) && (
@@ -675,6 +752,62 @@ export default function StaffSubmissionDetail() {
           refreshKey={previewRefreshKey}
           onClose={() => setPreviewDoc(null)}
         />
+      )}
+
+      {/* Promote confirmation. Adding a field to a SHARED form and rewriting other
+          people's submissions is not an action to take on one click, so the card's
+          button only ARMS this; the dialog states both effects before either
+          happens. Nothing in this app used `window.confirm`, and a native prompt
+          could not name the field or the form it is about to change. */}
+      {promoteTarget && detail && (
+        <div
+          className="modal-overlay open"
+          onClick={() => !promoting && setPromoteTarget(null)}
+        >
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <div className="modal-head">
+              <h2>Make this a real form field?</h2>
+              <button
+                className="icon-button close"
+                onClick={() => setPromoteTarget(null)}
+                disabled={promoting}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            <div className="modal-body">
+              <p style={BODY_TEXT}>
+                A field named <strong>{promoteTarget.label}</strong> will be added to{" "}
+                <strong>{detail.form_name}</strong>, and this answer will be moved into it.
+              </p>
+              <p style={BODY_HINT}>
+                Every other submission of this form with the same question title is migrated too,
+                and the captured copies are removed so the answer is not shown twice. Future
+                responses carrying this title will be stored in the field automatically — the Google
+                Form itself needs no change.
+              </p>
+              {promoteError && (
+                <div className="alert-error" style={{ marginTop: 12 }}>
+                  {promoteError}
+                </div>
+              )}
+            </div>
+            <div className="modal-foot">
+              <span className="spacer" />
+              <button
+                className="secondary-button"
+                onClick={() => setPromoteTarget(null)}
+                disabled={promoting}
+              >
+                Cancel
+              </button>
+              <button className="primary-button" onClick={handlePromote} disabled={promoting}>
+                {promoting ? "Promoting..." : "Promote to form field"}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Permanent-delete confirmation. The page's head button only ARMS this; the

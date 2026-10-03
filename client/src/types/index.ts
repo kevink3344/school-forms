@@ -429,6 +429,20 @@ export interface AdhocField {
   updated_at: string;
 }
 
+// Result of promoting a captured ad-hoc field to a real form field
+// (docs/plans/google-form-undefined-fields.md §11). The promoted answer moves out
+// of `adhocFields` and into `values`, which is why the whole submission comes
+// back rather than the new field alone.
+export interface PromoteAdhocResult {
+  // The `form_fields` row that was created.
+  field: FormField;
+  // How many submissions had their captured answer migrated — this one included,
+  // and every other submission of the same form with the same question title.
+  migrated_submissions: number;
+  // The submission, re-read after the move.
+  submission: SubmissionDetail;
+}
+
 export type DocumentStatus = "Pending" | "Completed" | "Failed";
 
 // A generated Google Doc record for a submission.

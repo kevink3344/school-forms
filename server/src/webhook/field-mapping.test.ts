@@ -1,6 +1,7 @@
 import { describe, it, expect } from "vitest";
 import {
   planSubmissionFields,
+  adhocRowsMatchingLabel,
   normalizeLabel,
   isEmptyAnswer,
   type MatchedField,
@@ -216,6 +217,41 @@ describe("normalizeLabel / isEmptyAnswer", () => {
     for (const real of ["a", 0, false, ["a"]]) {
       expect(isEmptyAnswer(real as never), JSON.stringify(real)).toBe(false);
     }
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Promotion must migrate exactly the rows the CAPTURE path would have matched
+// against a field with that label (docs/plans/google-form-undefined-fields.md
+// §11). If the two rules ever diverge, an admin creating the "right" field would
+// silently strand answers on some submissions and not others — and only the ones
+// with the odd capitalisation would be visibly wrong.
+// -----------------------------------------------------------------------------
+describe("adhocRowsMatchingLabel — promotion selects what capture would", () => {
+  const rows = [
+    { id: 1, label: "Student ID" },
+    { id: 2, label: "  student id  " },
+    { id: 3, label: "Student Name" },
+    { id: 4, label: "STUDENT ID" },
+  ];
+
+  it("matches a title case- and whitespace-insensitively", () => {
+    expect(adhocRowsMatchingLabel(rows, "Student ID").map((r) => r.id)).toEqual([1, 2, 4]);
+  });
+
+  it("leaves a different title alone", () => {
+    expect(adhocRowsMatchingLabel(rows, "Student Name").map((r) => r.id)).toEqual([3]);
+  });
+
+  it("returns NOTHING when no row matches, rather than everything", () => {
+    // The failure that matters: a promote that migrated rows it did not match
+    // would rewrite other questions' answers.
+    expect(adhocRowsMatchingLabel(rows, "Nope")).toEqual([]);
+  });
+
+  it("does not match on a substring", () => {
+    // "Student" must not sweep up both "Student ID" and "Student Name".
+    expect(adhocRowsMatchingLabel(rows, "Student")).toEqual([]);
   });
 });
 

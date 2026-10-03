@@ -1,7 +1,7 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
-import { planSubmissionFields, type IncomingAnswer } from "../webhook/field-mapping.js";
+import { planSubmissionFields, adhocRowsMatchingLabel, type IncomingAnswer } from "../webhook/field-mapping.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES } from "./schema.js";
 import type { FormVisibility } from "./schema.js";
 import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
@@ -12,6 +12,7 @@ import type {
   User,
   Form,
   FormField,
+  FieldType,
   Submission,
   SubmissionValue,
   AdhocField,
@@ -2495,6 +2496,132 @@ export async function createAdhocField(input: {
   const detailed = await getAdhocField(created.id);
   if (!detailed) throw new Error("Failed to read back created ad-hoc field");
   return detailed;
+}
+
+// -----------------------------------------------------------------------------
+// Promote a captured field to a real form field
+// (docs/plans/google-form-undefined-fields.md §11 — the escalation path)
+// -----------------------------------------------------------------------------
+// A Google Form question that matched no designer field is captured as a
+// per-submission ad-hoc row so the answer is not lost. Once the same question
+// keeps arriving, an admin wants it to BE a field. This does that in one move:
+//
+//   1. create the `form_fields` row — which is all that is needed for every
+//      FUTURE response to be matched to it, because the capture path matches
+//      normalised question titles against field labels;
+//   2. move the captured answer(s) into `submission_values`: THIS submission, and
+//      every other submission of the same form carrying the same question title.
+//      That backfill is the whole point — it makes "define the field after the
+//      fact" as good as defining it upfront;
+//   3. delete the ad-hoc rows it migrated, so the answer is not shown twice.
+//
+// Matching goes through `adhocRowsMatchingLabel`, so promotion selects exactly
+// the rows capture would have matched against a field with this label.
+//
+// ★ Ordering: values are inserted BEFORE the ad-hoc rows are deleted. A failure
+// between the two leaves the answer in both places — visible, and fixable by
+// hand. The reverse order would lose it, with nothing to recover from.
+//
+// ★ Deliberately not wrapped in a transaction. No other multi-statement write in
+// this module is (see `createSubmission`), and every residual state described
+// above is benign and self-evident, whereas a half-applied transaction would
+// need a recovery path of its own.
+export async function promoteAdhocFieldToFormField(params: {
+  submissionId: number;
+  formId: number;
+  adhocFieldId: number;
+  type?: FieldType;
+  options?: string[] | null;
+  required?: boolean;
+  staffOnly?: boolean;
+  backfill?: boolean;
+}): Promise<{ field: FormField; migrated: number }> {
+  const captured = await getAdhocField(params.adhocFieldId);
+  if (!captured || Number(captured.submission_id) !== Number(params.submissionId)) {
+    throw new Error("Ad-hoc field not found on this submission");
+  }
+
+  // Append after everything the designer already has, so promoting never
+  // reorders the fields a parent has got used to.
+  const maxRows = await execute<{ max_sort: number | string | null }>(
+    `SELECT MAX(sort_order) AS max_sort FROM dbo.form_fields WHERE form_id = @formId`,
+    { formId: params.formId }
+  );
+  const maxSort = Number(maxRows[0]?.max_sort ?? -1);
+  const nextSort = Number.isFinite(maxSort) ? maxSort + 1 : 0;
+
+  const inserted = await execute<{ id: number }>(
+    dialect().insertReturning({
+      table: "form_fields",
+      columns: [
+        "form_id",
+        "label",
+        "type",
+        "options",
+        "required",
+        "staff_only",
+        "sort_order",
+        "placeholder",
+        "roles",
+      ],
+      returning: ["id"],
+      values: "@formId, @label, @type, @options, @required, @staffOnly, @sortOrder, NULL, NULL",
+    }),
+    {
+      formId: params.formId,
+      // The captured label already fits NVARCHAR(200) — capture truncated it on
+      // the way in — but slice defensively so a hand-edited row cannot turn a
+      // promotion into a 500.
+      label: captured.label.slice(0, 200),
+      type: params.type ?? captured.type,
+      options: params.options && params.options.length ? JSON.stringify(params.options) : null,
+      required: params.required ?? false,
+      staffOnly: params.staffOnly ?? false,
+      sortOrder: nextSort,
+    }
+  );
+  const newFieldId = Number(inserted[0]?.id);
+  if (!Number.isFinite(newFieldId)) {
+    throw new Error("Failed to create the form field while promoting");
+  }
+
+  // Read the row back through the normal reader, so `options`/`roles` come out in
+  // the shape every API contract promises (`string[] | null`) instead of as the
+  // raw JSON strings the INSERT wrote.
+  const created = (await listFormFields(params.formId)).find((f) => Number(f.id) === newFieldId);
+  if (!created) throw new Error("Failed to read back the promoted form field");
+
+  // Every ad-hoc row on this form, so the backfill set can be decided by label
+  // rather than by a second, drifting case-folding rule in SQL.
+  const rows = await execute<{
+    id: number;
+    submission_id: number;
+    label: string;
+    value: string | null;
+  }>(
+    `SELECT af.id, af.submission_id, af.label, af.value
+       FROM dbo.submission_adhoc_fields af
+       JOIN dbo.submissions s ON s.id = af.submission_id
+      WHERE s.form_id = @formId`,
+    { formId: params.formId }
+  );
+
+  const candidates =
+    params.backfill === false
+      ? rows.filter((r) => Number(r.submission_id) === Number(params.submissionId))
+      : rows;
+  const matches = adhocRowsMatchingLabel(candidates, captured.label);
+
+  for (const r of matches) {
+    await execute(
+      `INSERT INTO dbo.submission_values (submission_id, field_id, value)
+       VALUES (@submissionId, @fieldId, @value)`,
+      { submissionId: Number(r.submission_id), fieldId: newFieldId, value: r.value }
+    );
+    await deleteAdhocField(Number(r.id));
+  }
+
+  return { field: created, migrated: matches.length };
 }
 
 export async function updateAdhocField(

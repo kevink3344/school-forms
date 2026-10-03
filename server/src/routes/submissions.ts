@@ -14,6 +14,7 @@ import {
   updateAdhocField,
   deleteAdhocField,
   listAdhocFields,
+  promoteAdhocFieldToFormField,
   getForm,
   getOrganizationBySlug,
 } from "../db/queries.js";
@@ -27,6 +28,7 @@ import {
   updateSubmissionValuesSchema,
   createAdhocFieldSchema,
   updateAdhocFieldSchema,
+  promoteAdhocFieldSchema,
 } from "../schemas.js";
 
 export const submissionsRouter = Router();
@@ -588,3 +590,81 @@ submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles(
     next(err);
   }
 });
+
+// -----------------------------------------------------------------------------
+// ADMIN: POST /api/submissions/:publicId/adhoc/:fieldId/promote
+// Make a captured question a real form field
+// (docs/plans/google-form-undefined-fields.md §11 — the escalation path)
+//
+// ★ ADMIN-only, deliberately, and it is not an oversight about who does the work:
+// this writes to `form_fields`, the form's DEFINITION, and every other route that
+// touches it is admin-only (`PUT /api/forms/:id`). Letting a queue worker promote
+// would hand them form-design rights one field at a time. It also rewrites OTHER
+// people's submissions, which is an admin-scale action however convenient it is
+// from the detail page.
+//
+// Responds with the new field, how many submissions were migrated, and the
+// re-read submission — so the page can re-render without a second round trip,
+// and can say "promoted, 3 submissions migrated" rather than "done".
+// -----------------------------------------------------------------------------
+submissionsRouter.post(
+  "/:publicId/adhoc/:fieldId/promote",
+  requireAuth,
+  requireRoles("admin"),
+  async (req, res, next) => {
+    try {
+      // The empty body is the normal case, so an absent body is a valid request
+      // rather than a validation failure.
+      const parsed = promoteAdhocFieldSchema.safeParse(req.body ?? {});
+      if (!parsed.success) {
+        res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+        return;
+      }
+      const submission = await getSubmissionDetail(
+        req.params.publicId,
+        req.user!.organization_id,
+        req.user!.role
+      );
+      if (!submission) {
+        res.status(404).json({ error: "Submission not found" });
+        return;
+      }
+      const denied = await submissionAccessError(req, submission);
+      if (denied) {
+        res.status(denied.status).json({ error: denied.error });
+        return;
+      }
+      const fieldId = Number(req.params.fieldId);
+      const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+      if (!current) {
+        res.status(404).json({ error: "Ad-hoc field not found on this submission" });
+        return;
+      }
+
+      const { field, migrated } = await promoteAdhocFieldToFormField({
+        submissionId: submission.id,
+        formId: submission.form_id,
+        adhocFieldId: fieldId,
+        type: parsed.data.type,
+        options: parsed.data.options ?? null,
+        required: parsed.data.required,
+        staffOnly: parsed.data.staff_only,
+        backfill: parsed.data.backfill,
+      });
+
+      // Re-read rather than patching the copy in hand: the promoted answer has
+      // moved from `adhocFields` into `values`, which is two changes to two
+      // arrays, and guessing at them is how the page ends up disagreeing with
+      // the database.
+      const updated = await getSubmissionDetail(
+        req.params.publicId,
+        req.user!.organization_id,
+        req.user!.role
+      );
+
+      res.json({ field, migrated_submissions: migrated, submission: updated });
+    } catch (err) {
+      next(err);
+    }
+  }
+);

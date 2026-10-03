@@ -8,6 +8,7 @@ import type {
   AvailableForm,
   DocumentRow,
   ExportPreview,
+  FieldType,
   Form,
   FormVisibility,
   FormWithFields,
@@ -15,6 +16,7 @@ import type {
   LoginUser,
   LoginStats,
   OrganizationWithMembers,
+  PromoteAdhocResult,
   PublicForm,
   ReportFormat,
   ReportPreview,
@@ -915,6 +917,26 @@ export const api = {
       method: "DELETE",
       auth: true,
     });
+  },
+
+  // Make a captured (Google Form) question a real field on the form. ADMIN only —
+  // it writes the form's definition and rewrites other submissions' answers.
+  // Returns the new field, the migrated count, and the re-read submission.
+  async promoteAdhocField(
+    publicId: string,
+    fieldId: number,
+    input?: {
+      type?: FieldType;
+      options?: string[] | null;
+      required?: boolean;
+      staff_only?: boolean;
+      backfill?: boolean;
+    }
+  ): Promise<PromoteAdhocResult> {
+    return request<PromoteAdhocResult>(
+      `/api/submissions/${publicId}/adhoc/${fieldId}/promote`,
+      { method: "POST", auth: true, body: input ?? {} }
+    );
   },
 
   // -------------------------------------------------------------------------

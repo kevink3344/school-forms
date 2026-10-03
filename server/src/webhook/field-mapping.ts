@@ -166,3 +166,25 @@ export function planSubmissionFields(
   return { values, captured, schoolName };
 }
 
+/**
+ * The ad-hoc rows a promotion should migrate into a new form field.
+ *
+ * ★ This exists so that PROMOTION and CAPTURE cannot disagree. Capture matches a
+ * question title to a field with `normalizeLabel`; promoting a captured title
+ * must select exactly the rows a `form_fields` row with that label would have
+ * matched — otherwise an admin doing the "right" thing would strand the answer on
+ * some submissions and not others. Two case-folding implementations would drift;
+ * one shared function cannot.
+ *
+ * Generic over the row shape because the caller passes a database row, not the
+ * `FieldPlan` shape this module otherwise deals in.
+ */
+export function adhocRowsMatchingLabel<T extends { label: string }>(
+  rows: T[],
+  label: string
+): T[] {
+  const target = normalizeLabel(label);
+  return rows.filter((r) => normalizeLabel(r.label) === target);
+}
+
+

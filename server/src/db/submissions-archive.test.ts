@@ -122,6 +122,16 @@ const READ_SITES: Record<string, ReadSite> = {
       "BY IDENTITY: the document generator's lookup. Archiving a submission must not make an " +
       "in-flight job fail to find the row it was started for.",
   },
+  "queries.ts::promoteAdhocFieldToFormField": {
+    requires: [],
+    readsSubmissions: true,
+    why:
+      "BOUNDARY: collecting every captured row for the form so a promotion can migrate those " +
+      "answers into the new field. Archiving hides a submission from the VIEWS; it does not make " +
+      "its answer a different kind of answer, so an archived row is migrated too. Leaving it out " +
+      "would strand that one submission holding an ad-hoc value while every sibling moved — and " +
+      "restoring it later would then show a real field that is empty for no visible reason.",
+  },
 
   // --- documents.ts --------------------------------------------------------
   "documents.ts::queryDocuments": {

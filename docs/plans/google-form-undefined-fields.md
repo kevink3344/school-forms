@@ -502,10 +502,22 @@ in its CHECK on every deployment, and the plan adds no columns.
 - **Outbound webhooks** (`docs/features/webhook.md`) — unrelated.
 - **Google file uploads → Drive/`google_doc` typing** for captured fields (they are always `text`).
 
-**Escalation path (future, if wanted):** an admin action on the detail page — *"Promote captured
-field to a form field"* — that creates a `form_fields` row and migrates that submission's value into
-`submission_values`. This is only worth building once capture is in production and we can see which
-labels recur. It is deliberately **not** in this plan.
+**Escalation path — IMPLEMENTED.** The admin action on the detail page — *"Promote to form field"*
+— creates a `form_fields` row and migrates the captured value into `submission_values`:
+`POST /api/submissions/:publicId/adhoc/:fieldId/promote`, implemented by
+`promoteAdhocFieldToFormField` (`server/src/db/queries.ts`). Three things make it more than a rename:
+
+- it backfills **every** submission of the same form carrying the same question title, matched with
+  the capture path's own `normalizeLabel` (via `adhocRowsMatchingLabel`) — so promotion and capture
+  cannot disagree about which rows belong to the field;
+- it deletes the ad-hoc rows it migrated, so the answer is never shown twice;
+- future responses need **no Google Form change**: they carry the title, and capture resolves that
+  title to the new field by label from then on.
+
+**Admin-only**, because it writes the form's DEFINITION (every other `form_fields` write is admin-only)
+and because the backfill reaches other people's submissions. It is registered as a read site in
+`db/submissions-archive.test.ts` with `requires: []` — it is a migration, not a view, so an archived
+submission is migrated too rather than left holding an ad-hoc value its restored self would not explain.
 
 ---
 

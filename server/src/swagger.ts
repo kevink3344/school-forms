@@ -2253,6 +2253,71 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/submissions/{publicId}/adhoc/{fieldId}/promote": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Promote a captured field to a real form field (admin)",
+          description:
+            "Turns a captured (Google Form) question into a real field on the form, then moves the " +
+            "captured answer into it — on THIS submission and on every other submission of the same " +
+            "form carrying the same question title. Future responses with that title are matched to " +
+            "the new field automatically, so the Google Form needs no change. The captured copies are " +
+            "removed, so the answer is never shown twice. Admin-only: it writes the form's definition, " +
+            "which every other form-design route also restricts to admin. Every body key is optional — " +
+            "an empty body promotes the question as a text field and backfills.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "fieldId", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          requestBody: {
+            required: false,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  properties: {
+                    type: {
+                      type: "string",
+                      enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"],
+                      description: "Defaults to the captured field's own type, which is always `text`.",
+                    },
+                    options: { type: "array", items: { type: "string" }, nullable: true },
+                    required: { type: "boolean", description: "Default false." },
+                    staff_only: {
+                      type: "boolean",
+                      description: "Default false — the question came from a parent-facing form, so promoting it must not hide it from future parents.",
+                    },
+                    backfill: {
+                      type: "boolean",
+                      description: "Default true. Set false to migrate only this submission.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "OK — the new field, how many submissions were migrated, and the re-read submission",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      field: { $ref: "#/components/schemas/FormField" },
+                      migrated_submissions: { type: "integer" },
+                      submission: { $ref: "#/components/schemas/Submission" },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Validation error" },
+            "404": { description: "Submission or field not found" },
+          },
+        },
+      },
       "/api/users": {
         get: {
           tags: ["Users"],

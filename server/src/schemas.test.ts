@@ -2,6 +2,7 @@ import { describe, it, expect } from "vitest";
 import {
   createSubmissionSchema,
   createWebhookSubmissionSchema,
+  promoteAdhocFieldSchema,
   submissionAnswerSchema,
   updateSubmissionValuesSchema,
 } from "./schemas.js";
@@ -221,5 +222,50 @@ describe("createWebhookSubmissionSchema — label is an acceptable identity", ()
       answers: [{ label: "Student Name", value: "Ada" }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Promoting a captured field to a real form field
+// (docs/plans/google-form-undefined-fields.md §11).
+//
+// The plain action — "make this captured question a real text field" — is an
+// EMPTY body, because the ad-hoc row already carries the label and its type is
+// always `text`. If this schema ever required a key, the detail page's one-click
+// promote would start failing validation, so the empty-body case is the first
+// test here rather than an afterthought.
+// -----------------------------------------------------------------------------
+
+describe("promoteAdhocFieldSchema", () => {
+  it("accepts an EMPTY body — the one-click promote", () => {
+    const parsed = promoteAdhocFieldSchema.safeParse({});
+    if (!parsed.success) {
+      throw new Error(
+        `an empty promote body was rejected: ${JSON.stringify(parsed.error.flatten().fieldErrors)}`
+      );
+    }
+    expect(parsed.data.type).toBeUndefined();
+    expect(parsed.data.backfill).toBeUndefined();
+  });
+
+  it("accepts every optional shaping key", () => {
+    const parsed = promoteAdhocFieldSchema.safeParse({
+      type: "date",
+      options: ["A", "B"],
+      required: true,
+      staff_only: true,
+      backfill: false,
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("CONTROL: rejects an unknown field type", () => {
+    // The type is written to `form_fields.type`, whose CHECK constraint would
+    // otherwise fail the INSERT as a 500.
+    expect(promoteAdhocFieldSchema.safeParse({ type: "bogus" }).success).toBe(false);
+  });
+
+  it("CONTROL: rejects a non-boolean backfill", () => {
+    expect(promoteAdhocFieldSchema.safeParse({ backfill: "yes" }).success).toBe(false);
   });
 });
