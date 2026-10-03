@@ -43,8 +43,19 @@ export interface FormViewer {
  * user and (correctly but confusingly) deny access.
  */
 export function viewerId(viewer: FormViewer): number | null {
+  // ★ `Number()` first. The id reaches this app as the JWT's `sub` claim, and
+  // every numeric value this app reads from SQL Server arrives as TEXT (see
+  // `canAccessForm` below, and `auth.ts`'s own `Number(payload.organization_id)`).
+  // A `typeof raw === "number"` test therefore discarded a perfectly good `"7"`
+  // and dropped the grant lookup entirely, which looks like the naive
+  // `visibility = 'public'` clause and denies a form the picker had just offered.
+  //
+  // The `> 0` test is what keeps a MISSING id from becoming `0`: `Number(null)`
+  // is `0`, and looking up user 0 would deny for the wrong reason instead of
+  // failing closed deliberately. For a real numeric id this is a no-op.
   const raw = viewer.userId ?? viewer.id;
-  return typeof raw === "number" && Number.isFinite(raw) ? raw : null;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : null;
 }
 
 /**
@@ -108,13 +119,31 @@ export function formVisibilityClause(
  *
  * Returns false for a form that does not exist, so a caller can 403 without
  * leaking existence.
+ *
+ * ★ `formId` may arrive as a STRING. Every caller's TypeScript signature says
+ * `number`, and that is a claim about the column, not about the runtime value:
+ * the SQL Server driver returns numeric columns as TEXT and `normalizeRow` does
+ * not coerce them (see `db/driver/client.ts`, and the `field_id` note in
+ * `export/table.test.ts` — "the same lie production tells about"). Hence the
+ * parameter type below, and hence `Number()` BEFORE the finiteness test.
  */
-export async function canAccessForm(viewer: FormViewer, formId: number): Promise<boolean> {
-  if (!Number.isFinite(formId)) return false;
+export async function canAccessForm(
+  viewer: FormViewer,
+  formId: number | string
+): Promise<boolean> {
+  // ★ `Number()` first, then the test. `Number.isFinite` does NOT parse its
+  // argument — `Number.isFinite("11")` is `false` — so testing the raw value
+  // rejected every VALID id. And because this guard sits ABOVE the role branch it
+  // denied unrestricted viewers too: every submission page answered
+  // `403 Forbidden: no access to this form` for an ADMIN, whose predicate here is
+  // a literal `1 = 1`. Measured on staging. It fails CLOSED, so nothing errored
+  // and nothing logged — the page simply refused to open for anybody.
+  const id = Number(formId);
+  if (!Number.isFinite(id)) return false;
   const { sql, params } = formVisibilityClause(viewer, "f");
   const rows = await execute<{ n: number }>(
     `SELECT COUNT(*) AS n FROM dbo.forms f WHERE f.id = @formId AND ${sql}`,
-    { ...params, formId }
+    { ...params, formId: id }
   );
   return Number(rows[0]?.n ?? 0) > 0;
 }
