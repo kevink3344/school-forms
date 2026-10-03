@@ -545,7 +545,12 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       return;
     }
     const fieldId = Number(req.params.fieldId);
-    const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+    // ★ `Number(f.id)` — "convert at the COMPARISON" (routes/users.ts states the
+    // rule, measured against a live database: a numeric column comes back as
+    // TEXT, `{"id":"1"}`). `fieldId` is parsed from the URL, so `"5" === 5` is
+    // false and this lookup found nothing for a row the page had just rendered
+    // from the same table. Two environments, identical code, one of them 404s.
+    const current = (await listAdhocFields(submission.id)).find((f) => Number(f.id) === fieldId);
     if (!current) {
       res.status(404).json({ error: "Ad-hoc field not found on this submission" });
       return;
@@ -578,7 +583,8 @@ submissionsRouter.delete("/:publicId/adhoc/:fieldId", requireAuth, requireRoles(
       return;
     }
     const fieldId = Number(req.params.fieldId);
-    const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+    // Same coercion as the PUT above, for the same reason.
+    const current = (await listAdhocFields(submission.id)).find((f) => Number(f.id) === fieldId);
     if (!current) {
       res.status(404).json({ error: "Ad-hoc field not found on this submission" });
       return;
@@ -635,7 +641,11 @@ submissionsRouter.post(
         return;
       }
       const fieldId = Number(req.params.fieldId);
-      const current = (await listAdhocFields(submission.id)).find((f) => f.id === fieldId);
+      // Same coercion as the PUT and DELETE routes above. This is the one that
+      // was REPORTED: the row was on screen (rendered from `detail.adhocFields`)
+      // and this lookup still missed it, so Promote answered "Ad-hoc field not
+      // found on this submission" for a field the page was displaying.
+      const current = (await listAdhocFields(submission.id)).find((f) => Number(f.id) === fieldId);
       if (!current) {
         res.status(404).json({ error: "Ad-hoc field not found on this submission" });
         return;

@@ -145,7 +145,7 @@ Then examine the submitted answer for that `field_id`. Because checkbox values a
 serialized as JSON arrays, compare against the stored value:
 
 ```ts
-const answer = parsed.data.answers.find((a) => a.field_id === gen.id);
+const answer = parsed.data.answers.find((a) => Number(a.field_id) === Number(gen.id));
 const val = Array.isArray(answer?.value) ? answer.value : answer?.value ? [answer.value] : [];
 const shouldGenerate = val.length > 0; // checked → has at least one option selected
 ```

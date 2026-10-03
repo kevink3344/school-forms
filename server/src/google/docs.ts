@@ -466,7 +466,14 @@ export async function maybeGenerateDocument(
     );
     if (!gen) return;
 
-    const saved = answers.find((a) => a.field_id === gen.id);
+    // ★ `Number(...)` on BOTH sides — "convert at the COMPARISON" (routes/users.ts
+    // states the rule, measured against a live database). `gen.id` comes straight
+    // from `listFormFields`, i.e. from the database, which hands a numeric column
+    // back as TEXT; `answers[].field_id` has been through `z.coerce.number()` and
+    // is a real number. `5 === "5"` is false, so the checkbox looked UNTICKED and
+    // no document was generated — silently, because this hook returns `void`
+    // inside a try/catch and has no way to report anything.
+    const saved = answers.find((a) => Number(a.field_id) === Number(gen.id));
     if (!saved || !readCheckbox(saved.value)) return;
 
     // Fire-and-forget generation; do not block the save response.
