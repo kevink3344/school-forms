@@ -552,7 +552,7 @@ export default function StaffSubmissionDetail() {
                         onChange={(val) => setDraftValue(f.id, val)}
                         note={
                           showMatchNote && match ? (
-                            <span className="field-note">
+                            <span className="value-note">
                               Matched with <strong>{match.school_name}</strong>
                               {match.matched_by_name ? ` by ${match.matched_by_name}` : ""}.
                             </span>

@@ -1111,6 +1111,12 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .field { display: grid; grid-template-columns: 260px 1fr; column-gap: 28px; align-items: start; }
 .field .f-label { color: var(--text); font-weight: 500; }
 .field .f-value.inline { display: inline-flex; flex-wrap: wrap; gap: 6px; }
+/* The value plus its optional sub-note (e.g. "Matched with <school> by <admin>")
+   as ONE grid cell, so the note sits UNDER the value. `.field` is a 2-column
+   grid, so a note left as its own child would land in the 260px label column on
+   a new row instead of beneath the value it describes. */
+.field .f-value-stack { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.field .f-value-stack .value-note { font-size: 0.75rem; line-height: 1.35; color: var(--text-muted); }
 .divider { height: 1px; background: var(--border); margin: 18px 0; }
 
 /* Google Document answers — the Drive id rendered as a Docs link.

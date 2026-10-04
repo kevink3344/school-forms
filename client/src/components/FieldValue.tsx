@@ -67,8 +67,14 @@ export function FieldValue({
     return (
       <div className="field">
         <span className="f-label">{label}</span>
-        <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{renderValue(value, type)}</span>
-        {note}
+        {/* `.f-value-stack` holds the value AND its optional note as ONE grid
+            cell, so the note sits under the VALUE. `.field` is a 2-column grid;
+            an un-wrapped note is a third grid child and lands in the label
+            column on its own row instead. */}
+        <span className="f-value-stack">
+          <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{renderValue(value, type)}</span>
+          {note}
+        </span>
       </div>
     );
   }
@@ -76,11 +82,13 @@ export function FieldValue({
   return (
     <div className="field">
       <span className="f-label">{label}</span>
-      {renderEditor(type, options, value, onChange, `radio-${v.field_id}`, {
-        expandable,
-        label,
-      })}
-      {note}
+      <span className="f-value-stack">
+        {renderEditor(type, options, value, onChange, `radio-${v.field_id}`, {
+          expandable,
+          label,
+        })}
+        {note}
+      </span>
     </div>
   );
 }
