@@ -13,6 +13,16 @@ import { FieldValue, valuesToDraft } from "../../components/FieldValue";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "completed"];
 
+// The labels that identify a form's "which school?" field — kept in step with the
+// server's SCHOOL_FIELD_LABELS (server/src/db/dialect/shared.ts). Used to place
+// the "Matched with <school> by <admin>" note under the school ANSWER, which is
+// the parent's own words and is never rewritten
+// (docs/plans/school-name-reconciliation.md §17).
+const SCHOOL_FIELD_LABELS = ["school", "school name"];
+function isSchoolFieldLabel(label: string): boolean {
+  return SCHOOL_FIELD_LABELS.includes(label.trim().toLowerCase());
+}
+
 // Inline styles for the delete confirmation, matching the dispatch on the admin
 // dashboard and the form-delete dialog on the Forms page.
 const BODY_TEXT: CSSProperties = { margin: 0, fontSize: "0.875rem", lineHeight: 1.5 };
@@ -519,6 +529,15 @@ export default function StaffSubmissionDetail() {
                   {parentFields.map((f) => {
                     const existing = valuesByField.get(f.id);
                     const value = editing ? (draft[f.id] ?? existing?.value ?? null) : (existing?.value ?? null);
+                    // The school ANSWER keeps the parent's own words. When an admin
+                    // has matched that exact spelling to an app school, say so
+                    // underneath instead of rewriting the answer.
+                    const match = detail.school_match;
+                    const showMatchNote =
+                      match != null &&
+                      isSchoolFieldLabel(f.label) &&
+                      typeof value === "string" &&
+                      value.trim().toLowerCase() === match.declared_name.trim().toLowerCase();
                     return (
                       <FieldValue
                         key={f.id}
@@ -531,6 +550,14 @@ export default function StaffSubmissionDetail() {
                         editing={editing}
                         value={value}
                         onChange={(val) => setDraftValue(f.id, val)}
+                        note={
+                          showMatchNote && match ? (
+                            <span className="field-note">
+                              Matched with <strong>{match.school_name}</strong>
+                              {match.matched_by_name ? ` by ${match.matched_by_name}` : ""}.
+                            </span>
+                          ) : null
+                        }
                       />
                     );
                   })}

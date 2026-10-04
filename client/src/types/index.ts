@@ -491,6 +491,16 @@ export interface DocumentRow extends Document {
   phase1_result: string | null;
 }
 
+// The detail page's "Matched with <school> by <admin>" attribution for a school
+// answer an admin matched (docs/plans/school-name-reconciliation.md). Present
+// only when the answer was matched through an admin alias; never for a parent.
+export interface SchoolMatchNote {
+  declared_name: string;
+  school_id: number;
+  school_name: string;
+  matched_by_name: string | null;
+}
+
 export interface SubmissionDetail extends Submission {
   form_name: string;
   student_name: string | null;
@@ -505,6 +515,9 @@ export interface SubmissionDetail extends Submission {
   parentFields: FormField[];
   // Generated Google Docs for this submission (idempotent: at most one active).
   documents: DocumentRow[];
+  // "Matched with <school> by <admin>" — see SchoolMatchNote. Absent/null when the
+  // spelling had no alias, and never present for a parent viewer.
+  school_match?: SchoolMatchNote | null;
 }
 
 export interface AuthResponse {

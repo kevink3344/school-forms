@@ -46,6 +46,7 @@ export function FieldValue({
   value,
   onChange,
   expandable = false,
+  note,
 }: {
   v: FieldDescriptor;
   editing: boolean;
@@ -55,6 +56,10 @@ export function FieldValue({
   // larger dialog. Opt-in, because the admin grid renders this same mapping into
   // a table cell that has its own Enter-to-commit editor wrapped around it.
   expandable?: boolean;
+  // Optional sub-line under the value, inside the same `.field` block so it reads
+  // as part of the answer — e.g. a submission's "Matched with <school> by <admin>"
+  // note (docs/plans/school-name-reconciliation.md).
+  note?: ReactNode;
 }) {
   const { field_type: type, field_label: label, options } = v;
 
@@ -63,6 +68,7 @@ export function FieldValue({
       <div className="field">
         <span className="f-label">{label}</span>
         <span className={`f-value ${isEmpty(value) ? "empty" : ""}`}>{renderValue(value, type)}</span>
+        {note}
       </div>
     );
   }
@@ -74,6 +80,7 @@ export function FieldValue({
         expandable,
         label,
       })}
+      {note}
     </div>
   );
 }

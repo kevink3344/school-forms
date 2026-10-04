@@ -575,6 +575,38 @@ export async function relocateSubmissionsByDeclaredName(
   return rows.length;
 }
 
+// The alias (if any) that covers a declared school spelling, for the detail
+// page's "Matched with <school> by <admin>" note. Returns null when the spelling
+// has NO alias — so an exact-name match, a still-unmatched spelling, and an
+// Ignore all produce no note (an exact match needs none: the answer already
+// names the app school).
+async function getSchoolAliasMatch(declaredName: string | null): Promise<SchoolMatchNote | null> {
+  if (!declaredName) return null;
+  const nameKey = normalizeSchoolKey(declaredName);
+  if (!nameKey) return null;
+  const rows = await execute<{
+    school_id: number;
+    school_name: string;
+    matched_by_name: string | null;
+  }>(
+    `SELECT a.school_id, s.name AS school_name, u.display_name AS matched_by_name
+       FROM dbo.school_name_aliases a
+       JOIN dbo.schools s ON s.id = a.school_id
+       LEFT JOIN dbo.users u ON u.id = a.created_by
+      WHERE LOWER(a.submitted_name) = @nameKey
+        AND a.school_id IS NOT NULL`,
+    { nameKey }
+  );
+  const row = rows[0];
+  if (!row) return null;
+  return {
+    declared_name: declaredName.trim(),
+    school_id: Number(row.school_id),
+    school_name: row.school_name,
+    matched_by_name: row.matched_by_name ?? null,
+  };
+}
+
 // Upsert a school from the imported feed, keyed on the stable source_id (FID).
 export async function upsertSchoolFromSource(s: {
   sourceId: number;
@@ -1723,6 +1755,11 @@ export interface SubmissionRow extends Submission {
   // The first non-staff-only field value (conventionally the Student Name), used
   // to render a clickable name in the staff queue. Falls back to a placeholder.
   student_name: string | null;
+  // The school name the submission's own answers declared — the parent's
+  // spelling, recorded at intake (docs/plans/school-name-reconciliation.md). NULL
+  // when the form has no school question, or on a row written before the column
+  // existed / was backfilled. Only selected by queries that ask for it.
+  declared_school_name?: string | null;
   // Display name of the staff member who last saved the staff-only fields.
   staff_fields_updated_by_name: string | null;
   // Display name of whoever archived this submission. Only meaningful when
@@ -1738,6 +1775,21 @@ export interface SubmissionValueRow extends SubmissionValue {
   options: string[] | null;
 }
 
+// The detail page's attribution note for a school answer an admin matched
+// (docs/plans/school-name-reconciliation.md §17). Present ONLY when the
+// submission's declared school spelling was matched to an app school through an
+// admin-authored alias — an EXACT-name resolution needs no note, because the
+// answer already IS the app school's name. Never sent to a parent viewer.
+export interface SchoolMatchNote {
+  /** The parent's spelling, as submitted. */
+  declared_name: string;
+  /** The app school the spelling was matched to. */
+  school_id: number;
+  school_name: string;
+  /** Display name of the admin who made the match (NULL for a seeded row). */
+  matched_by_name: string | null;
+}
+
 export interface SubmissionDetail extends SubmissionRow {
   values: SubmissionValueRow[];
   // Staff-only fields added ad-hoc to this submission (not part of the fixed form).
@@ -1751,6 +1803,9 @@ export interface SubmissionDetail extends SubmissionRow {
   parentFields: FormField[];
   // Generated Google documents for this submission (detail-card audit line).
   documents: ListDocumentRow[];
+  // "Matched with <school> by <admin>" — see SchoolMatchNote. NULL for a parent
+  // viewer, and for any submission whose declared spelling had no alias.
+  school_match: SchoolMatchNote | null;
 }
 
 // A submission can be filtered by org, school, form, workflow status, date
@@ -2006,7 +2061,7 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
             s.submission_seq, s.submitted_at, s.updated_at,
             s.school_year,
             s.staff_fields_updated_by, s.staff_fields_updated_at,
-            s.archived_at, s.archived_by,
+            s.archived_at, s.archived_by, s.declared_school_name,
             su.display_name AS staff_fields_updated_by_name,
             au.display_name AS archived_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
@@ -2140,7 +2195,22 @@ export async function getSubmissionDetail(
   // member without access) never receives out-of-view answers.
   const visibleValues = values.filter((v) => visibleFieldIds.has(v.field_id));
   const documents = await listDocumentsBySubmission(submission.id);
-  return { ...submission, values: visibleValues, adhocFields, staffOnlyFields, parentFields, documents };
+  // "Matched with <school> by <admin>": the answer itself is never rewritten —
+  // it is the parent's own words — so the attribution lives here instead. Parents
+  // do not receive it (it is internal routing plus a colleague's name).
+  const schoolMatch =
+    viewer === "parent"
+      ? null
+      : await getSchoolAliasMatch(submission.declared_school_name ?? null);
+  return {
+    ...submission,
+    values: visibleValues,
+    adhocFields,
+    staffOnlyFields,
+    parentFields,
+    documents,
+    school_match: schoolMatch,
+  };
 }
 
 // Resolve which school a submission belongs to. District-wide forms (e.g. CDM)

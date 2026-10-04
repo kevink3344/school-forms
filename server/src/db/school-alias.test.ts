@@ -180,3 +180,22 @@ describe("createSchoolAliasSchema", () => {
     ).toBe(false);
   });
 });
+
+describe("detail page — the school-match note", () => {
+  const src = read("queries.ts");
+
+  it("derives school_match from the alias and gates it away from parents", () => {
+    // The note names an internal routing decision AND a colleague, so it must not
+    // reach a parent viewer (the public readback passes viewer: "parent").
+    expect(src).toContain("getSchoolAliasMatch");
+    expect(src).toContain('viewer === "parent"');
+    expect(src).toContain("school_match: schoolMatch");
+  });
+
+  it("only notes an ALIAS match — an exact name needs no attribution", () => {
+    // `a.school_id IS NOT NULL` and the alias-only join mean an exact-name match
+    // (which resolves with no alias row) produces no note.
+    expect(src).toMatch(/FROM dbo\.school_name_aliases a/);
+    expect(src).toMatch(/AND a\.school_id IS NOT NULL/);
+  });
+});
