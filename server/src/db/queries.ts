@@ -2,8 +2,9 @@ import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
 import { planSubmissionFields, adhocRowsMatchingLabel, type IncomingAnswer } from "../webhook/field-mapping.js";
-import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES } from "./schema.js";
-import type { FormVisibility } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES, normalizeSchoolKey } from "./schema.js";
+import type { FormVisibility, SchoolAlias } from "./schema.js";
+import { findAliasedSchoolId, invalidateSchoolAliasCache } from "./school-alias-cache.js";
 import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { env } from "../config/env.js";
@@ -401,6 +402,177 @@ export async function getSchoolFacets(): Promise<{
     gradeLevels: gradeRows.map((r) => r.value),
     calendars: calendarRows.map((r) => r.value),
   };
+}
+
+// -----------------------------------------------------------------------------
+// School name aliases (Settings → School Name Matching)
+// docs/plans/school-name-reconciliation.md
+//
+// The app's school list is the single source of truth; a submitted spelling is
+// only an input that maps TO an app school. A row in `dbo.school_name_aliases`
+// is that mapping, made explicitly by an administrator. `findSchoolIdByName`
+// consults it on the live intake path, so a mismatch resolved once never
+// recurs. Nothing here guesses: there is no fuzzy or distance matching.
+// -----------------------------------------------------------------------------
+
+/** A submitted spelling that resolves to no school and has no alias/ignore yet. */
+export interface UnmatchedSchoolName {
+  /** The NORMALISED key (LOWER(TRIM(...))) — what `POST /aliases` sends back. */
+  submitted_name: string;
+  /** The spelling as first seen, for the panel to display. */
+  display_name: string;
+  /** How many active submissions carry this spelling. */
+  count: number;
+  first_seen: Date | string | null;
+  last_seen: Date | string | null;
+}
+
+/** An alias row joined to the school it maps to and the admin who made it. */
+export interface SchoolAliasRow extends SchoolAlias {
+  school_name: string | null;
+  created_by_name: string | null;
+}
+
+// Every alias row, for the "Existing matches" list under the worklist. Reads the
+// database directly (not the cache) so the panel is never 30 s stale.
+export async function listSchoolAliases(): Promise<SchoolAliasRow[]> {
+  const rows = await execute<SchoolAliasRow>(
+    `SELECT a.id, a.submitted_name, a.display_name, a.school_id, a.created_by, a.created_at,
+            s.name AS school_name,
+            u.display_name AS created_by_name
+       FROM dbo.school_name_aliases a
+       LEFT JOIN dbo.schools s ON s.id = a.school_id
+       LEFT JOIN dbo.users u ON u.id = a.created_by
+      ORDER BY a.display_name`
+  );
+  return rows.map((r) => ({
+    ...r,
+    id: Number(r.id),
+    school_id: r.school_id === null || r.school_id === undefined ? null : Number(r.school_id),
+    created_by: r.created_by === null || r.created_by === undefined ? null : Number(r.created_by),
+  }));
+}
+
+// Create or update one alias. Idempotent: re-matching the same spelling to the
+// same school is a no-op; re-matching to a different school updates the row.
+// Invalidates the cache so intake honours the change on THIS instance at once.
+export async function setSchoolAlias(input: {
+  submitted_name: string;
+  display_name: string;
+  school_id: number | null;
+  createdBy: number | null;
+}): Promise<SchoolAlias> {
+  const key = normalizeSchoolKey(input.submitted_name);
+  const display = input.display_name.trim() || input.submitted_name.trim();
+  const rows = await execute<SchoolAlias>(dialect().upsertSchoolAlias(), {
+    submittedName: key,
+    displayName: display.slice(0, 200),
+    schoolId: input.school_id,
+    createdBy: input.createdBy,
+  });
+  invalidateSchoolAliasCache();
+  const row = rows[0];
+  return {
+    ...row,
+    id: Number(row.id),
+    school_id: row.school_id === null || row.school_id === undefined ? null : Number(row.school_id),
+    created_by: row.created_by === null || row.created_by === undefined ? null : Number(row.created_by),
+  };
+}
+
+// Remove a mapping. Reverts FUTURE routing only — rows a previous Match already
+// re-filed keep their `school_id`, because the prior value is not recorded
+// (docs/plans/school-name-reconciliation.md §4.7). Returns false when there was
+// no such row, so the route can answer 404.
+export async function deleteSchoolAlias(id: number): Promise<boolean> {
+  const rows = await execute<{ id: number }>(
+    dialect().deleteReturning({
+      table: "school_name_aliases",
+      where: "id = @id",
+      returning: ["id"],
+    }),
+    { id }
+  );
+  invalidateSchoolAliasCache();
+  return rows.length > 0;
+}
+
+// The worklist: distinct school spellings that submissions DECLARED but that
+// resolve to no school and have no alias/ignore row. Grouped by the normalised
+// key so two spellings differing only by case are one row. Archived submissions
+// are excluded, so the count matches exactly what a Match would re-file.
+export async function listUnmatchedSchoolNames(): Promise<UnmatchedSchoolName[]> {
+  const candidates = await execute<{
+    name_key: string;
+    display_name: string;
+    count: number | string;
+    first_seen: unknown;
+    last_seen: unknown;
+  }>(
+    `SELECT LOWER(LTRIM(RTRIM(declared_school_name))) AS name_key,
+            MIN(declared_school_name) AS display_name,
+            COUNT(*) AS count,
+            MIN(submitted_at) AS first_seen,
+            MAX(submitted_at) AS last_seen
+       FROM dbo.submissions
+      WHERE declared_school_name IS NOT NULL
+        AND LTRIM(RTRIM(declared_school_name)) <> ''
+        AND ${notArchived("submissions")}
+      GROUP BY LOWER(LTRIM(RTRIM(declared_school_name)))`
+  );
+  if (candidates.length === 0) return [];
+
+  const [schoolRows, aliasRows] = await Promise.all([
+    execute<{ name_key: string }>("SELECT name AS name_key FROM dbo.schools"),
+    execute<{ name_key: string }>("SELECT submitted_name AS name_key FROM dbo.school_name_aliases"),
+  ]);
+  const known = new Set(schoolRows.map((r) => normalizeSchoolKey(String(r.name_key))));
+  const aliased = new Set(aliasRows.map((r) => normalizeSchoolKey(String(r.name_key))));
+
+  const result: UnmatchedSchoolName[] = [];
+  for (const c of candidates) {
+    const key = normalizeSchoolKey(String(c.name_key));
+    if (!key) continue;
+    if (known.has(key) || aliased.has(key)) continue;
+    result.push({
+      submitted_name: key,
+      display_name: String(c.display_name),
+      count: Number(c.count),
+      first_seen: (c.first_seen as Date | string | null) ?? null,
+      last_seen: (c.last_seen as Date | string | null) ?? null,
+    });
+  }
+  result.sort((a, b) => b.count - a.count || a.display_name.localeCompare(b.display_name));
+  return result;
+}
+
+// Re-file every ACTIVE submission declaring `declaredName` onto `schoolId`.
+//
+// This is the access half of a Match: once `school_id` is the app school, the
+// school's own users see the row in their queue and `canAccessSchool` lets them
+// open it. Reuses the guarded UPDATE from backfill-school-id.ts: the `<>` guard
+// makes it idempotent and safe against a row changed between read and write, and
+// the returned-row count is the affected figure (libSQL reports 0 affected rows
+// for an UPDATE ... RETURNING). Archived rows are skipped deliberately.
+export async function relocateSubmissionsByDeclaredName(
+  declaredName: string,
+  schoolId: number
+): Promise<number> {
+  const key = normalizeSchoolKey(declaredName);
+  if (!key) return 0;
+  const rows = await execute<{ id: number }>(
+    dialect().updateReturning({
+      table: "submissions",
+      set: "school_id = @schoolId, updated_at = SYSUTCDATETIME()",
+      where:
+        "LOWER(LTRIM(RTRIM(declared_school_name))) = @key " +
+        "AND (school_id IS NULL OR school_id <> @schoolId) " +
+        `AND ${notArchived("submissions")}`,
+      returning: ["id"],
+    }),
+    { schoolId, key }
+  );
+  return rows.length;
 }
 
 // Upsert a school from the imported feed, keyed on the stable source_id (FID).
@@ -2044,9 +2216,19 @@ async function findSchoolIdByName(name: string): Promise<number | null> {
   // written to `submissions.school_id` and then compared with `===` by
   // `canAccessSchool`.
   const raw = rows[0]?.id;
-  if (raw === undefined || raw === null) return null;
-  const resolved = Number(raw);
-  return Number.isFinite(resolved) ? resolved : null;
+  if (raw !== undefined && raw !== null) {
+    const resolved = Number(raw);
+    if (Number.isFinite(resolved)) return resolved;
+  }
+
+  // No exact school name — consult the admin-authored aliases
+  // (docs/plans/school-name-reconciliation.md). The alias table is the LIVE
+  // routing step the reviewed constant in backfill-school-id.ts never was, so a
+  // spelling an admin matched once resolves for every later submission. This is
+  // a DECISION, never a guess: no fuzzy/prefix/phonetic matching exists here.
+  // Putting it inside this one lookup fixes intake, resolveSubmissionSchoolId
+  // and the detail verdict together, so they cannot disagree.
+  return findAliasedSchoolId(name);
 }
 
 export async function createSubmission(
@@ -2117,6 +2299,7 @@ export async function createSubmission(
         "status",
         "submission_seq",
         "school_year",
+        "declared_school_name",
       ],
       returning: [
         "id",
@@ -2131,9 +2314,9 @@ export async function createSubmission(
         "updated_at",
       ],
       values:
-        "@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq, @schoolYear",
+        "@publicId, @formId, @schoolId, @organizationId, 'submitted', @submissionSeq, @schoolYear, @declaredSchoolName",
     }),
-    { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq, schoolYear }
+    { publicId, formId: form.id, schoolId, organizationId: form.organization_id, submissionSeq, schoolYear, declaredSchoolName: plan.schoolName }
   );
   const submission = subs[0];
   // Only the answers that resolved to a field THIS form defines. A captured

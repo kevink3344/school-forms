@@ -524,7 +524,7 @@ describe("dialect submissionSchoolNameSubquery", () => {
   it("limits at the head on SQL Server and at the tail on Turso", () => {
     const sg = sqlserverDialect.submissionSchoolNameSubquery();
     const lite = tursoDialect.submissionSchoolNameSubquery();
-    expect(sg).toMatch(/SELECT TOP 1 COALESCE\(scs\.name, sv\.value\)/);
+    expect(sg).toMatch(/SELECT TOP 1 COALESCE\(scs\.name, acs\.name, sv\.value\)/);
     expect(sg).not.toMatch(/\bLIMIT\b/);
     expect(lite).toMatch(/LIMIT 1\)/);
     expect(lite).not.toMatch(/\bTOP\b/);
@@ -561,15 +561,25 @@ describe("dialect submissionSchoolNameSubquery", () => {
     }
   });
 
-  it("prefers the canonical school name and falls back to the typed answer", () => {
+  it("prefers an app school (exact, then alias) and falls back to the typed answer", () => {
     for (const dialect of [sqlserverDialect, tursoDialect]) {
       const sql = dialect.submissionSchoolNameSubquery();
-      expect(sql).toMatch(/COALESCE\(scs\.name, sv\.value\)/);
+      // The app school wins, then the admin-confirmed alias, then the raw text.
+      // §4.4.1: without `acs.name` a re-filed row would store the right
+      // school_id yet still DISPLAY the parent's typo.
+      expect(sql).toMatch(/COALESCE\(scs\.name, acs\.name, sv\.value\)/);
       // The compared answer is trimmed, matching the insert-time resolver and
       // the backfill script — all three must classify one answer the same way.
       expect(sql).toMatch(
         /LEFT JOIN [\w.]*schools scs ON LOWER\(scs\.name\) = LOWER\(LTRIM\(RTRIM\(sv\.value\)\)\)/
       );
+      // The alias branch resolves the typed answer through `school_name_aliases`
+      // to the app school the admin chose, so the label and the stored
+      // `school_id` agree.
+      expect(sql).toMatch(
+        /LEFT JOIN [\w.]*school_name_aliases a ON LOWER\(a\.submitted_name\) = LOWER\(LTRIM\(RTRIM\(sv\.value\)\)\)/
+      );
+      expect(sql).toMatch(/LEFT JOIN [\w.]*schools acs ON acs\.id = a\.school_id/);
       // A blank field is not an answer: without this the first school-labelled
       // field, left empty, would COALESCE to '' and out-rank the real join.
       expect(sql).toMatch(/LTRIM\(RTRIM\(sv\.value\)\) <> ''/);

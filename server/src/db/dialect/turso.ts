@@ -179,6 +179,7 @@ const TURSO_DDL: string[] = [
      staff_fields_updated_at TEXT,
      archived_at             TEXT,
      archived_by             INTEGER,
+     declared_school_name    TEXT,
      submitted_at            TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
      updated_at              TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
@@ -390,6 +391,28 @@ const TURSO_DDL: string[] = [
      PRIMARY KEY (message_id, user_id)
    )`,
 
+  // School Name Matching (docs/plans/school-name-reconciliation.md). An
+  // admin-authored map from a submitted school SPELLING to an app school;
+  // `submitted_name` is the NORMALISED key (LOWER(TRIM(...))).
+  //
+  // `COLLATE NOCASE` replaces SQL Server's default case-insensitive collation on
+  // the key, so `WHERE submitted_name = @x` matches a differently-cased spelling
+  // and the UNIQUE index dedupes case-insensitively — exactly as SQL Server's
+  // index does. The `ON CONFLICT(submitted_name)` upsert below requires this
+  // UNIQUE index to exist.
+  //
+  // `school_id` is NULLABLE (NULL = "Ignore"); the FK is NO ACTION, mirroring
+  // SQL Server. New table, so no `addColumns` entry is needed.
+  `CREATE TABLE IF NOT EXISTS school_name_aliases (
+     id             INTEGER PRIMARY KEY AUTOINCREMENT,
+     submitted_name TEXT NOT NULL COLLATE NOCASE,
+     display_name   TEXT NOT NULL,
+     school_id      INTEGER REFERENCES schools(id) ON DELETE NO ACTION,
+     created_by     INTEGER,
+     created_at     TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE UNIQUE INDEX IF NOT EXISTS UX_school_name_aliases_name ON school_name_aliases(submitted_name)`,
+
   // --- reference data --------------------------------------------------------
   // The two known organizations, seeded idempotently exactly as the SQL Server
   // ladder does.
@@ -516,6 +539,17 @@ export const tursoDialect: Dialect = {
       column: "visibility",
       definition: "TEXT NOT NULL DEFAULT 'public'",
     },
+    {
+      // School Name Matching (docs/plans/school-name-reconciliation.md). The
+      // school name a submission's own answers declared, recorded at intake. In
+      // `TURSO_DDL` as well, so a fresh database gets it from CREATE TABLE; this
+      // entry is for a database created before the column existed. It is a plain
+      // string — NOT a boolean or a timestamp — so it must not appear in
+      // BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
+      table: "submissions",
+      column: "declared_school_name",
+      definition: "TEXT",
+    },
   ],
 
   insertReturning({ table, columns, returning, values }) {
@@ -601,6 +635,23 @@ export const tursoDialect: Dialect = {
     );
   },
 
+  upsertSchoolAlias() {
+    // Replaces the SQL Server MERGE, keyed on the `submitted_name` unique index
+    // the DDL declares (which is what `ON CONFLICT` requires). Params:
+    // @submittedName (the NORMALISED key), @displayName, @schoolId (nullable —
+    // NULL is the "Ignore" state), @createdBy. Re-matching the same spelling to a
+    // different school updates the row in place.
+    return (
+      `INSERT INTO school_name_aliases (submitted_name, display_name, school_id, created_by)\n` +
+      `     VALUES (@submittedName, @displayName, @schoolId, @createdBy)\n` +
+      `     ON CONFLICT(submitted_name) DO UPDATE SET\n` +
+      `       display_name = excluded.display_name,\n` +
+      `       school_id = excluded.school_id,\n` +
+      `       created_by = excluded.created_by\n` +
+      `     RETURNING id, submitted_name, display_name, school_id, created_by, created_at`
+    );
+  },
+
   submissionValueSubquery(label) {
     // The SQL Server spelling is `SELECT TOP 1 …`; libSQL rejects `TOP`
     // outright, so the limit moves to the tail. The predicate is shared with the
@@ -623,11 +674,19 @@ export const tursoDialect: Dialect = {
     // SQL Server because libSQL's `=` is case-sensitive. The answer is trimmed
     // before comparison to agree with the insert-time resolver and the backfill
     // script; see the SQL Server variant for the full reasoning.
+    //
+    // ★ The alias joins (docs/plans/school-name-reconciliation.md §4.4.1) are the
+    // SQL sibling of `findSchoolIdByName`: `COALESCE(scs.name, acs.name, sv.value)`
+    // means an APP school name — exact match, else an admin-confirmed alias —
+    // wins over the parent's typed text. Without `acs.name` a re-filed row would
+    // store the right `school_id` but still DISPLAY the typo.
     return (
-      `(SELECT COALESCE(scs.name, sv.value)\n` +
+      `(SELECT COALESCE(scs.name, acs.name, sv.value)\n` +
       `       FROM submission_values sv\n` +
       `       JOIN form_fields ff ON ff.id = sv.field_id\n` +
       `       LEFT JOIN schools scs ON LOWER(scs.name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
+      `       LEFT JOIN school_name_aliases a ON LOWER(a.submitted_name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
+      `       LEFT JOIN schools acs ON acs.id = a.school_id\n` +
       `      WHERE sv.submission_id = s.id\n` +
       `        AND ${schoolFieldPredicate()}\n` +
       `        AND sv.value IS NOT NULL\n` +

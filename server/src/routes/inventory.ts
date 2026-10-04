@@ -43,6 +43,13 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/schools/page", auth: "admin", tags: "Schools" },
   { method: "post", path: "/api/schools", auth: "admin", tags: "Schools" },
   { method: "post", path: "/api/schools/import", auth: "admin", tags: "Schools" },
+  // School Name Matching (docs/plans/school-name-reconciliation.md). Admin-only:
+  // matching a submitted spelling to an app school re-files existing submissions,
+  // so it is a data-routing decision, not a queue action.
+  { method: "get", path: "/api/schools/aliases", auth: "admin", tags: "Schools" },
+  { method: "get", path: "/api/schools/aliases/unmatched", auth: "admin", tags: "Schools" },
+  { method: "post", path: "/api/schools/aliases", auth: "admin", tags: "Schools" },
+  { method: "delete", path: "/api/schools/aliases/{id}", auth: "admin", tags: "Schools" },
   { method: "get", path: "/api/forms", auth: "admin", tags: "Forms" },
   { method: "post", path: "/api/forms", auth: "admin", tags: "Forms" },
   // Public/Private forms (docs/plans/public-private-forms.md). `/available` is

@@ -132,7 +132,15 @@ const READ_SITES: Record<string, ReadSite> = {
       "would strand that one submission holding an ad-hoc value while every sibling moved — and " +
       "restoring it later would then show a real field that is empty for no visible reason.",
   },
-
+  "queries.ts::listUnmatchedSchoolNames": {
+    requires: ["notArchived"],
+    readsSubmissions: true,
+    why:
+      "the School Name Matching worklist (docs/plans/school-name-reconciliation.md). Its count is an " +
+      "invitation to re-file rows, so it must describe exactly what a Match would touch: archived rows " +
+      "are excluded on BOTH sides — here and in `relocateSubmissionsByDeclaredName`'s UPDATE — or the " +
+      "number the admin reads would overstate the change.",
+  },
   // --- documents.ts --------------------------------------------------------
   "documents.ts::queryDocuments": {
     requires: [],

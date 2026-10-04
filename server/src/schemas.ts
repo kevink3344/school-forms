@@ -195,6 +195,21 @@ export const updateSchoolSchema = z
   .refine((v) => Object.keys(v).length > 0, { message: "At least one field is required" });
 
 // -----------------------------------------------------------------------------
+// School name aliases (Settings → School Name Matching)
+// docs/plans/school-name-reconciliation.md
+// -----------------------------------------------------------------------------
+// `submitted_name` is the parent's spelling exactly as the Google Form sent it;
+// the server NORMALISES it before storing. `display_name` is optional and
+// defaults to the submitted spelling. `school_id` is nullable on purpose — NULL
+// is the "Ignore" state, so it must accept null rather than being coerced to a
+// number (a `z.coerce.number().nullable()` would turn null into 0 and fail).
+export const createSchoolAliasSchema = z.object({
+  submitted_name: z.string().min(1).max(200),
+  display_name: z.string().min(1).max(200).optional().nullable(),
+  school_id: z.union([z.coerce.number().int().positive(), z.null()]).optional(),
+});
+
+// -----------------------------------------------------------------------------
 // Organizations (admin add/edit)
 // -----------------------------------------------------------------------------
 export const createOrganizationSchema = z.object({

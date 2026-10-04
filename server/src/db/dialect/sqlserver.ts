@@ -118,6 +118,26 @@ export const sqlserverDialect: Dialect = {
     );
   },
 
+  upsertSchoolAlias() {
+    // Keyed on the `submitted_name` unique index, mirroring
+    // upsertUserFormViewColumns: MERGE rather than an UPDATE-then-INSERT pair so
+    // the read and the write cannot interleave with another request for the same
+    // spelling. Params: @submittedName (the NORMALISED key), @displayName,
+    // @schoolId (nullable — NULL is the "Ignore" state), @createdBy.
+    return (
+      `MERGE dbo.school_name_aliases AS target\n` +
+      `     USING (SELECT @submittedName AS submitted_name) AS source\n` +
+      `     ON target.submitted_name = source.submitted_name\n` +
+      `     WHEN MATCHED THEN UPDATE SET target.display_name = @displayName,\n` +
+      `                                  target.school_id = @schoolId,\n` +
+      `                                  target.created_by = @createdBy\n` +
+      `     WHEN NOT MATCHED THEN INSERT (submitted_name, display_name, school_id, created_by)\n` +
+      `       VALUES (source.submitted_name, @displayName, @schoolId, @createdBy)\n` +
+      `     OUTPUT INSERTED.id, INSERTED.submitted_name, INSERTED.display_name, INSERTED.school_id,\n` +
+      `            INSERTED.created_by, INSERTED.created_at;`
+    );
+  },
+
   submissionValueSubquery(label) {
     return (
       `(SELECT TOP 1 sv.value\n` +
@@ -144,11 +164,20 @@ export const sqlserverDialect: Dialect = {
     // and the backfill script trims its lookup key. Comparing untrimmed here
     // would let an answer typed with a trailing space resolve at insert time
     // and then fail to resolve for display.
+    //
+    // ★ The alias joins (docs/plans/school-name-reconciliation.md §4.4.1) are the
+    // SQL sibling of `findSchoolIdByName`: `COALESCE(scs.name, acs.name, sv.value)`
+    // means an APP school name — exact match, else an admin-confirmed alias —
+    // wins over the parent's typed text. Without `acs.name` a re-filed row would
+    // store the right `school_id` but still DISPLAY the typo, which is the whole
+    // point of "the app school list is the single source of truth".
     return (
-      `(SELECT TOP 1 COALESCE(scs.name, sv.value)\n` +
+      `(SELECT TOP 1 COALESCE(scs.name, acs.name, sv.value)\n` +
       `       FROM dbo.submission_values sv\n` +
       `       JOIN dbo.form_fields ff ON ff.id = sv.field_id\n` +
       `       LEFT JOIN dbo.schools scs ON LOWER(scs.name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
+      `       LEFT JOIN dbo.school_name_aliases a ON LOWER(a.submitted_name) = LOWER(LTRIM(RTRIM(sv.value)))\n` +
+      `       LEFT JOIN dbo.schools acs ON acs.id = a.school_id\n` +
       `      WHERE sv.submission_id = s.id\n` +
       `        AND ${schoolFieldPredicate()}\n` +
       `        AND sv.value IS NOT NULL\n` +

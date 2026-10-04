@@ -1,16 +1,22 @@
 import { Router } from "express";
 import {
   createSchool,
+  deleteSchoolAlias,
   featureToSchool,
+  getSchool,
   getSchoolByName,
   getSchoolFacets,
+  listSchoolAliases,
   listSchools,
   listSchoolsPage,
+  listUnmatchedSchoolNames,
+  relocateSubmissionsByDeclaredName,
+  setSchoolAlias,
   updateSchool,
   upsertSchoolFromSource,
 } from "../db/queries.js";
 import { requireAuth, requireRoles, scopedSchoolId } from "../auth.js";
-import { createSchoolSchema, updateSchoolSchema } from "../schemas.js";
+import { createSchoolAliasSchema, createSchoolSchema, updateSchoolSchema } from "../schemas.js";
 import type { School } from "../db/schema.js";
 import { env } from "../config/env.js";
 
@@ -83,6 +89,86 @@ schoolsRouter.get("/facets", requireAuth, requireRoles("admin"), async (_req, re
   try {
     const facets = await getSchoolFacets();
     res.json(facets);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// School Name Matching (docs/plans/school-name-reconciliation.md)
+//
+// ★ Registered ABOVE `PATCH /:id` so a future `GET /:id` cannot swallow
+// `/aliases`. These make the app's school list the source of truth: an admin
+// pairs a submitted spelling with an app school, and that pairing then drives
+// live routing AND re-files the submissions already carrying the spelling.
+// -----------------------------------------------------------------------------
+
+// Admin: every alias row (the "Existing matches" list).
+schoolsRouter.get("/aliases", requireAuth, requireRoles("admin"), async (_req, res, next) => {
+  try {
+    res.json(await listSchoolAliases());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: the worklist — submitted spellings that match no school and have no
+// alias/ignore yet.
+schoolsRouter.get("/aliases/unmatched", requireAuth, requireRoles("admin"), async (_req, res, next) => {
+  try {
+    res.json(await listUnmatchedSchoolNames());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: create/update an alias, and (for a real school) re-file existing rows.
+// `school_id: null` is the "Ignore" state — recorded so the spelling leaves the
+// worklist, but NO submission is moved.
+schoolsRouter.post("/aliases", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const parsed = createSchoolAliasSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const submittedName = parsed.data.submitted_name.trim();
+    const schoolId = parsed.data.school_id ?? null;
+    if (schoolId !== null) {
+      const school = await getSchool(schoolId);
+      if (!school) {
+        res.status(400).json({ error: "school_id does not match any school" });
+        return;
+      }
+    }
+    const alias = await setSchoolAlias({
+      submitted_name: submittedName,
+      display_name: parsed.data.display_name?.trim() || submittedName,
+      school_id: schoolId,
+      createdBy: Number(req.user!.id) || null,
+    });
+    // The repair half. "Ignore" (null) moves nothing.
+    const relocated =
+      schoolId === null ? 0 : await relocateSubmissionsByDeclaredName(submittedName, schoolId);
+    res.status(201).json({ alias, relocated });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: remove a mapping. Reverts FUTURE routing only (see deleteSchoolAlias).
+schoolsRouter.delete("/aliases/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isInteger(id) || id <= 0) {
+      res.status(400).json({ error: "Invalid alias id" });
+      return;
+    }
+    if (!(await deleteSchoolAlias(id))) {
+      res.status(404).json({ error: "Alias not found" });
+      return;
+    }
+    res.json({ ok: true });
   } catch (err) {
     next(err);
   }

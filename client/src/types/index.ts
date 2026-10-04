@@ -42,6 +42,29 @@ export interface School {
   created_at: string;
 }
 
+// Settings → School Name Matching. One admin-authored pairing of a submitted
+// school SPELLING to an app school. `school_id === null` is the "Ignore" state.
+export interface SchoolAlias {
+  id: number;
+  submitted_name: string;
+  display_name: string;
+  school_id: number | null;
+  created_by: number | null;
+  created_at: string;
+  // Joined for display by GET /api/schools/aliases:
+  school_name?: string | null;
+  created_by_name?: string | null;
+}
+
+// A submitted school spelling that resolves to no school and has no alias/ignore.
+export interface UnmatchedSchoolName {
+  submitted_name: string;
+  display_name: string;
+  count: number;
+  first_seen: string | null;
+  last_seen: string | null;
+}
+
 export interface Organization {
   id: number;
   slug: string;

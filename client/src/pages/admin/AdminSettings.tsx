@@ -11,6 +11,7 @@ import { refreshSystemMessages } from "../../components/SystemMessageBar";
 import { Toast } from "../../components/Toast";
 import { useAuth } from "../../context/AuthContext";
 import SchoolsPanel from "./SchoolsPanel";
+import SchoolNameMatchingPanel from "./SchoolNameMatchingPanel";
 
 // login mode options displayed in the Settings → Login Mode panel.
 const LOGIN_MODES: { value: LoginMode; label: string; desc: string; tone: string }[] = [
@@ -2340,6 +2341,18 @@ export default function AdminSettings() {
         bodyStyle={{ padding: 0 }}
       >
         <SchoolsPanel />
+      </CollapsibleSection>
+
+      {/* School Name Matching — the remedy for a submission whose school answer
+          matches no school (docs/plans/school-name-reconciliation.md). Sits
+          beside Schools: that list is what the app knows, this is what the forms
+          are saying that it does not. */}
+      <CollapsibleSection
+        title="School Name Matching"
+        subtitle="Google Form school answers that don't match a school in the list — match one to fix it for good."
+        bodyStyle={{ padding: 0 }}
+      >
+        <SchoolNameMatchingPanel />
       </CollapsibleSection>
 
       {/* Create / edit organization — right slide-out drawer */}

@@ -108,6 +108,13 @@ export interface Dialect {
   upsertUserFormViewColumns(): string;
 
   /**
+   * Upsert one `school_name_aliases` row keyed on the NORMALISED
+   * `submitted_name`. Params: `@submittedName`, `@displayName`, `@schoolId`
+   * (nullable — NULL is the "Ignore" state), `@createdBy`.
+   */
+  upsertSchoolAlias(): string;
+
+  /**
    * Parenthesised scalar subquery yielding the first non-null value of one
    * submission field, correlated on the outer alias `s` (a `submissions` row)
    * and ordered by `form_fields.sort_order`.

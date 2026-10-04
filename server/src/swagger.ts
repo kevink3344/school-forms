@@ -2494,6 +2494,70 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/schools/aliases": {
+        get: {
+          tags: ["Schools"],
+          summary: "List admin-confirmed school-name aliases (admin)",
+          security: [{ [bearerScheme]: [] }],
+          responses: { "200": { description: "OK" } },
+        },
+        post: {
+          tags: ["Schools"],
+          summary: "Match a submitted school spelling to an app school (admin)",
+          description:
+            "Records an explicit, admin-made pairing of a submitted spelling to an app school, and " +
+            "re-files the active submissions carrying that spelling onto the chosen school (so its " +
+            "staff can open them). Pass `school_id: null` to Ignore a spelling that is not a school — " +
+            "that records the decision but moves no submission. There is no fuzzy matching.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["submitted_name"],
+                  properties: {
+                    submitted_name: { type: "string" },
+                    display_name: { type: "string", nullable: true },
+                    school_id: {
+                      type: "integer",
+                      nullable: true,
+                      description: "The app school; omit/null to Ignore the spelling.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Created — { alias, relocated }" },
+            "400": { description: "Validation failed, or school_id does not match a school" },
+          },
+        },
+      },
+      "/api/schools/aliases/unmatched": {
+        get: {
+          tags: ["Schools"],
+          summary: "Submitted school spellings that match no school (admin)",
+          security: [{ [bearerScheme]: [] }],
+          responses: { "200": { description: "OK" } },
+        },
+      },
+      "/api/schools/aliases/{id}": {
+        delete: {
+          tags: ["Schools"],
+          summary: "Remove a school-name alias (admin)",
+          description:
+            "Reverts future routing only: rows a previous Match already re-filed keep their school_id.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "id", in: "path", required: true, schema: { type: "integer" } }],
+          responses: {
+            "200": { description: "OK" },
+            "404": { description: "Alias not found" },
+          },
+        },
+      },
       "/api/webhook/events": {
         get: {
           tags: ["Webhooks"],

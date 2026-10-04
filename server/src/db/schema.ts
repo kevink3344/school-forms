@@ -171,6 +171,42 @@ export interface School {
   created_at: Date;
 }
 
+/**
+ * One admin-authored pairing of a submitted school SPELLING to an app school
+ * (docs/plans/school-name-reconciliation.md).
+ *
+ * The app's school list is the single source of truth: a parent's spelling is
+ * only an input that maps TO an app school. A row here is that mapping, made
+ * explicitly by an administrator and reused for routing ever afterwards.
+ *
+ * `school_id === null` is the "Ignore" state — the spelling is known NOT to be a
+ * school, so it stops appearing in the worklist but no submission is re-filed.
+ */
+export interface SchoolAlias {
+  id: number;
+  /** The NORMALISED key (LOWER(TRIM(...))) — what matching compares against. */
+  submitted_name: string;
+  /** The spelling as first seen, for the admin panel to display. */
+  display_name: string;
+  /** The app school it maps to; NULL means "Ignore". */
+  school_id: number | null;
+  /** users.id of the admin who made the decision; NULL for a seeded row. */
+  created_by: number | null;
+  created_at: Date;
+}
+
+/**
+ * The ONE normalisation used by every alias comparison.
+ *
+ * Two sides must agree — the key written into `school_name_aliases.submitted_name`
+ * and the value read back from a submission's declared answer — so the rule lives
+ * here once rather than being re-spelled at each call site. It matches the SQL
+ * (`LOWER(LTRIM(RTRIM(...)))`) the display subquery and the worklist use.
+ */
+export function normalizeSchoolKey(name: string): string {
+  return name.trim().toLowerCase();
+}
+
 export interface User {
   id: number;
   email: string;
@@ -1711,6 +1747,51 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // every later batch, leaving dbReady false.
   `${indexGuard("IX_system_messages_org_active", "system_messages", ["organization_id", "active", "created_at"])}
      CREATE INDEX IX_system_messages_org_active ON dbo.system_messages(organization_id, active, created_at DESC);`,
+
+  // ---------------------------------------------------------------------
+  // School Name Matching (docs/plans/school-name-reconciliation.md)
+  //
+  // An admin-authored map from a submitted school SPELLING to an app school.
+  // Live intake consults it (see findSchoolIdByName in queries.ts), so a
+  // mismatch an admin resolves once never recurs. The table starts EMPTY: no
+  // row is inserted by the app, because a mapping is a decision an admin makes,
+  // not a guess the app makes for them.
+  //
+  // `submitted_name` is the NORMALISED key (LOWER(TRIM(...))) and carries the
+  // UNIQUE index; `display_name` is the spelling as first seen, shown to the
+  // admin. `school_id` is NULLABLE on purpose — NULL is the "Ignore" state
+  // (this spelling is known not to be a school). The FK to `schools` is
+  // NO ACTION: schools are not deleted today, and a cascade that could silently
+  // drop every mapping (re-opening the mismatch) is not wanted.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.school_name_aliases', 'U') IS NULL
+   CREATE TABLE dbo.school_name_aliases (
+     id             INT IDENTITY(1,1) PRIMARY KEY,
+     submitted_name NVARCHAR(200) NOT NULL,
+     display_name   NVARCHAR(200) NOT NULL,
+     school_id      INT NULL,
+     created_by     INT NULL,
+     created_at     DATETIME2 NOT NULL CONSTRAINT DF_school_name_aliases_created_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_school_name_aliases_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id)
+   );`,
+
+  // Its own batch (a CREATE INDEX must not share a batch with the CREATE TABLE
+  // that defines its columns — error 207) and declared through indexGuard so
+  // expectedIndexNames() sees it and the boot-time "N indexes MISSING" warning
+  // stays honest. This UNIQUE index is also what the Turso dialect's
+  // `ON CONFLICT(submitted_name)` upsert relies on.
+  `${indexGuard("UX_school_name_aliases_name", "school_name_aliases", ["submitted_name"])}
+     CREATE UNIQUE INDEX UX_school_name_aliases_name ON dbo.school_name_aliases(submitted_name);`,
+
+  // `submissions.declared_school_name` — the school name the submission's own
+  // answers declared (the parent's spelling), recorded at intake so the
+  // reconciliation worklist is a GROUP BY and the repair is one guarded UPDATE.
+  // It is the INPUT, never the app school; `school_id` holds the resolved app
+  // school. Nullable, so every existing/single-school row is unaffected.
+  // Its own batch (error 207: a batch that references a just-added column cannot
+  // share the batch with the ALTER that adds it).
+  `IF COL_LENGTH('dbo.submissions', 'declared_school_name') IS NULL
+     ALTER TABLE dbo.submissions ADD declared_school_name NVARCHAR(200) NULL;`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

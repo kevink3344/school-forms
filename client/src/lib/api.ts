@@ -28,7 +28,9 @@ import type {
   RoleRow,
   RoleUsageReport,
   School,
+  SchoolAlias,
   SchoolPage,
+  UnmatchedSchoolName,
   SubmissionAnswer,
   SubmissionDetail,
   SubmissionRow,
@@ -461,6 +463,44 @@ export const api = {
   // route is still the only way to re-sync from SCHOOL_JSON.
   async importSchools(): Promise<{ total: number }> {
     return request<{ total: number }>("/api/schools/import", { method: "POST", auth: true });
+  },
+
+  // -------------------------------------------------------------------------
+  // School Name Matching (admin Settings → School Name Matching panel)
+  // docs/plans/school-name-reconciliation.md
+  // -------------------------------------------------------------------------
+
+  // Every admin-authored alias (the "Existing matches" list).
+  async listSchoolAliases(): Promise<SchoolAlias[]> {
+    return request<SchoolAlias[]>("/api/schools/aliases", { auth: true });
+  },
+
+  // The worklist: submitted spellings that resolve to no school.
+  async listUnmatchedSchoolNames(): Promise<UnmatchedSchoolName[]> {
+    return request<UnmatchedSchoolName[]>("/api/schools/aliases/unmatched", { auth: true });
+  },
+
+  // Record a match (school_id) or an Ignore (school_id: null). A match also
+  // re-files the active submissions carrying the spelling; `relocated` is how
+  // many moved.
+  async createSchoolAlias(input: {
+    submitted_name: string;
+    display_name?: string;
+    school_id: number | null;
+  }): Promise<{ alias: SchoolAlias; relocated: number }> {
+    return request<{ alias: SchoolAlias; relocated: number }>("/api/schools/aliases", {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  // Remove a mapping. Reverts future routing only (past re-files are not undone).
+  async deleteSchoolAlias(id: number): Promise<{ ok: boolean }> {
+    return request<{ ok: boolean }>(`/api/schools/aliases/${id}`, {
+      method: "DELETE",
+      auth: true,
+    });
   },
 
   // -------------------------------------------------------------------------
