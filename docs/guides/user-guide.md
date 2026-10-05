@@ -325,15 +325,23 @@ Switch a toggle off to hide that item from that role.
 
 ## 2.15 Slack notifications
 
-Expand **Slack Notifications** to verify that admin alerts are being delivered.
+Expand **Slack Notifications** to turn admin alerts on or off and to verify that they
+are being delivered.
 
 ![Slack Notifications](images/08-settings.png)
 
-1. Enter a **Subject** and optional **Body**. Slack formatting such as `*bold*` and
-   `` `code` `` is supported.
-2. Click **Send Test Message**.
+1. Use the **Send Slack notifications** switch to turn admin alerts on or off. Off
+   silences every admin alert — new submissions and generated documents — even when a
+   webhook is configured. The switch is on by default.
+2. With notifications on, enter a **Subject** and optional **Body**. Slack formatting
+   such as `*bold*` and `` `code` `` is supported.
+3. Click **Send Test Message**.
 
-A confirmation appears when the message is delivered.
+A confirmation appears when the message is delivered. While notifications are off, the
+test button is disabled and nothing is sent.
+
+> **Note:** A webhook URL must be set (`SLACK_WEBHOOK_URL`) for anything to be delivered.
+> The switch only decides whether a configured webhook is used.
 
 ## 2.16 Organizations
 

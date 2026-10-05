@@ -204,8 +204,14 @@ export interface RoleUsageReport {
 export type LoginMode = "select" | "password" | "maintenance";
 
 // App setting keys the client can read/write. `documents_link` stores a JSON
-// role array; `login_mode` / `maintenance_message` back the Login Mode feature.
-export type AppSettingKey = "login_mode" | "maintenance_message" | "documents_link" | "menu_items";
+// role array; `login_mode` / `maintenance_message` back the Login Mode feature;
+// `slack_notifications_enabled` is the Slack alert on/off switch ("true"/"false").
+export type AppSettingKey =
+  | "login_mode"
+  | "maintenance_message"
+  | "documents_link"
+  | "menu_items"
+  | "slack_notifications_enabled";
 
 // A user row for the select-mode login dropdown (no password hash, no school).
 export interface LoginUser {

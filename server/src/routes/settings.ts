@@ -3,7 +3,7 @@ import { getSetting, setSetting } from "../db/queries.js";
 import { requireAuth, requireRoles } from "../auth.js";
 import { getRolesCache } from "../db/roles-cache.js";
 import { env } from "../config/env.js";
-import { notifySlack } from "../notify/slack.js";
+import { notifySlack, SLACK_ENABLED_KEY, SLACK_ENABLED_VALUES, slackNotificationsEnabled } from "../notify/slack.js";
 
 export const settingsRouter = Router();
 
@@ -31,12 +31,15 @@ export type MenuItemKey = (typeof MENU_ITEM_KEYS)[number];
 
 // Allow-list of keys that can be read/written. Never let an arbitrary key hit
 // the store. `login_mode` and `maintenance_message` back the Login Mode feature;
-// `documents_link` controls whether the Documents sidebar link is visible, by role.
+// `documents_link` controls whether the Documents sidebar link is visible, by
+// role; `slack_notifications_enabled` is the Slack alert on/off switch, read by
+// notify/slack.ts before every send.
 export const ALLOWED_SETTING_KEYS = new Set([
   "login_mode",
   "maintenance_message",
   DOCUMENTS_LINK_KEY,
   MENU_ITEMS_KEY,
+  SLACK_ENABLED_KEY,
 ]);
 
 // Valid login modes. Used both for the env override and to validate a PUT.
@@ -65,6 +68,11 @@ function defaultValue(key: string): string {
   if (key === MENU_ITEMS_KEY) {
     // Every menu item visible to everyone by default (null = unrestricted).
     return JSON.stringify(defaultMenuItems());
+  }
+  if (key === SLACK_ENABLED_KEY) {
+    // ON by default, so an installation created before this switch existed keeps
+    // sending exactly as it did. See slackNotificationsEnabled() in notify/slack.ts.
+    return "true";
   }
   return "select"; // login_mode
 }
@@ -237,6 +245,10 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
       res.status(400).json({ error: `Invalid login mode: ${value}` });
       return;
     }
+    if (key === SLACK_ENABLED_KEY && !SLACK_ENABLED_VALUES.has(value.trim().toLowerCase())) {
+      res.status(400).json({ error: `Invalid value for ${key}: ${value} (expected "true" or "false")` });
+      return;
+    }
 
     let effective = value.trim();
     if (key === DOCUMENTS_LINK_KEY) {
@@ -304,6 +316,10 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
       effective = JSON.stringify(normalized);
     } else if (key === "login_mode") {
       effective = value.trim().toLowerCase();
+    } else if (key === SLACK_ENABLED_KEY) {
+      // Store the canonical lower-case "true"/"false" so a reader never has to
+      // guess at casing (the value was validated above).
+      effective = value.trim().toLowerCase();
     }
 
     const stored = await setSetting(key, effective);
@@ -319,6 +335,11 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
 // Lets an admin verify the SLACK_WEBHOOK_URL and preview how a notification
 // renders. Subject is sent bold; the optional body follows on a new line. Both
 // support Slack mrkdwn formatting (*bold*, _italic_, `code`, >quote, links).
+//
+// ★ The test obeys the admin's on/off switch (Settings → Slack Notifications):
+// with notifications off, nothing is sent here either. The response says so
+// explicitly rather than reporting a generic send failure, because "nothing was
+// sent" is then the correct, deliberate outcome.
 // -----------------------------------------------------------------------------
 settingsRouter.post("/slack/test", requireAuth, requireRoles("admin"), async (req, res, next) => {
   try {
@@ -329,14 +350,17 @@ settingsRouter.post("/slack/test", requireAuth, requireRoles("admin"), async (re
       return;
     }
 
-    const configured = !!env.slack.webhookUrl;
-    const text = `*${subject}*${body ? `\n\n${body}` : ""}`;
-    const sent = configured ? await notifySlack({ text }) : false;
-
-    if (!configured) {
+    if (!env.slack.webhookUrl) {
       res.status(400).json({ ok: false, error: "Slack webhook is not configured. Set SLACK_WEBHOOK_URL and restart the server." });
       return;
     }
+    if (!(await slackNotificationsEnabled())) {
+      res.status(400).json({ ok: false, error: "Slack notifications are turned off. Turn them on in Settings → Slack Notifications to send a test." });
+      return;
+    }
+
+    const text = `*${subject}*${body ? `\n\n${body}` : ""}`;
+    const sent = await notifySlack({ text });
     if (!sent) {
       res.status(400).json({ ok: false, error: "Slack send failed. Check the webhook URL and the server logs." });
       return;
