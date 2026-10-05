@@ -453,6 +453,13 @@ export default function AdminSettings() {
   const [menuItems, setMenuItems] = useState<Record<MenuItemKey, string[] | null>>(defaultMenuItems);
   const [menuBusy, setMenuBusy] = useState(false);
 
+  // Slack Notifications section state. `slackEnabled` is the admin's on/off
+  // switch (app setting `slack_notifications_enabled`, default ON). While it is
+  // off the server sends nothing — see server/src/notify/slack.ts — so the test
+  // below is disabled too, rather than reporting a failure the admin cannot fix.
+  const [slackEnabled, setSlackEnabled] = useState(true);
+  const [slackEnabledBusy, setSlackEnabledBusy] = useState(false);
+
   // Slack test panel state — subject, body, and a busy flag.
   const [slackSubject, setSlackSubject] = useState("Test notification");
   const [slackBody, setSlackBody] = useState(
@@ -530,18 +537,22 @@ export default function AdminSettings() {
     // Load the Login Mode + maintenance settings (separate try so a settings
     // failure never blocks the users/orgs panels).
     try {
-      const [mode, info, msg, docs, menu] = await Promise.all([
+      const [mode, info, msg, docs, menu, slack] = await Promise.all([
         api.getPublicSetting("login_mode"),
         api.getInfo(),
         api.getPublicSetting("maintenance_message"),
         api.getPublicSetting("documents_link"),
         api.getPublicSetting("menu_items"),
+        api.getPublicSetting("slack_notifications_enabled"),
       ]);
       setLoginMode((mode.value as LoginMode) || "select");
       setLoginModeOverride(info.loginModeOverride);
       if (msg.value) setMaintenanceMessage(msg.value);
       setDocRoles(parseDocumentRoles(docs.value));
       setMenuItems(parseMenuItems(menu.value));
+      // Default ON when unset/blank, mirroring the server's default so the switch
+      // never renders "off" for a setting that has never been written.
+      setSlackEnabled(slack.value.trim().toLowerCase() !== "false");
     } catch {
       // keep defaults
     }
@@ -955,6 +966,29 @@ export default function AdminSettings() {
       setError(err instanceof ApiError ? err.message : "Could not update menu visibility");
     } finally {
       setMenuBusy(false);
+    }
+  };
+
+  // Turn admin Slack alerts on or off. Optimistic with rollback, matching the
+  // other switches on this page. Stored as the string "true"/"false"; the server
+  // reads it in notify/slack.ts and skips EVERY send while it is "false".
+  const toggleSlackEnabled = async (next: boolean) => {
+    setError("");
+    setSlackEnabledBusy(true);
+    const prev = slackEnabled;
+    setSlackEnabled(next);
+    try {
+      await api.updateSetting("slack_notifications_enabled", next ? "true" : "false");
+      setMessage(
+        next
+          ? "Slack notifications turned on."
+          : "Slack notifications turned off. No admin alerts will be sent."
+      );
+    } catch (err) {
+      setSlackEnabled(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update Slack notifications");
+    } finally {
+      setSlackEnabledBusy(false);
     }
   };
 
@@ -1859,11 +1893,29 @@ export default function AdminSettings() {
         </div>
       </CollapsibleSection>
 
-      {/* Slack test panel — send a test message to verify the admin alert webhook */}
+      {/* Slack notifications — the on/off switch plus a test panel to verify the
+          admin alert webhook. */}
       <CollapsibleSection
         title="Slack Notifications"
-        subtitle="Send a test message to verify the admin alert webhook"
+        subtitle="Turn admin alerts on or off, and send a test message"
       >
+        {/* The master switch. Its label is its children, so the visible words are
+            the checkbox's accessible name (see components/Toggle.tsx). */}
+        <div style={{ margin: "0 0 14px" }}>
+          <Toggle
+            checked={slackEnabled}
+            disabled={slackEnabledBusy}
+            onChange={(v) => void toggleSlackEnabled(v)}
+          >
+            Send Slack notifications
+          </Toggle>
+          <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "6px 0 0" }}>
+            {slackEnabled
+              ? "Admin alerts are delivered to Slack when a webhook is configured."
+              : "Off — no admin alerts are sent, even when a webhook is configured."}
+          </p>
+        </div>
+
         <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
           Admin alerts (new submissions, generated documents) are delivered to{" "}
           <strong>Slack</strong> through a webhook. Use this panel to verify the webhook
@@ -1893,15 +1945,20 @@ export default function AdminSettings() {
               placeholder="Message body — Slack markdown supported"
             />
           </div>
-          <button
-            type="button"
-            className="primary-button"
-            disabled={slackBusy || !slackSubject.trim()}
-            onClick={() => void sendSlackTest()}
-            style={{ alignSelf: "flex-start" }}
-          >
-            {slackBusy ? "Sending…" : "Send Test Message"}
-          </button>
+          <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className="primary-button"
+              disabled={slackBusy || !slackSubject.trim() || !slackEnabled}
+              onClick={() => void sendSlackTest()}
+              style={{ alignSelf: "flex-start" }}
+            >
+              {slackBusy ? "Sending…" : "Send Test Message"}
+            </button>
+            {!slackEnabled && (
+              <span className="muted-note">Turn notifications on to send a test.</span>
+            )}
+          </div>
         </div>
       </CollapsibleSection>
 

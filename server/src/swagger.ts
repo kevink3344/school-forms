@@ -553,10 +553,10 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/settings/{key}": {
         get: {
           tags: ["Settings"],
-          summary: "Get a public app setting (login_mode / maintenance_message / documents_link)",
+          summary: "Get a public app setting (login_mode / maintenance_message / documents_link / menu_items / slack_notifications_enabled)",
           security: [],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "menu_items", "slack_notifications_enabled"] } },
           ],
           responses: {
             "200": {
@@ -578,7 +578,7 @@ export function buildSwaggerSpec(req?: Request) {
           summary: "Update an app setting (admin only)",
           security: [{ [bearerScheme]: [] }],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "menu_items", "slack_notifications_enabled"] } },
           ],
           requestBody: {
             required: true,
