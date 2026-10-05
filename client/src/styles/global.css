@@ -353,6 +353,7 @@ p { margin: 0; }
 .secondary-button,
 .filter-group select,
 .filter-group input:not([type="checkbox"]):not([type="radio"]),
+.window-select,
 .edit-select,
 input.edit-input {
   height: var(--control-h);
@@ -580,6 +581,17 @@ input.edit-input {
 }
 .filter-group input:hover, .filter-group select:hover { border-color: var(--accent); }
 .filter-group input:focus, .filter-group select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(22,87,136,.14); }
+
+/* The Webhook intake strip's window picker. That strip is a plain card row, not
+   a .filter-bar, so this bare <select> carries the toolbar field styling itself
+   (its height comes from the shared control-sizing family above). */
+.window-select {
+  border: 1px solid var(--border); background: var(--input-bg); color: var(--text);
+  border-radius: var(--radius); outline: none; padding: 0 10px; font-size: 0.8125rem;
+  transition: border-color .13s ease;
+}
+.window-select:hover { border-color: var(--accent); }
+.window-select:focus { border-color: var(--accent); box-shadow: 0 0 0 3px rgba(22,87,136,.14); }
 
 .filter-spacer { flex: 1; }
 .filter-bar .clear { font-size: 0.75rem; color: var(--accent); background: none; border: none; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700; padding: 4px; }
