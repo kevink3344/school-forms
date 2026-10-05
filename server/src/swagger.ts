@@ -2546,12 +2546,18 @@ export function buildSwaggerSpec(req?: Request) {
           tags: ["Webhooks"],
           summary: "Webhook counters for the dashboard and the republish prompt (admin)",
           description:
-            "Counts only, no rows. `window` is the last `days` days; `form` is present when " +
-            "`form_id` is supplied and gives that form's all-time totals, which is how the " +
-            "publish prompt knows there are responses waiting to be replayed.",
+            "Counts only, no rows. `window` is the last `days` days, or all time when `days` is " +
+            "0; `form` is present when `form_id` is supplied and gives that form's all-time " +
+            "totals, which is how the publish prompt knows there are responses waiting to be " +
+            "replayed.",
           security: [{ [bearerScheme]: [] }],
           parameters: [
-            { name: "days", in: "query", schema: { type: "integer", default: 7, maximum: 365 } },
+            {
+              name: "days",
+              in: "query",
+              description: "Trailing window in days. `0` means all time.",
+              schema: { type: "integer", default: 7, minimum: 0, maximum: 365 },
+            },
             { name: "form_id", in: "query", schema: { type: "integer" } },
           ],
           responses: {

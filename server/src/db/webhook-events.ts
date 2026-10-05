@@ -500,20 +500,27 @@ export async function hasSuccessfulReplay(id: number): Promise<boolean> {
  * A small aggregate for the admin dashboard: how many intake attempts landed in
  * the last N days, split by outcome. Uses a bound cutoff rather than
  * `DATEADD`/`datetime('now')` so the single statement is valid on both dialects.
+ *
+ * `days <= 0` means ALL TIME — the dashboard's window picker offers it. The
+ * cutoff is dropped entirely rather than computed, because a cutoff of `now`
+ * would match nothing and report a confident "0 failed" over a full log.
  */
 export async function countRecentWebhookEvents(
   days = 7,
   organizationId?: number
 ): Promise<{ succeeded: number; failed: number }> {
-  const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  const allTime = days <= 0;
   const scoped = organizationId !== undefined;
+  const params: Record<string, unknown> = {};
+  if (!allTime) params.cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+  if (scoped) params.organizationId = organizationId;
   const rows = await execute<{ status: string; n: number }>(
     `SELECT e.status AS status, COUNT(*) AS n
        FROM dbo.webhook_events e
-      WHERE e.received_at >= @cutoff
+      WHERE ${allTime ? "1 = 1" : "e.received_at >= @cutoff"}
         ${scoped ? "AND e.organization_id = @organizationId" : ""}
       GROUP BY e.status`,
-    scoped ? { cutoff, organizationId } : { cutoff }
+    params
   );
 
   let succeeded = 0;

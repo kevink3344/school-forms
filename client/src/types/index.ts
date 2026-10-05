@@ -675,6 +675,9 @@ export interface WebhookEventPage {
 }
 
 export interface WebhookEventSummary {
+  /** The window these counters cover. `0` means all time — the dashboard's
+   *  "All" option — and is echoed back rather than normalized, so the UI never
+   *  has to guess which window it is showing. */
   days: number;
   /** The trailing-window counters for the dashboard (Q9). */
   window: { succeeded: number; failed: number };

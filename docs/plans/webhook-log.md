@@ -716,7 +716,7 @@ recommendations above are kept for the reasoning, not as the spec.
 | **Q6** | **No Slack alert** on webhook failure | The dashboard counters and the republish prompt are the notification surface. |
 | **Q7** | **Option C** — override `school_year` from the original `received_at`; leave `submitted_at` at replay time | Option B (`submitted_at` preservation) was explicitly declined. |
 | **Q8** | Keep **indefinitely**, with a warning above **100,000** rows | No pruning implemented. See §7. |
-| **Q9** | **Yes** — dashboard shows webhook ok/failed counts (7 days) linking to the filtered log | The counters deliberately ignore the submission grid's own form/school filters. |
+| **Q9** | **Yes** — dashboard shows webhook ok/failed counts (7 / 30 days / all time, picker on the strip) linking to the filtered log | The counters deliberately ignore the submission grid's own form/school filters. The window maps to `days` on `/api/webhook/events/summary`, where `0` means all time. |
 
 ### One consequence worth stating plainly
 

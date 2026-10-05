@@ -46,10 +46,13 @@ export default function AdminDashboard() {
   const [submissions, setSubmissions] = useState<SubmissionRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [exportOpen, setExportOpen] = useState(false);
-  // Q9: the org-wide webhook intake counts for the last 7 days. Null until they
-  // arrive — a strip reporting "0 failed" before the request lands would be a
-  // false all-clear on the one number that matters most.
+  // Q9: the org-wide webhook intake counts over the window below. Null until
+  // they arrive — a strip reporting "0 failed" before the request lands would be
+  // a false all-clear on the one number that matters most.
   const [webhook, setWebhook] = useState<WebhookEventSummary | null>(null);
+  // The window the strip counts over: 7, 30, or 0 for all time (the server's
+  // contract — see WebhookEventSummary.days).
+  const [webhookDays, setWebhookDays] = useState(7);
   // How many rows this filter is hiding, and how many it would show if the
   // archive toggle went the other way. Null until they arrive: a strip reading
   // "0 archived" before the request lands is a false all-clear on the number
@@ -213,7 +216,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     let cancelled = false;
     api
-      .getWebhookEventSummary({ days: 7 })
+      .getWebhookEventSummary({ days: webhookDays })
       .then((s) => {
         if (!cancelled) setWebhook(s);
       })
@@ -224,7 +227,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [webhookDays]);
 
   const setFilter = (key: TextFilterKey, value: string) =>
     setFilters((prev) => ({ ...prev, [key]: value }));
@@ -318,10 +321,10 @@ export default function AdminDashboard() {
 
       {/* A silently-rejected response looks exactly like a form nobody filled in,
           so the intake counters sit on the dashboard rather than only inside the
-          log. It is a link because the useful next step is always the log. */}
+          log. The counters are a link because the useful next step is always the
+          log; the window picker beside it re-scopes them (7 / 30 / all time). */}
       {webhook && (
-        <Link
-          to={webhook.window.failed > 0 ? "/admin/webhooks?status=failed" : "/admin/webhooks"}
+        <div
           className="card"
           style={{
             display: "flex",
@@ -330,30 +333,52 @@ export default function AdminDashboard() {
             flexWrap: "wrap",
             padding: "10px 14px",
             marginBottom: 16,
-            textDecoration: "none",
-            color: "var(--text)",
             fontSize: "0.8125rem",
           }}
         >
-          <Webhook size={16} />
-          <span>
-            <strong>Webhook intake</strong> — last {webhook.days} days
-          </span>
-          <span className="badge badge-green">{webhook.window.succeeded} delivered</span>
-          {webhook.window.failed > 0 && (
-            <span className="badge badge-red">{webhook.window.failed} failed</span>
-          )}
-          {webhook.unattributed > 0 && (
-            <span className="badge badge-slate" title="Attempts that could not be attributed to a form">
-              {webhook.unattributed} unattributed
+          <Link
+            to={webhook.window.failed > 0 ? "/admin/webhooks?status=failed" : "/admin/webhooks"}
+            style={{
+              display: "flex",
+              alignItems: "center",
+              gap: 10,
+              flexWrap: "wrap",
+              textDecoration: "none",
+              color: "var(--text)",
+            }}
+          >
+            <Webhook size={16} />
+            <strong>Webhook intake</strong>
+            <span className="badge badge-green">{webhook.window.succeeded} delivered</span>
+            {webhook.window.failed > 0 && (
+              <span className="badge badge-red">{webhook.window.failed} failed</span>
+            )}
+            {webhook.unattributed > 0 && (
+              <span className="badge badge-slate" title="Attempts that could not be attributed to a form">
+                {webhook.unattributed} unattributed
+              </span>
+            )}
+            <span className="head-hint">
+              {webhook.window.failed > 0
+                ? "Click to see what was rejected — and re-send it"
+                : "View the full log"}
             </span>
-          )}
-          <span className="head-hint">
-            {webhook.window.failed > 0
-              ? "Click to see what was rejected — and re-send it"
-              : "View the full log"}
-          </span>
-        </Link>
+          </Link>
+          {/* The window picker is a SIBLING of the link, never inside it: a
+              <select> nested in an <a> hands the click to the link, so choosing
+              a window would navigate to the log instead of opening the menu. */}
+          <select
+            className="window-select"
+            aria-label="Webhook intake window"
+            value={webhookDays}
+            onChange={(e) => setWebhookDays(Number(e.target.value))}
+            style={{ marginLeft: "auto" }}
+          >
+            <option value={7}>Last 7 days</option>
+            <option value={30}>Last 30 days</option>
+            <option value={0}>All time</option>
+          </select>
+        </div>
       )}
 
       {/* Filter toolbar */}
