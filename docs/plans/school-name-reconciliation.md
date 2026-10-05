@@ -665,7 +665,7 @@ drawer · the two backfill scripts · tests.
 
 | file | change |
 |---|---|
-| `server/src/db/schema.ts` | `school_name_aliases` table + its unique index (via `indexGuard`); `submissions.declared_school_name` column batch; `SchoolAlias` type |
+| `server/src/db/schema.ts` | `school_name_aliases` table + its unique index (via `indexGuard`); the `schools` FK in its own `fkGuard` + type-guarded batch (**§18**); `submissions.declared_school_name` column batch; `SchoolAlias` type |
 | `server/src/db/dialect/turso.ts` | the table + index in `TURSO_DDL`; `declared_school_name` in the `submissions` CREATE and in `addColumns`; **§4.4.1** — the alias joins in `submissionSchoolNameSubquery` |
 | `server/src/db/dialect/sqlserver.ts` | **§4.4.1** — the alias joins in `submissionSchoolNameSubquery` (`addColumns` stays `[]` — the ladder is cumulative) |
 | `server/src/db/dialect/shared.ts` | optional: hoist the alias-join text so both dialects build it from one place (§4.4.1) |
@@ -729,6 +729,116 @@ upsert→relocate→delete round trip were run against the **live SQL Server** d
 
 **Still manual (by design):** `npm run backfill:declared-school` (dry run, then `-- --apply`) fills
 `declared_school_name` for rows that predate the column. New submissions populate it automatically.
+
+---
+
+## 18. Production schema catch-up (2026-10-04)
+
+**Symptom.** Settings → **School Name Matching** answered `Invalid column name 'declared_school_name'`
+on the production database, permanently, while staging was fine.
+
+**Root cause — the ladder aborted eleven batches before reaching that column.** Production
+(`wcpsssqlelasticpool` / `wcpss-google-forms`) is the database this app did **not** create: its
+`schools.id` is **`bigint`** and its string columns are `nvarchar(max)`. `v1` declared the new table's
+FK **inline**:
+
+```sql
+school_id INT NULL,
+CONSTRAINT FK_school_name_aliases_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id)
+```
+
+A foreign key between an `int` and a `bigint` column is refused (error **1750**, "Could not create
+constraint or index"). Inline, that refusal fails the whole `CREATE TABLE`, and because `run()`
+executes the ladder batch by batch and stops at the first failure, **every later batch was never
+applied** — including the `ALTER TABLE dbo.submissions ADD declared_school_name` the panel's query
+needs. Hence a permanent `Invalid column name` for a column the schema had declared for a week.
+
+The failure was invisible: `initDb()` logs only `err.message`, which named the constraint refusal
+inside one statement and said nothing about the eleven batches that silently did not run.
+
+**Fix (in the code, so it self-heals on every later deploy).** Two changes in `schema.ts`:
+
+1. The FK moved **out of the `CREATE TABLE` batch into its own** batch, reached through `fkGuard`
+   (never on the constraint's name) **and** a new `isSameTypeAs` guard that compares
+   `school_name_aliases.school_id` against `schools.id` through `sys.columns`/`sys.types`. Where the
+   two agree (every database this ladder created — `schools.id INT`) the FK is created exactly as
+   before; where the database declares `schools.id BIGINT` the FK is **skipped and the table is still
+   created**, so a type difference in a foreign database can no longer cost the app its schema.
+   `school_id` itself stays `INT`: the app reads and writes app school ids, and
+   [`school-id-space-repair.md`](./school-id-space-repair.md) keeps both databases on the same 235
+   school names.
+2. `driver/mssql.ts` now prefixes a ladder failure with **the failing batch's number, its total and
+   the statement's first 160 characters**, so "the ladder stopped here and everything after it is
+   unapplied" is in the log rather than inferred.
+
+**Applied by hand to production** (add-only: one empty table, its unique index, one nullable column —
+no row data written). Each batch on its own, in this order:
+
+```sql
+-- 1. the table (no FK; see the type guard above)
+IF OBJECT_ID('dbo.school_name_aliases', 'U') IS NULL
+CREATE TABLE dbo.school_name_aliases (
+  id             INT IDENTITY(1,1) PRIMARY KEY,
+  submitted_name NVARCHAR(200) NOT NULL,
+  display_name   NVARCHAR(200) NOT NULL,
+  school_id      INT NULL,
+  created_by     INT NULL,
+  created_at     DATETIME2 NOT NULL CONSTRAINT DF_school_name_aliases_created_at DEFAULT SYSUTCDATETIME()
+);
+
+-- 2. its unique index (its own batch — error 207)
+IF NOT EXISTS (SELECT 1 FROM sys.indexes WHERE name = 'UX_school_name_aliases_name')
+CREATE UNIQUE INDEX UX_school_name_aliases_name ON dbo.school_name_aliases(submitted_name);
+
+-- 3. the declared name the worklist groups by
+IF COL_LENGTH('dbo.submissions', 'declared_school_name') IS NULL
+ALTER TABLE dbo.submissions ADD declared_school_name NVARCHAR(200) NULL;
+```
+
+Batch 2 is the one the Turso `ON CONFLICT(submitted_name)` upsert depends on; do not skip it.
+
+**Verification run** (2026-10-04, against live production):
+
+| check | result |
+|---|---|
+| the four batches inside a rolled-back transaction, before applying | all four OK — the FK guard skipped, **no error 1750** |
+| after applying | `school_name_aliases` present, `UX_school_name_aliases_name` present, `declared_school_name` present, 92 submissions unchanged |
+| `listUnmatchedSchoolNames()` — the query that raised the error | returns rows, no error |
+| `school-alias-cache.ts`'s `SELECT submitted_name, school_id …` | returns rows, no error |
+| type guard on production — `int`(4) vs `bigint`(8) | **skipped**; `sys.foreign_keys` for the table stays 0 |
+| type guard on TEST — `int`(4) vs `int`(4) | **created**; the FK that database has had since `v1` is re-derived identically |
+| all **70** ladder batches in one rolled-back transaction on production | every batch OK; `sys.tables`, `sys.columns` and `submissions` counts identical before, inside and after |
+
+The `isSameTypeAs` guard compares **type name _and_ `max_length`**, so `varchar(64)` against
+`varchar(200)` is also caught rather than trusted. The whole-ladder run is the proof that the ladder
+is now **inert** on production: a `staging` → `production` slot swap can boot without changing a
+single object or row.
+
+**Still outstanding — which deployment renders the panel.** The panel the screenshot showed is
+served by a **slot** (`staging` / `sandbox`), not by the root app: the bundle the root app serves at
+`https://webform-hcf0e2gzgudjcsaq.eastus2-01.azurewebsites.net/assets/index-DvpwBmV5.js` contains
+**no** occurrence of `School Name Matching`, `declared_school_name`, `Unmatched` or `aliases/unmatched`
+(the only `School Name` hits are the submissions table's column header; `aliases` and `matching` come
+from lucide icons). So the root app's deployment predates the feature and is not the one that was
+failing. That is consistent with `deploy-azure.md` §5 — **a staging deploy points at production's
+database** — and it is why an app that looked "production" was querying a production table the ladder
+had never finished creating. With the schema now in place, whichever slot renders the panel will work.
+No CI workflow targets the root app; see `deploy-azure.md` §5.
+
+**Left as-is, deliberately:**
+
+- **The backfill has not been run on production.** `declared_school_name` is `NULL` on all 92
+  pre-existing rows, so the worklist is legitimately empty until
+  `npm run backfill:declared-school` (dry run first, then `-- --apply`) is run **against production**.
+  New submissions populate it themselves. Nothing is broken by waiting, and the panel shows an honest
+  zero rather than a wrong count.
+- **Production has no FK on this table**, by the guard above. That matches every other FK in that
+  database (`FK_forms_school_id`, `FK_users_school_id`, …) — all of them pre-date this app and none is
+  declared by the ladder.
+- **Eleven other ladder indexes cannot exist there** and the boot warning says so on every start:
+  their key columns are `nvarchar(max)`. `UX_users_email` is the one to know about — production has
+  **no unique constraint on `users.email` at all**. Unchanged by this work; see `schema.ts:677-712`.
+
 
 
 

@@ -54,6 +54,31 @@ describe("school_name_aliases DDL (both dialects)", () => {
     expect(ddl).toMatch(/school_id\s+INT NULL/);
   });
 
+  it("adds the school FK only where both columns are the same type", () => {
+    const ddl = sqlserverDialect.ddl.join("\n");
+    // The guard compares school_name_aliases.school_id with schools.id through
+    // sys.columns/sys.types, so an int→bigint pairing is skipped instead of
+    // failing the ladder (error 1750).
+    expect(ddl).toMatch(/c\.name = 'school_id'/);
+    expect(ddl).toMatch(/c2\.name = 'id'/);
+    expect(ddl).toMatch(/t\.name = \(SELECT t2\.name/);
+    expect(ddl).toMatch(/c\.max_length = \(SELECT c2\.max_length/);
+    // And it runs AFTER the CREATE TABLE it constrains.
+    expect(ddl.indexOf("CREATE TABLE dbo.school_name_aliases")).toBeLessThan(
+      ddl.indexOf("ALTER TABLE dbo.school_name_aliases ADD CONSTRAINT")
+    );
+  });
+
+  it("does NOT put the FK inside the CREATE TABLE batch", () => {
+    const ddl = sqlserverDialect.ddl.join("\n");
+    const from = ddl.indexOf("CREATE TABLE dbo.school_name_aliases");
+    const body = ddl.slice(from, ddl.indexOf(");", from));
+    // Inline, a refused FK fails the CREATE TABLE itself, and the ladder stops
+    // there: `declared_school_name` (the next batch) is never added, so the
+    // reconciliation routes answer `Invalid column name 'declared_school_name'`.
+    expect(body).not.toMatch(/FOREIGN KEY/);
+  });
+
   it("Turso declares the same table with a case-insensitive unique key", () => {
     const ddl = tursoDialect.ddl.join("\n");
     expect(ddl).toMatch(/CREATE TABLE IF NOT EXISTS school_name_aliases/);

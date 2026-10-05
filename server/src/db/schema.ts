@@ -632,6 +632,37 @@ function fkGuard(table: string, column: string, referenced: string): string {
   );
 }
 
+// True only when the two columns are declared with the SAME type — name and
+// length. A foreign key between an `int` and a `bigint` column is refused outright
+// (error 1750), and because the driver stops the ladder at the first failure that
+// one refusal aborts every batch after it. This app's own tables use `int` ids
+// while the database it did not create uses `bigint`, so a table this ladder
+// creates NEW there cannot carry a hard-coded `INT` FK to a column the other
+// database declares `BIGINT`. Note this is only ever a problem for a table the
+// ladder CREATES: on the database it did not create the legacy tables already
+// exist, `CREATE TABLE IF NOT EXISTS` skips them, and their own `bigint` columns
+// pair up with each other.
+function isSameTypeAs(
+  table: string,
+  column: string,
+  referenced: string,
+  referencedColumn: string
+): string {
+  return (
+    `EXISTS (SELECT 1 FROM sys.columns c\n` +
+    `               JOIN sys.types t ON t.user_type_id = c.user_type_id\n` +
+    `              WHERE c.object_id = OBJECT_ID('dbo.${table}')\n` +
+    `                AND c.name = '${column}'\n` +
+    `                AND t.name = (SELECT t2.name FROM sys.columns c2\n` +
+    `                                JOIN sys.types t2 ON t2.user_type_id = c2.user_type_id\n` +
+    `                               WHERE c2.object_id = OBJECT_ID('dbo.${referenced}')\n` +
+    `                                 AND c2.name = '${referencedColumn}')\n` +
+    `                AND c.max_length = (SELECT c2.max_length FROM sys.columns c2\n` +
+    `                                     WHERE c2.object_id = OBJECT_ID('dbo.${referenced}')\n` +
+    `                                       AND c2.name = '${referencedColumn}'))`
+  );
+}
+
 /**
  * Every index name a ladder declares, parsed out of its statements.
  *
@@ -1763,6 +1794,15 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // (this spelling is known not to be a school). The FK to `schools` is
   // NO ACTION: schools are not deleted today, and a cascade that could silently
   // drop every mapping (re-opening the mismatch) is not wanted.
+  //
+  // The FK is NOT declared inline. `school_id` is `INT` — correct for the
+  // database this app created, where `schools.id` is `INT IDENTITY` — but the
+  // database it did not create declares `schools.id BIGINT`, and a FK between the
+  // two types is refused (error 1750). Inline, that refusal fails the CREATE
+  // TABLE and the ladder aborts there, so `declared_school_name` (the batch right
+  // after it) is never applied and the reconciliation routes answer "Invalid
+  // column name 'declared_school_name'". The FK is therefore added in its own
+  // guarded batch below, and only where the two columns agree.
   // ---------------------------------------------------------------------
   `IF OBJECT_ID('dbo.school_name_aliases', 'U') IS NULL
    CREATE TABLE dbo.school_name_aliases (
@@ -1771,9 +1811,19 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      display_name   NVARCHAR(200) NOT NULL,
      school_id      INT NULL,
      created_by     INT NULL,
-     created_at     DATETIME2 NOT NULL CONSTRAINT DF_school_name_aliases_created_at DEFAULT SYSUTCDATETIME(),
-     CONSTRAINT FK_school_name_aliases_school FOREIGN KEY (school_id) REFERENCES dbo.schools(id)
+     created_at     DATETIME2 NOT NULL CONSTRAINT DF_school_name_aliases_created_at DEFAULT SYSUTCDATETIME()
    );`,
+
+  // Declared through fkGuard (never on the constraint's name) AND only when
+  // `school_name_aliases.school_id` and `schools.id` share a type, so a database
+  // whose `schools.id` is `bigint` ends up with the table but no FK instead of no
+  // table at all. Note `school_id` stays `INT` there rather than matching: the app
+  // reads and writes app school ids, which are small, and `school-id-space-repair.md`
+  // keeps both databases on the same 235 school names.
+  `${fkGuard("school_name_aliases", "school_id", "schools")}
+     AND ${isSameTypeAs("school_name_aliases", "school_id", "schools", "id")}
+     ALTER TABLE dbo.school_name_aliases ADD CONSTRAINT FK_school_name_aliases_school
+       FOREIGN KEY (school_id) REFERENCES dbo.schools(id);`,
 
   // Its own batch (a CREATE INDEX must not share a batch with the CREATE TABLE
   // that defines its columns — error 207) and declared through indexGuard so

@@ -128,6 +128,30 @@ function bindParams(request: sql.Request, params: DbParams): void {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Name the failing DDL batch.
+//
+// `run()` executes the ladder batch by batch and stops at the first failure, so
+// everything after the failing batch is silently unapplied. The message a driver
+// gives back names the SYMPTOM inside that one statement (`Could not create
+// constraint or index`), and `initDb()` logs only `err.message` — so the fact that
+// eleven later batches never ran, and that the route the user is looking at
+// depends on one of them, is nowhere in the log. Measured: production's ladder
+// stopped at the `school_name_aliases` batch, and the only visible evidence was
+// `Invalid column name 'declared_school_name'` in an unrelated Settings panel.
+// -----------------------------------------------------------------------------
+function describeFailingBatch(err: unknown, index: number, total: number, statement: string): Error {
+  const message = err instanceof Error ? err.message : String(err);
+  const collapsed = statement.replace(/\s+/g, " ").trim().slice(0, 160);
+  const note =
+    `DDL batch ${index + 1} of ${total} failed and every batch after it was not applied: ${collapsed}`;
+  if (err instanceof Error) {
+    err.message = `${message}\n  (${note})`;
+    return err;
+  }
+  return new Error(`${message}\n  (${note})`);
+}
+
 function transactionClient(transaction: Transaction): DbClient {
   return {
     kind: "sqlserver",
@@ -163,8 +187,17 @@ export const mssqlClient: DbClient = {
   async run(statements: string[]): Promise<void> {
     const db = await getPool();
     const request = db.request();
-    for (const statement of statements) {
-      await request.batch(statement);
+    // The ladder is cumulative and a failure aborts every batch after it, so the
+    // batch that threw is the one that names the real problem. Without it the only
+    // evidence is a downstream route failing on a column an unapplied batch would
+    // have added. The original error object is REUSED (not rewrapped) so callers
+    // that read driver fields such as `number` still can.
+    for (let index = 0; index < statements.length; index += 1) {
+      try {
+        await request.batch(statements[index]);
+      } catch (err) {
+        throw describeFailingBatch(err, index, statements.length, statements[index]);
+      }
     }
   },
 
