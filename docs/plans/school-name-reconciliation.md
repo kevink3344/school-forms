@@ -830,14 +830,64 @@ No CI workflow targets the root app; see `deploy-azure.md` §5.
 - **The backfill has not been run on production.** `declared_school_name` is `NULL` on all 92
   pre-existing rows, so the worklist is legitimately empty until
   `npm run backfill:declared-school` (dry run first, then `-- --apply`) is run **against production**.
-  New submissions populate it themselves. Nothing is broken by waiting, and the panel shows an honest
-  zero rather than a wrong count.
+  New submissions populate it themselves — `createSubmission` inserts `plan.schoolName`. Nothing is
+  broken by waiting, and the panel shows an honest zero rather than a wrong count. §18.1 lists exactly
+  what appears once it is run.
 - **Production has no FK on this table**, by the guard above. That matches every other FK in that
   database (`FK_forms_school_id`, `FK_users_school_id`, …) — all of them pre-date this app and none is
   declared by the ladder.
 - **Eleven other ladder indexes cannot exist there** and the boot warning says so on every start:
   their key columns are `nvarchar(max)`. `UX_users_email` is the one to know about — production has
   **no unique constraint on `users.email` at all**. Unchanged by this work; see `schema.ts:677-712`.
+
+### 18.1 What the worklist will show once the backfill is run
+
+Read only, so nobody re-debugs an empty panel. A projection was replayed against live production on
+2026-10-04 — each row through `planSubmissionFields(fields, answers, SCHOOL_FIELD_LABELS)` exactly as
+`backfill-declared-school.ts` does, then filtered and grouped exactly as `listUnmatchedSchoolNames()`
+does (`normalizeSchoolKey` is the same `LOWER(LTRIM(RTRIM(…)))` the worklist SQL uses, and the alias
+table is still empty, so the two agree row for row):
+
+| | count |
+|---|---|
+| active rows with a NULL `declared_school_name` | **86** |
+| …that declare a school (would gain a name) | **78** |
+| …whose form asks no school question (stay NULL, never listed) | **8** |
+| distinct spellings that already match a school name (no worklist entry) | **11** |
+| distinct spellings that do **not** match — the panel's first worklist | **6** |
+
+The six, in the order the panel will show them:
+
+| declared spelling | rows |
+|---|---|
+| Herbert Akins Middle School | 5 |
+| Moore Square Magnet Middle School | 3 |
+| Option 23 | 1 |
+| Southeast Raleigh Magnet High School | 1 |
+| Vernon Malone College & Career Academy | 1 |
+| Dillard Drive Magnet Middle School | 1 |
+
+Each is a real near-miss, **not** a parsing failure and **not** something normalisation could ever fix
+(the differences are words, not case or whitespace) — which is exactly why these need an admin decision
+and why `normalizeSchoolKey` is deliberately only `LOWER(LTRIM(RTRIM(…)))`:
+
+| declared spelling | closest canonical `dbo.schools` name | what differs |
+|---|---|---|
+| Herbert Akins Middle School | Herbert Akins Road Middle School | parent dropped "Road" |
+| Moore Square Magnet Middle School | Moore Square Middle School | parent added "Magnet" |
+| Southeast Raleigh Magnet High School | Southeast Raleigh High School | parent added "Magnet" |
+| Vernon Malone College & Career Academy | Vernon Malone College and Career Academy | "&" vs "and" |
+| Dillard Drive Magnet Middle School | Dillard Drive Middle School | parent added "Magnet" |
+| Option 23 | — none — | a program, not a school: the ignore case |
+
+Five of the six are the same shape — the parent wrote the school's marketing name — so five aliases and
+one ignore clear the whole list. It is also why the confirmation step matters: "Southeast Raleigh"
+matches both an Elementary and a High School in `dbo.schools`, so the admin's click is what decides which
+one the alias points at, and the alias is then taught to intake for every future submission from that form.
+
+The unfiltered dry run reports **92** rows / **83** declaring a school: `backfill-declared-school.ts`
+does not filter `archived_at`, so it also fills archived rows. A full run therefore produces a worklist
+very slightly larger than the six above.
 
 
 
