@@ -105,13 +105,17 @@ webhookEventsRouter.get("/", async (req, res, next) => {
 // `/summary` against `/:id` if the order were reversed — and `parseId("summary")`
 // would then 400 instead of returning counters.
 //
-// Query: days (default 7), form_id (optional)
+// Query: days (default 7; 0 = all time), form_id (optional)
 // -----------------------------------------------------------------------------
 webhookEventsRouter.get("/summary", async (req, res, next) => {
   try {
     const organizationId = scopeOf(req.user!);
-    const daysRaw = Number(req.query.days);
-    const days = Number.isInteger(daysRaw) && daysRaw > 0 && daysRaw <= 365 ? daysRaw : 7;
+    // `days=0` is the client's explicit "all time" (the dashboard's window
+    // picker). Absent or out-of-range values fall back to the 7-day default;
+    // 0 is deliberately NOT clamped up to 1, or the "All" option would silently
+    // report a single day.
+    const daysRaw = typeof req.query.days === "string" ? Number(req.query.days) : NaN;
+    const days = Number.isInteger(daysRaw) && daysRaw >= 0 && daysRaw <= 365 ? daysRaw : 7;
 
     const window = await countRecentWebhookEvents(days, organizationId);
 

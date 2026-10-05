@@ -1253,8 +1253,8 @@ export const api = {
 
   /**
    * The counters the dashboard (Q9) and the republish prompt (Q4) need without
-   * pulling a page of rows. `days` defaults to 7 server-side; `form_id` makes it
-   * per-form.
+   * pulling a page of rows. `days` defaults to 7 server-side and `0` means all
+   * time (the dashboard's window picker); `form_id` makes it per-form.
    */
   async getWebhookEventSummary(params: { days?: number; form_id?: number } = {}): Promise<WebhookEventSummary> {
     const qs = new URLSearchParams();
