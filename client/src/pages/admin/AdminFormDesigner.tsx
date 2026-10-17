@@ -588,67 +588,71 @@ export default function AdminFormDesigner() {
               <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
                 Optional link to the source Google Form. Shown to staff so they can open it.
               </div>
-
-              {/* Visibility — its OWN control, not part of the form's save.
-                  ★ Switching to private has a SIDE EFFECT on a different table
-                  (it grandfathers every School Contact who can see the form), so
-                  it goes through PATCH /api/forms/:id/visibility rather than
-                  riding along on a general form edit. The confirmation names the
-                  count, because a wrong number here locks people out. */}
-              <label style={{ marginTop: 12, display: "block" }}>Visibility</label>
-              <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                <select
-                  className="edit-select"
-                  value={form?.visibility ?? "public"}
-                  disabled={visibilityBusy}
-                  onChange={(e) => void changeVisibility(e.target.value as FormVisibility)}
-                >
-                  <option value="public">Public — everyone in the organization</option>
-                  <option value="private">Private — School Contacts need a grant</option>
-                </select>
-                {visibilityBusy && <span className="cell-sub">Saving…</span>}
-              </div>
-              <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
-                A private form is hidden from School Contacts unless an administrator grants access.
-                Administrators and staff always see it. Families can still submit either way.
-              </div>
-
-              {/* ★ The consequence of the flag, stated in bold, for the group the
-                  grandfather does NOT cover: accounts that come into being after
-                  the flip. They match no row in the backfill's `NOT EXISTS`, so
-                  they are simply invisible to the form and must ask.
-
-                  The date is the LAST public → private flip, derived server-side
-                  from the `backfilled` audit rows rather than from `updated_at` —
-                  `updated_at` moves on every title edit, which would name a date
-                  after the flip and wrongly promise that older registrations have
-                  to request access. `private_since` is null when no flip ever
-                  grandfathered anybody (a form created already private), and the
-                  message then says so instead of inventing a date.
-
-                  Only shown while the form IS private: on a public form the
-                  sentence describes a restriction that is not in force, and the
-                  date names a window that closing the form re-opened. */}
-              {form?.visibility === "private" && (
-                <div
-                  style={{ fontSize: "0.75rem", marginTop: 6, fontWeight: 600, lineHeight: 1.45 }}
-                >
-                  {form.private_since
-                    ? `Users who register after ${fmtDate(form.private_since)} will need to request access.`
-                    : "Users who register will need to request access — no account existed to keep when this form was made private."}
-                </div>
-              )}
-              {visibilityMsg && (
-                <div
-                  className="cell-sub"
-                  style={{ marginTop: 4, color: "var(--text)" }}
-                  role="status"
-                >
-                  {visibilityMsg}
-                </div>
-              )}
             </div>
           </div>
+        </div>
+      </div>
+
+      {/* Visibility gets its own card, level with Form Details and Fields. A
+          mis-set visibility silently locks people out, which is not a thing to
+          bury as the last field in a list of form details.
+
+          ★ Switching to private has a SIDE EFFECT on a different table (it
+          grandfathers every School Contact who can see the form), so it goes
+          through PATCH /api/forms/:id/visibility rather than riding along on a
+          general form edit. The confirmation names the count, because a wrong
+          number here locks people out. */}
+      <div className="card">
+        <div className="card-head">
+          <h3>Visibility</h3>
+        </div>
+        <div className="card-body">
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <select
+              className="edit-select"
+              aria-label="Visibility"
+              value={form?.visibility ?? "public"}
+              disabled={visibilityBusy}
+              onChange={(e) => void changeVisibility(e.target.value as FormVisibility)}
+            >
+              <option value="public">Public — everyone in the organization</option>
+              <option value="private">Private — School Contacts need a grant</option>
+            </select>
+            {visibilityBusy && <span className="cell-sub">Saving…</span>}
+          </div>
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 6 }}>
+            A private form is hidden from School Contacts unless an administrator grants access.
+            Administrators and staff always see it. Families can still submit either way.
+          </div>
+
+          {/* ★ The consequence of the flag, stated in bold, for the group the
+              grandfather does NOT cover: accounts that come into being after
+              the flip. They match no row in the backfill's `NOT EXISTS`, so
+              they are simply invisible to the form and must ask.
+
+              The date is the LAST public → private flip, derived server-side
+              from the `backfilled` audit rows rather than from `updated_at` —
+              `updated_at` moves on every title edit, which would name a date
+              after the flip and wrongly promise that older registrations have
+              to request access. `private_since` is null when no flip ever
+              grandfathered anybody (a form created already private), and the
+              message then says so instead of inventing a date.
+
+              Only shown while the form IS private: on a public form the
+              sentence describes a restriction that is not in force, and the
+              date names a window that closing the form re-opened. */}
+          {form?.visibility === "private" && (
+            <div style={{ fontSize: "0.75rem", marginTop: 8, fontWeight: 600, lineHeight: 1.45 }}>
+              {form.private_since
+                ? `Users who register after ${fmtDate(form.private_since)} will need to request access.`
+                : "Users who register will need to request access — no account existed to keep when this form was made private."}
+            </div>
+          )}
+          {visibilityMsg && (
+            <div className="cell-sub" style={{ marginTop: 6, color: "var(--text)" }} role="status">
+              {visibilityMsg}
+            </div>
+          )}
         </div>
       </div>
 
