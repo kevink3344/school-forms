@@ -4,6 +4,8 @@ import {
   AccessRequestError,
   countPendingAccessRequests,
   decideFormAccess,
+  dismissFormAccessNotice,
+  listFormAccessNotices,
   listAccessForUser,
   listAccessGrantsFor,
   listAccessRequests,
@@ -24,7 +26,8 @@ export const formAccessRouter = Router();
 //
 // Two audiences in one file, so no route inherits a router-level guard:
 //
-//   * three SELF-SERVICE routes (`/mine`, `/requests`, `/requests/withdraw`) —
+//   * self-service routes (`/mine`, `/notices`, `/notices/:eventId/dismiss`,
+//     `/requests`, `/requests/withdraw`) —
 //     any signed-in role, because the whole point is that a restricted person can
 //     ask for what they cannot read;
 //   * the ADMIN routes (`GET /requests`, `POST /requests/decide`, `GET /grants`,
@@ -56,6 +59,44 @@ function orgId(user: { organization_id?: unknown }): number {
 formAccessRouter.get("/mine", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     res.json(await listLockedFormsFor(req.user!, orgId(req.user!)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Any signed-in role: newly approved form grants that have not been dismissed.
+formAccessRouter.get("/notices", requireAuth, async (req, res, next) => {
+  try {
+    const userId = parseId(req.user!.id);
+    if (userId === null) {
+      res.status(401).json({ error: "Invalid user identity" });
+      return;
+    }
+    res.json(await listFormAccessNotices(userId, orgId(req.user!)));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Close one of my own grant notices. Repeat dismissals are idempotent.
+formAccessRouter.post("/notices/:eventId/dismiss", requireAuth, async (req, res, next) => {
+  try {
+    const userId = parseId(req.user!.id);
+    const eventId = parseId(req.params.eventId);
+    if (userId === null) {
+      res.status(401).json({ error: "Invalid user identity" });
+      return;
+    }
+    if (eventId === null) {
+      res.status(400).json({ error: "Invalid access notice id" });
+      return;
+    }
+    const dismissed = await dismissFormAccessNotice(eventId, userId);
+    if (!dismissed) {
+      res.status(404).json({ error: "Form access notice not found" });
+      return;
+    }
+    res.json({ dismissed: true });
   } catch (err) {
     next(err);
   }

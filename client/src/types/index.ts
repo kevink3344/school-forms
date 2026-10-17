@@ -325,6 +325,7 @@ export interface AvailableForm {
   title: string;
   description: string | null;
   code: string | null;
+  visibility: FormVisibility;
   access: FormAccess;
   /** Only on a granted row: why it is readable. */
   reason?: "role" | "public" | "grant";
@@ -360,6 +361,13 @@ export interface AccessEventRow {
   actor_name: string | null;
   note: string | null;
   created_at: string;
+}
+
+/** An approved form grant that has not been dismissed by its recipient. */
+export interface FormAccessNotice {
+  event_id: number;
+  form_id: number;
+  form_title: string;
 }
 
 /** One account's relationship to a form, with its full history. */

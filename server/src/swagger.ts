@@ -1796,6 +1796,37 @@ export function buildSwaggerSpec(req?: Request) {
           responses: { "200": { description: "OK — the locked forms" } },
         },
       },
+      "/api/form-access/notices": {
+        get: {
+          tags: ["Form Access"],
+          summary: "Newly approved form access notices for the current user",
+          description:
+            "Returns the latest approved or backfilled grant event for each form the current user can still access, excluding notices they have dismissed.",
+          security: [{ [bearerScheme]: [] }],
+          responses: { "200": { description: "OK — the undismissed access notices" } },
+        },
+      },
+      "/api/form-access/notices/{eventId}/dismiss": {
+        post: {
+          tags: ["Form Access"],
+          summary: "Dismiss one of my form access notices",
+          description: "Dismisses an access notice belonging to the current user. Repeated dismissals are idempotent.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            {
+              name: "eventId",
+              in: "path",
+              required: true,
+              schema: { type: "integer", minimum: 1 },
+            },
+          ],
+          responses: {
+            "200": { description: "Dismissed" },
+            "400": { description: "Invalid notice id" },
+            "404": { description: "Notice not found for the current user" },
+          },
+        },
+      },
       "/api/form-access/requests": {
         get: {
           tags: ["Form Access"],

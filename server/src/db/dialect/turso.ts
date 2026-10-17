@@ -303,6 +303,12 @@ const TURSO_DDL: string[] = [
      note       TEXT,
      created_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
+  `CREATE TABLE IF NOT EXISTS form_access_notice_dismissals (
+     event_id     INTEGER NOT NULL,
+     user_id      INTEGER NOT NULL,
+     dismissed_at TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
+     PRIMARY KEY (event_id, user_id)
+   )`,
 
   // Carry the one legacy forms.view_columns value over to the form's designer,
   // who is the person most likely to have set it. Idempotent, and deliberately

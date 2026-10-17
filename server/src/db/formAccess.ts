@@ -46,6 +46,7 @@ export interface AvailableForm {
   title: string;
   description: string | null;
   code: string | null;
+  visibility: FormVisibility;
   access: "granted" | "none" | "pending" | "denied";
   /** Only on a granted row: why it is readable. */
   reason?: "public" | "grant" | "role";
@@ -56,9 +57,79 @@ export interface AvailableForm {
   last_event?: FormAccessEvent | null;
 }
 
+/** One newly approved access grant the user has not dismissed yet. */
+export interface FormAccessNotice {
+  event_id: number;
+  form_id: number;
+  form_title: string;
+}
+
 // -----------------------------------------------------------------------------
 // Reads
 // -----------------------------------------------------------------------------
+
+/**
+ * The latest active grant event for each form the user can currently access.
+ * Looking at the latest grant event means a re-approval creates a fresh notice,
+ * while a revoked grant cannot produce a notice.
+ */
+export async function listFormAccessNotices(
+  userId: number,
+  organizationId: number
+): Promise<FormAccessNotice[]> {
+  return execute<FormAccessNotice>(
+    `SELECT e.id AS event_id, e.form_id, f.title AS form_title
+       FROM dbo.form_access_events e
+       JOIN dbo.form_access a ON a.user_id = e.user_id AND a.form_id = e.form_id
+       JOIN dbo.forms f ON f.id = e.form_id
+      WHERE e.user_id = @userId
+        AND f.organization_id = @organizationId
+        AND a.status = 'approved'
+        AND e.event IN ('approved', 'backfilled')
+        AND e.id = (
+          SELECT MAX(latest.id)
+            FROM dbo.form_access_events latest
+           WHERE latest.user_id = e.user_id
+             AND latest.form_id = e.form_id
+             AND latest.event IN ('approved', 'backfilled')
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM dbo.form_access_notice_dismissals d
+           WHERE d.event_id = e.id AND d.user_id = e.user_id
+        )
+      ORDER BY e.created_at DESC, e.id DESC`,
+    { userId, organizationId }
+  );
+}
+
+/**
+ * Dismiss a grant notice for its owner. Event ids are validated against the
+ * user's own approval history before the idempotent dismissal is inserted.
+ */
+export async function dismissFormAccessNotice(
+  eventId: number,
+  userId: number
+): Promise<boolean> {
+  const events = await execute<{ id: number }>(
+    `SELECT id
+       FROM dbo.form_access_events
+      WHERE id = @eventId AND user_id = @userId
+        AND event IN ('approved', 'backfilled')`,
+    { eventId, userId }
+  );
+  if (events.length === 0) return false;
+
+  await execute(
+    `INSERT INTO dbo.form_access_notice_dismissals (event_id, user_id)
+     SELECT @eventId, @userId
+      WHERE NOT EXISTS (
+        SELECT 1 FROM dbo.form_access_notice_dismissals
+         WHERE event_id = @eventId AND user_id = @userId
+      )`,
+    { eventId, userId }
+  );
+  return true;
+}
 
 /**
  * Every PUBLISHED form in the organization, each with the caller's relationship.
@@ -134,6 +205,7 @@ export async function listAvailableFormsFor(
         title: f.title,
         description: f.description,
         code: f.code,
+        visibility: f.visibility,
         access: "granted" as const,
         reason: "role" as const,
       };
@@ -144,6 +216,7 @@ export async function listAvailableFormsFor(
         title: f.title,
         description: f.description,
         code: f.code,
+        visibility: f.visibility,
         access: "granted" as const,
         reason: "public" as const,
       };
@@ -154,6 +227,7 @@ export async function listAvailableFormsFor(
         title: f.title,
         description: f.description,
         code: f.code,
+        visibility: f.visibility,
         access: "granted" as const,
         reason: "grant" as const,
       };
@@ -164,6 +238,7 @@ export async function listAvailableFormsFor(
         title: f.title,
         description: f.description,
         code: f.code,
+        visibility: f.visibility,
         access: "pending" as const,
         requested_at: row.requested_at,
       };
@@ -174,6 +249,7 @@ export async function listAvailableFormsFor(
         title: f.title,
         description: f.description,
         code: f.code,
+        visibility: f.visibility,
         access: "denied" as const,
         decided_at: row.decided_at,
         note: row.note,
@@ -185,6 +261,7 @@ export async function listAvailableFormsFor(
       title: f.title,
       description: f.description,
       code: f.code,
+      visibility: f.visibility,
       access: "none" as const,
     };
   });

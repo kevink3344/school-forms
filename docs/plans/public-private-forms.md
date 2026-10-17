@@ -1078,7 +1078,7 @@ Returns every published form in the caller's organisation, each with the caller'
   `listLockedFormsFor` does. Reuse that function's join rather than writing a second one.
 - **`reason`** on a granted row is `public` or `grant`, so the page can say *"public"* beside a form nobody
   had to grant — which is what stops a reader concluding every form needs a request.
-- **No new route family, no new table.** This is a read over `forms` + `form_access`, both of which §5
+- **No new route family or table for this endpoint.** This is a read over `forms` + `form_access`, both of which §5
   already creates. It is registered in `inventory.ts` **and** `swagger.ts` like every other route (§8), and
   it is labelled `staff` in the inventory vocabulary (open to staff, School Contacts and admins).
 - **★ It is NOT `GET /api/forms` and must not replace it.** `GET /api/forms` answers *"what may I read?"*
@@ -1128,6 +1128,15 @@ a sibling of the queue, not of Settings.
 - **The page must not compute visibility.** It renders `access` from the payload. Any `if (form.visibility
   === 'private')` in this component is the "client hides, it never decides" violation (§4.1) and the
   "two overlapping gates" trap (§13 trap 3). The server already said what the relationship is.
+
+**New grant notice:** after sign-in, the app shows a dismissible banner for each newly approved (or
+grandfathered) form grant that remains active. Closing a banner is saved per user, so it stays closed on
+later logins and does not affect other users. Re-approval creates a new notice; revoked access is not
+announced as active. The banner links to Available Forms.
+
+`GET /api/form-access/notices` returns the current user's undismissed grant notices.
+`POST /api/form-access/notices/{eventId}/dismiss` records a per-user dismissal in
+`form_access_notice_dismissals`; that table is separate from the append-only access audit.
 
 ### 16.6 Does an admin need this page?
 

@@ -120,6 +120,7 @@ export default function AvailableForms() {
                 <thead>
                   <tr>
                     <th>Form</th>
+                    <th>Visibility</th>
                     <th>Access</th>
                     <th />
                   </tr>
@@ -132,6 +133,9 @@ export default function AvailableForms() {
                           #{f.id} {f.title}
                         </span>
                         {f.description && <div className="cell-sub">{f.description}</div>}
+                      </td>
+                      <td data-label="Visibility">
+                        {f.visibility === "public" ? "Public" : "Private"}
                       </td>
                       <td data-label="Access">
                         <span className="badge badge-green">
@@ -165,6 +169,7 @@ export default function AvailableForms() {
                 <thead>
                   <tr>
                     <th>Form</th>
+                    <th>Visibility</th>
                     <th />
                   </tr>
                 </thead>
@@ -191,6 +196,9 @@ export default function AvailableForms() {
                             {f.note ? ` — “${f.note}”` : ""}
                           </div>
                         )}
+                      </td>
+                      <td data-label="Visibility">
+                        {f.visibility === "public" ? "Public" : "Private"}
                       </td>
                       <td>
                         {/* A BUTTON, not a link: there is no page behind a locked
@@ -226,6 +234,7 @@ export default function AvailableForms() {
                 <thead>
                   <tr>
                     <th>Form</th>
+                    <th>Visibility</th>
                     <th>Status</th>
                     <th />
                   </tr>
@@ -237,6 +246,9 @@ export default function AvailableForms() {
                         <span className="cell-strong">
                           #{f.id} {f.title}
                         </span>
+                      </td>
+                      <td data-label="Visibility">
+                        {f.visibility === "public" ? "Public" : "Private"}
                       </td>
                       <td data-label="Status">
                         <span className="badge badge-blue">

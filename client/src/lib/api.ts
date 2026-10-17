@@ -9,6 +9,7 @@ import type {
   DocumentRow,
   ExportPreview,
   FieldType,
+  FormAccessNotice,
   Form,
   FormVisibility,
   FormWithFields,
@@ -594,6 +595,19 @@ export const api = {
   /** The private forms I cannot read, with my status on each. */
   async listLockedForms(): Promise<AvailableForm[]> {
     return request<AvailableForm[]>("/api/form-access/mine", { auth: true });
+  },
+
+  /** Newly approved form grants that this user has not dismissed. */
+  async listFormAccessNotices(): Promise<FormAccessNotice[]> {
+    return request<FormAccessNotice[]>("/api/form-access/notices", { auth: true });
+  },
+
+  /** Dismiss one grant notice for the current user. */
+  async dismissFormAccessNotice(eventId: number): Promise<{ dismissed: boolean }> {
+    return request<{ dismissed: boolean }>(`/api/form-access/notices/${eventId}/dismiss`, {
+      method: "POST",
+      auth: true,
+    });
   },
 
   /**

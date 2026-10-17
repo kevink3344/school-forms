@@ -99,6 +99,8 @@ export default function AdminFormDesigner() {
   // state — a pending change here must never look like an unsaved form edit.
   const [visibilityBusy, setVisibilityBusy] = useState(false);
   const [visibilityMsg, setVisibilityMsg] = useState("");
+  const [pendingVisibility, setPendingVisibility] = useState<FormVisibility | null>(null);
+  const [visibilityEffectiveAt, setVisibilityEffectiveAt] = useState<Date | null>(null);
 
   /**
    * Set the form's visibility and report the grandfather count.
@@ -108,7 +110,7 @@ export default function AdminFormDesigner() {
    * is the only evidence that happened. A wrong count here is wrong in the
    * direction of locking someone out, so it is shown rather than assumed.
    */
-  const changeVisibility = async (visibility: FormVisibility) => {
+  const changeVisibility = async (visibility: FormVisibility): Promise<boolean> => {
     setVisibilityBusy(true);
     setVisibilityMsg("");
     setError("");
@@ -122,11 +124,24 @@ export default function AdminFormDesigner() {
             : "Now private. No existing accounts needed to keep access."
           : "Now public. Everyone in the organization can read it."
       );
+      return true;
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not change visibility");
+      return false;
     } finally {
       setVisibilityBusy(false);
     }
+  };
+
+  const confirmVisibilityChange = async () => {
+    if (!pendingVisibility) return;
+    if (pendingVisibility === "private") setVisibilityEffectiveAt(new Date());
+    if (await changeVisibility(pendingVisibility)) setPendingVisibility(null);
+  };
+
+  const cancelVisibilityChange = () => {
+    setPendingVisibility(null);
+    setVisibilityEffectiveAt(null);
   };
 
   useEffect(() => {
@@ -613,7 +628,14 @@ export default function AdminFormDesigner() {
               aria-label="Visibility"
               value={form?.visibility ?? "public"}
               disabled={visibilityBusy}
-              onChange={(e) => void changeVisibility(e.target.value as FormVisibility)}
+              onChange={(e) => {
+                const nextVisibility = e.target.value as FormVisibility;
+                if (nextVisibility !== form?.visibility) {
+                  setVisibilityMsg("");
+                  setPendingVisibility(nextVisibility);
+                  setVisibilityEffectiveAt(nextVisibility === "private" ? new Date() : null);
+                }
+              }}
             >
               <option value="public">Public — everyone in the organization</option>
               <option value="private">Private — School Contacts need a grant</option>
@@ -655,6 +677,86 @@ export default function AdminFormDesigner() {
           )}
         </div>
       </div>
+
+      {pendingVisibility && (
+        <div
+          className="drawer-overlay open"
+          onClick={() => {
+            if (!visibilityBusy) cancelVisibilityChange();
+          }}
+        >
+          <div
+            className="drawer"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="visibility-confirm-title"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="drawer-head">
+              <h2 id="visibility-confirm-title">Are you sure?</h2>
+              <button
+                className="icon-button close"
+                type="button"
+                aria-label="Close"
+                disabled={visibilityBusy}
+                onClick={cancelVisibilityChange}
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="drawer-body">
+              <p>
+                Change this form from <strong>{form?.visibility}</strong> to{" "}
+                <strong>{pendingVisibility}</strong>?
+              </p>
+              {pendingVisibility === "private" ? (
+                <>
+                  <p>
+                    School Contacts will need a grant to access it. Existing accounts that can
+                    currently see the form will keep their access.
+                  </p>
+                  <p
+                    role="alert"
+                    style={{ color: "var(--danger, #b3261e)", fontWeight: 700 }}
+                  >
+                    Users who register after{" "}
+                    {visibilityEffectiveAt?.toLocaleString(undefined, {
+                      year: "numeric",
+                      month: "short",
+                      day: "numeric",
+                      hour: "numeric",
+                      minute: "2-digit",
+                      timeZoneName: "short",
+                    })}{" "}
+                    will need to request access.
+                  </p>
+                </>
+              ) : (
+                <p>Everyone in the organization will be able to access this form.</p>
+              )}
+            </div>
+            <div className="drawer-foot">
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={visibilityBusy}
+                onClick={cancelVisibilityChange}
+              >
+                Cancel
+              </button>
+              <div className="spacer" />
+              <button
+                className="primary-button"
+                type="button"
+                disabled={visibilityBusy}
+                onClick={() => void confirmVisibilityChange()}
+              >
+                {visibilityBusy ? "Saving…" : "Yes, change visibility"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       <div className="card">
         <div className="card-head" style={{ flexDirection: "column", alignItems: "flex-start", gap: 12 }}>

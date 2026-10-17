@@ -25,6 +25,7 @@ import {
 } from "../lib/settings";
 import { useDocumentsEnabled } from "../lib/useDocumentsEnabled";
 import { SystemMessageBar } from "./SystemMessageBar";
+import { FormAccessNoticeBar } from "./FormAccessNoticeBar";
 import { NotificationBell } from "./NotificationBell";
 import type { Role } from "../types";
 
@@ -393,6 +394,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             whether anything renders: it returns null when this user has no open
             messages, so there is no empty wrapper taking up space. */}
         <main className="main">
+          <FormAccessNoticeBar />
           <SystemMessageBar />
           {children}
         </main>

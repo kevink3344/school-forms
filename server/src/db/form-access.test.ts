@@ -20,9 +20,9 @@
  *   3. `listAvailableFormsFor` filters `status = 'published'`, so drafts never
  *      appear on a page every internal role can open (trap 2 of §16.8).
  *   4. Every row-level site that accepts a form id applies the check (§7.2).
- *   5. Both dialects declare both tables and the column, and the timestamp
+ *   5. Both dialects declare the access, event and dismissal tables and the column, and timestamps
  *      columns are registered (or the two engines disagree about the shape).
- *   6. The ten routes are registered in the inventory AND documented in
+ *   6. All twelve routes are registered in the inventory AND documented in
  *      Swagger — the existing coverage test proves the second half.
  */
 import { readFileSync } from "node:fs";
@@ -137,6 +137,14 @@ describe("Available Forms", () => {
   it("returns granted for an exempt role without consulting the grant table", () => {
     expect(DATA).toContain("isUnrestrictedRole(viewer.role)");
   });
+
+  it("delivers only the latest active grant notice and records dismissals per user", () => {
+    expect(DATA).toContain("listFormAccessNotices");
+    expect(DATA).toContain("latest.id");
+    expect(DATA).toContain("a.status = 'approved'");
+    expect(DATA).toContain("form_access_notice_dismissals");
+    expect(DATA).toContain("WHERE id = @eventId AND user_id = @userId");
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -200,7 +208,7 @@ describe("schema parity", () => {
   const tursoDdl = tursoDialect.ddl.join("\n");
 
   it("both dialects create both tables", () => {
-    for (const table of ["form_access", "form_access_events"]) {
+    for (const table of ["form_access", "form_access_events", "form_access_notice_dismissals"]) {
       expect(sqlDdl, `SQL Server is missing ${table}`).toContain(table);
       expect(tursoDdl, `Turso is missing ${table}`).toContain(table);
     }
@@ -221,7 +229,7 @@ describe("schema parity", () => {
     // Omit one and it is a Date on SQL Server and a string on Turso — the
     // libsql.test.ts honesty guard enforces the pairing, and this is the same
     // check stated for this feature's columns.
-    for (const col of ["requested_at", "decided_at"]) {
+    for (const col of ["requested_at", "decided_at", "dismissed_at"]) {
       expect(TIMESTAMP_COLUMNS.has(col), `${col} must be in TIMESTAMP_COLUMNS`).toBe(true);
     }
     // `created_at` is already registered by an earlier feature; assert it too so
@@ -251,6 +259,8 @@ describe("route registration", () => {
     "/api/forms/available",
     "/api/forms/{id}/visibility",
     "/api/form-access/mine",
+    "/api/form-access/notices",
+    "/api/form-access/notices/{eventId}/dismiss",
     "/api/form-access/requests",
     "/api/form-access/requests/withdraw",
     "/api/form-access/requests/decide",

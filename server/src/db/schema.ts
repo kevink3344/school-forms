@@ -1637,6 +1637,17 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      created_at DATETIME2     NOT NULL CONSTRAINT DF_form_access_events_created DEFAULT SYSUTCDATETIME()
    );`,
 
+  // Per-user close-out state for the grant notices shown after an approval.
+  // Keeping this separate from the append-only access audit preserves the
+  // audit's meaning while allowing each user to dismiss notices independently.
+  `IF OBJECT_ID('dbo.form_access_notice_dismissals', 'U') IS NULL
+   CREATE TABLE dbo.form_access_notice_dismissals (
+     event_id     INT NOT NULL,
+     user_id      INT NOT NULL,
+     dismissed_at DATETIME2 NOT NULL CONSTRAINT DF_fand_dismissed_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT PK_form_access_notice_dismissals PRIMARY KEY (event_id, user_id)
+   );`,
+
   // ---------------------------------------------------------------------
   // Inbound webhook intake log (docs/plans/webhook-log.md).
   //

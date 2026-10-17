@@ -68,6 +68,8 @@ export const ROUTES: RouteEntry[] = [
   // means "staff, School Contacts and admins"; the admin-only routes are marked
   // `admin` individually (there is no router-level guard, by design).
   { method: "get", path: "/api/form-access/mine", auth: "staff", tags: "Form Access" },
+  { method: "get", path: "/api/form-access/notices", auth: "staff", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/notices/{eventId}/dismiss", auth: "staff", tags: "Form Access" },
   { method: "post", path: "/api/form-access/requests", auth: "staff", tags: "Form Access" },
   { method: "post", path: "/api/form-access/requests/withdraw", auth: "staff", tags: "Form Access" },
   { method: "get", path: "/api/form-access/requests", auth: "admin", tags: "Form Access" },
