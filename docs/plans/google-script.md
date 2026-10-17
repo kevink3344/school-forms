@@ -3,7 +3,7 @@
 // Forwards a Google Form response to the School Forms webhook endpoint.
 //   POST {API_BASE}/api/webhook/google
 //   Header: X-Webhook-Secret  (must equal GOOGLE_FORMS_WEBHOOK_SECRET in .env)
-//   Body:   { form_id: <number>, answers: [{ field_id?, label?, value }] }
+//   Body:   { form_id: <number>, answers: [{ field_id?, label?, item_id?, value }] }
 //
 // The Google Form does NOT have to be defined in the School Forms designer.
 // Every answer carries its question title as `label`, and the numeric `field_id`
@@ -32,7 +32,11 @@ function onFormSubmit(e) {
   //    captures it as a text field on the submission, so nothing is dropped.
   const answers = [];
   itemResponses.forEach((itemResponse) => {
-    const title = itemResponse.getItem().getTitle();
+    const item = itemResponse.getItem();
+    const title = item.getTitle();
+    // Google's own id for this question, stable across renaming. Sent on every
+    // answer so the server can bind its field to this question permanently.
+    const itemId = item.getId();
     const raw = itemResponse.getResponse();
     // Normalize: single value -> string; checkbox/array -> string[]; blank -> "".
     // (Without the `raw == null` guard a missing answer would become the literal
@@ -41,8 +45,8 @@ function onFormSubmit(e) {
 
     const fieldId = fieldMap[title];
     answers.push(fieldId
-      ? { field_id: fieldId, label: title, value }  // defined field: id + title
-      : { label: title, value });                    // undefined field: title only
+      ? { field_id: fieldId, label: title, item_id: itemId, value }  // defined field
+      : { label: title, item_id: itemId, value });                   // undefined field
   });
 
   // ★ No more "no answers mapped" abort. An unmatched title is captured as text,

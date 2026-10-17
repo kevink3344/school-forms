@@ -294,6 +294,16 @@ export interface Form {
   // Number of submissions attached to this form. Present on list responses so
   // the admin Forms list can gate the Delete action (used forms can't be deleted).
   submission_count?: number;
+  // When this form was LAST flipped public → private, as an ISO instant, or null
+  // if no flip ever grandfathered anybody (a form created already private). It is
+  // what the designer's warning is built from: everyone who registers after this
+  // moment has no grant and has to request access.
+  //
+  // ★ Present only on the admin form-detail and visibility responses, which are
+  // the two admin surfaces that need it — it is NOT part of the public form
+  // payloads, and the server derives it from the `backfilled` audit rows rather
+  // than from `updated_at`, which any title edit moves.
+  private_since?: string | null;
   created_at: string;
   updated_at: string;
 }

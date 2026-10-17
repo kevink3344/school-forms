@@ -4,7 +4,7 @@ import { api, ApiError } from "../../lib/api";
 import { ChevronDown, Check, Copy, KeyRound, Plus, Webhook, X } from "lucide-react";
 import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, audienceLabel, type MenuItemKey } from "../../lib/settings";
 import { BADGE_CHOICES, badgeClass, roleBadgeFor, roleLabelFor, useRoleCatalog } from "../../lib/roles";
-import type { AccessGrantRow, AccessRequestRow, AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, RoleRow, RoleUsageReport, School, SystemMessage, UserAccessRow, WebhookEventSummary } from "../../types";
+import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, RoleRow, RoleUsageReport, School, SystemMessage, UserAccessRow, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import { refreshSystemMessages } from "../../components/SystemMessageBar";
@@ -626,26 +626,34 @@ export default function AdminSettings() {
   }, [loadSysMsgs]);
 
   // ---------------------------------------------------------------------------
-  // Access Requests (docs/plans/public-private-forms.md §10.2).
+  // Access Requests — MOVED to its own page (docs/plans/access-requests.md §8).
   //
-  // ★ The pending count is fetched SEPARATELY from the queue and is rendered on
-  // the section TITLE, because the section is closed by default and §15 Q3
-  // answered "in-app only" — so the count IS the notification. A count that only
-  // rendered inside an open section would be a count nobody sees.
+  // The queue, the pending count and the per-form grant list all live on
+  // /admin/access-requests now, together with the bell that notifies about them.
+  // ★ One fetch here feeds the link's count, and the link is the only thing left
+  // of this section in Settings: the triage table needed the notification sitting
+  // next to it to be usable, and splitting the two left a count on a collapsed
+  // title as the app's only signal that work was waiting.
   //
   // Its own try/catch, like the webhook counters: a failure here must not blank
   // the account and organization panels.
   // ---------------------------------------------------------------------------
-  const [accessRequests, setAccessRequests] = useState<AccessRequestRow[]>([]);
   const [accessPending, setAccessPending] = useState(0);
-  const [accessError, setAccessError] = useState("");
-  const [accessBusy, setAccessBusy] = useState<string | null>(null);
-  // Which form's grant list is expanded, and its rows.
-  const [grantsFormId, setGrantsFormId] = useState<number | null>(null);
-  const [grants, setGrants] = useState<AccessGrantRow[]>([]);
-  // The note an admin types before declining.
-  const [declineFor, setDeclineFor] = useState<string | null>(null);
-  const [declineNote, setDeclineNote] = useState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    api
+      .getAccessRequestNotifications(1)
+      .then((res) => {
+        if (!cancelled) setAccessPending(res.pending);
+      })
+      .catch(() => {
+        /* leave the count off the link; the page itself still opens */
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   // Per-account access, for the Edit User drawer. Loaded when the drawer opens
   // on an EXISTING user — a create has no account to grant to yet.
@@ -683,66 +691,6 @@ export default function AdminSettings() {
       setUserAccessError(err instanceof ApiError ? err.message : "The removal did not reach the server.");
     } finally {
       setUserAccessBusy(null);
-    }
-  };
-
-  const loadAccess = useCallback(async () => {
-    try {
-      const [queue, summary] = await Promise.all([
-        api.listAccessRequests("pending"),
-        api.getAccessRequestSummary(),
-      ]);
-      setAccessRequests(queue);
-      setAccessPending(summary.pending);
-      setAccessError("");
-    } catch {
-      /* leave the section empty; the rest of Settings still works */
-    }
-  }, []);
-
-  useEffect(() => {
-    void loadAccess();
-  }, [loadAccess]);
-
-  const decide = async (
-    row: { user_id: number; form_id: number },
-    decision: "approve" | "decline" | "revoke",
-    note?: string
-  ) => {
-    const key = `${row.user_id}:${row.form_id}`;
-    setAccessBusy(key);
-    setAccessError("");
-    try {
-      await api.decideFormAccess({
-        user_id: row.user_id,
-        form_id: row.form_id,
-        decision,
-        note: note ?? null,
-      });
-      setDeclineFor(null);
-      setDeclineNote("");
-      await loadAccess();
-      // A revoke changes the grant list, so refresh it if it is open.
-      if (grantsFormId === row.form_id) setGrants(await api.listAccessGrants(row.form_id));
-    } catch (err) {
-      setAccessError(err instanceof ApiError ? err.message : "The decision did not reach the server.");
-    } finally {
-      setAccessBusy(null);
-    }
-  };
-
-  const toggleGrants = async (formId: number) => {
-    if (grantsFormId === formId) {
-      setGrantsFormId(null);
-      setGrants([]);
-      return;
-    }
-    setGrantsFormId(formId);
-    try {
-      setGrants(await api.listAccessGrants(formId));
-    } catch (err) {
-      setAccessError(err instanceof ApiError ? err.message : "Could not load the access list.");
-      setGrants([]);
     }
   };
 
@@ -1962,201 +1910,30 @@ export default function AdminSettings() {
         </div>
       </CollapsibleSection>
 
-      {/* Access Requests — the queue for private forms
-          (docs/plans/public-private-forms.md §10.2).
-          ★ The pending count is on the TITLE because the section is closed by
-          default and nothing pushes (§15 Q3): the count IS the notification. */}
-      <CollapsibleSection
-        title={`Access Requests${accessPending > 0 ? ` (${accessPending} pending)` : ""}`}
-        subtitle="Requests to read a private form. Approving is the only thing that grants access."
-        bodyStyle={{ padding: 0 }}
-      >
-        {accessError && (
-          <div className="alert-error" role="alert" style={{ margin: 14 }}>
-            {accessError}
-          </div>
-        )}
-        <table className="grid">
-          <thead>
-            <tr>
-              <th>Requester</th>
-              <th>Form</th>
-              <th>Requested</th>
-              <th />
-            </tr>
-          </thead>
-          <tbody>
-            {accessRequests.length === 0 ? (
-              <tr>
-                <td colSpan={4} style={{ textAlign: "center", padding: 24 }}>
-                  No pending requests.
-                </td>
-              </tr>
-            ) : (
-              accessRequests.map((r) => {
-                const key = `${r.user_id}:${r.form_id}`;
-                const busy = accessBusy === key;
-                return (
-                  <tr key={key}>
-                    <td data-label="Requester">
-                      <div className="cell-strong">{r.user_name ?? `User ${r.user_id}`}</div>
-                      <div className="cell-sub">
-                        {r.user_email}
-                        {r.school_name ? ` · ${r.school_name}` : ""}
-                      </div>
-                    </td>
-                    <td data-label="Form">
-                      <div className="cell-strong">
-                        {r.form_code ? `#${r.form_id} ` : ""}
-                        {r.form_title}
-                      </div>
-                      <button
-                        type="button"
-                        className="badge-button"
-                        onClick={() => void toggleGrants(r.form_id)}
-                      >
-                        {grantsFormId === r.form_id ? "Hide access list" : "Who has access?"}
-                      </button>
-                    </td>
-                    <td data-label="Requested" className="cell-mono">
-                      {new Date(r.requested_at).toLocaleDateString()}
-                    </td>
-                    <td>
-                      {declineFor === key ? (
-                        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
-                          <input
-                            className="edit-input"
-                            placeholder="Reason (shown to the requester)"
-                            value={declineNote}
-                            onChange={(e) => setDeclineNote(e.target.value)}
-                          />
-                          <div style={{ display: "flex", gap: 6 }}>
-                            <button
-                              type="button"
-                              className="badge-button danger"
-                              disabled={busy}
-                              onClick={() => void decide(r, "decline", declineNote)}
-                            >
-                              Confirm decline
-                            </button>
-                            <button
-                              type="button"
-                              className="badge-button"
-                              onClick={() => {
-                                setDeclineFor(null);
-                                setDeclineNote("");
-                              }}
-                            >
-                              Cancel
-                            </button>
-                          </div>
-                        </div>
-                      ) : (
-                        <div style={{ display: "flex", gap: 6 }}>
-                          <button
-                            type="button"
-                            className="badge-button"
-                            disabled={busy}
-                            onClick={() => void decide(r, "approve")}
-                          >
-                            Approve
-                          </button>
-                          <button
-                            type="button"
-                            className="badge-button"
-                            disabled={busy}
-                            onClick={() => {
-                              setDeclineFor(key);
-                              setDeclineNote("");
-                            }}
-                          >
-                            Decline
-                          </button>
-                        </div>
-                      )}
-                    </td>
-                  </tr>
-                );
-              })
-            )}
-          </tbody>
-        </table>
+      {/* Access Requests — MOVED to its own page, together with the bell that
+          announces the requests (docs/plans/access-requests.md §8).
 
-        {/* The access list for one form, with a Revoke per row and each
-            account's event history. ★ A revoke control needs a list to act on,
-            and the HISTORY is what makes "declined" and "access removed"
-            distinguishable (§15 Q6/Q7). */}
-        {grantsFormId !== null && (
-          <div style={{ borderTop: "1px solid var(--border)", padding: "14px" }}>
-            <h3 className="section-title">Who can read this form</h3>
-            {grants.length === 0 ? (
-              <p className="empty-note">Nobody holds a grant on this form.</p>
-            ) : (
-              <table className="grid">
-                <thead>
-                  <tr>
-                    <th>Account</th>
-                    <th>Status</th>
-                    <th>History</th>
-                    <th />
-                  </tr>
-                </thead>
-                <tbody>
-                  {grants.map((g) => (
-                    <tr key={g.user_id}>
-                      <td data-label="Account">
-                        <div className="cell-strong">{g.user_name ?? `User ${g.user_id}`}</div>
-                        <div className="cell-sub">{g.user_email}</div>
-                      </td>
-                      <td data-label="Status">
-                        <span
-                          className={`badge ${
-                            g.status === "approved"
-                              ? "badge-green"
-                              : g.status === "pending"
-                                ? "badge-blue"
-                                : "badge-gray"
-                          }`}
-                        >
-                          {g.status ?? "no row"}
-                        </span>
-                        {g.source === "backfill" && (
-                          <div className="cell-sub">Grandfathered when the form went private</div>
-                        )}
-                      </td>
-                      <td data-label="History">
-                        <ul className="event-list">
-                          {g.events.map((e) => (
-                            <li key={e.id}>
-                              <span className="cell-mono">{e.event}</span>{" "}
-                              {new Date(e.created_at).toLocaleDateString()}
-                              {e.actor_name ? ` by ${e.actor_name}` : ""}
-                              {e.note ? ` — “${e.note}”` : ""}
-                            </li>
-                          ))}
-                        </ul>
-                      </td>
-                      <td>
-                        {g.status === "approved" && (
-                          <button
-                            type="button"
-                            className="badge-button danger"
-                            disabled={accessBusy === `${g.user_id}:${grantsFormId}`}
-                            onClick={() =>
-                              void decide({ user_id: g.user_id, form_id: grantsFormId }, "revoke")
-                            }
-                          >
-                            Revoke
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </div>
-        )}
+          ★ What stood here was a closed-by-default section whose TITLE carried
+          the pending count — the count was the only notification the app had,
+          which is exactly the defect the bell was built to fix. The queue, the
+          per-form grant list and the count now live on one page, and the bell in
+          the banner announces them without going looking for them.
+
+          This row stays because Settings is where an administrator goes to change
+          how the app behaves, and "who is waiting on me" is one click from there.
+          It reads the same endpoint the bell does, so the two cannot disagree. */}
+      <CollapsibleSection
+        title="Access Requests"
+        subtitle="Requests to read a private form, and who currently holds a grant"
+      >
+        <p style={{ margin: 0, fontSize: "0.8125rem" }}>
+          {accessPending > 0
+            ? `${accessPending} request${accessPending === 1 ? "" : "s"} waiting for a decision.`
+            : "No requests are waiting."}{" "}
+          <Link to="/admin/access-requests">
+            Open Access Requests{accessPending > 0 ? ` (${accessPending})` : ""} →
+          </Link>
+        </p>
       </CollapsibleSection>
 
       {/* Webhook Log — the log itself stays on its own page because its filters

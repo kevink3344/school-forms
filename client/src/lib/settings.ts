@@ -100,7 +100,7 @@ export function documentsEnabledFor(raw: string | null | undefined, role: string
 // could switch Documents on in the Documents Link panel and still see no link,
 // with nothing on screen explaining why. Forms and Reports have no dedicated
 // control of their own, so they belong here.
-export const MENU_ITEMS = ["forms", "reports", "available_forms"] as const;
+export const MENU_ITEMS = ["forms", "reports", "available_forms", "access_requests"] as const;
 export type MenuItemKey = (typeof MENU_ITEMS)[number];
 
 // Human-facing label for a menu item.
@@ -113,6 +113,10 @@ export const MENU_ITEM_LABELS: Record<MenuItemKey, string> = {
   // the right and only gate. (Ask "is there already a gate?" before adding a key:
   // `documents` was deliberately REMOVED from both lists for exactly that reason.)
   available_forms: "Available Forms",
+  // ★ The Access Requests LINK only. The bell in the banner is not gated by any
+  // setting on purpose: a hidden link is a lost shortcut, but a hidden request
+  // queue is work nobody can see. See docs/plans/access-requests.md §5.4.
+  access_requests: "Access Requests",
 };
 
 // Every menu item visible to everyone — the default when the setting, or one key

@@ -13,6 +13,7 @@ import {
   KeyRound,
   ChevronDown,
   ListChecks,
+  Inbox,
 } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
 import { FORCED_PASSWORD_PATH } from "../pages/account/ChangePasswordPage";
@@ -24,6 +25,7 @@ import {
 } from "../lib/settings";
 import { useDocumentsEnabled } from "../lib/useDocumentsEnabled";
 import { SystemMessageBar } from "./SystemMessageBar";
+import { NotificationBell } from "./NotificationBell";
 import type { Role } from "../types";
 
 // ---------------------------------------------------------------------------
@@ -240,6 +242,12 @@ export function AppShell({ children }: { children: ReactNode }) {
           <span className="logo-text">School Forms</span>
         </div>
         <div className="actions">
+          {/* ★ Deliberately NOT behind a menu_items key. Every other sidebar link
+              can be switched off because a missing link is only a shortcut lost;
+              hiding this one would leave work waiting with no signal at all. The
+              sidebar link below IS toggleable. See
+              docs/plans/access-requests.md §5.4. */}
+          <NotificationBell />
           {user && (
             <div className="user-menu-wrap" ref={userMenuRef}>
               <button
@@ -321,6 +329,15 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <NavLink to="/staff/forms" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
                   <ListChecks size={18} />
                   <span className="s-label">Available Forms</span>
+                </NavLink>
+              )}
+              {/* Access Requests — the queue for private forms. Sits next to
+                  Available Forms because that is where a request comes from. The
+                  LINK can be switched off; the bell in the banner cannot. */}
+              {menuVisible("access_requests") && (
+                <NavLink to="/admin/access-requests" className="sidebar-link" onClick={() => setSidebarOpen(false)}>
+                  <Inbox size={18} />
+                  <span className="s-label">Access Requests</span>
                 </NavLink>
               )}
               {/* Schools is no longer a sidebar item — it renders as a

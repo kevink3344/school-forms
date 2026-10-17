@@ -422,7 +422,7 @@ restored from code).
 | `submissions DELETE /:publicId` | `requireRoles("admin")` | **unchanged** | D3/short-circuit — destructive, admin only |
 | `forms GET /` | `requireRoles(staff,cdm,admin)` | `requireAuth` + `visibleFormIds()` filter | every role must be able to list its own forms |
 | `forms GET /:id` | `requireRoles("admin")` | `formCapabilities().view` | **this is the change that makes custom roles work at all** |
-| `forms POST /`, `PUT /:id`, `PATCH /:id/status`, `DELETE /:id`, `POST /:id/generate-fields`, `POST /:id/drive-validate` | `requireRoles("admin")` | **unchanged** | form design is administration (D3) |
+| `forms POST /`, `PUT /:id`, `PATCH /:id/status`, `DELETE /:id`, `POST /:id/drive-validate` | `requireRoles("admin")` | **unchanged** | form design is administration (D3) |
 | `forms GET/PUT /:id/columns` | `requireRoles(staff,cdm,admin)` | `view` / `edit` | it is this form's data |
 | `export` preview + download | `requireRoles(staff,cdm,admin)` (+ `documentsEnabled` / `requireAuthForPdf`) | `can_export` **on top of** the existing gates | the existing gates are orthogonal (feature flag, PDF token) and stay |
 | `reports` (`REPORT_ROLES` = staff,cdm,admin) | role list | `can_report` for form-scoped reports; `REPORT_ROLES` stays for org-wide ones | some reports are not form-specific |

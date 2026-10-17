@@ -26,7 +26,7 @@ export const MENU_ITEMS_KEY = "menu_items";
 // Documents Link panel), which also gates the /api/documents endpoints. Having it
 // in both places meant a hidden `menu_items.documents` silently overrode a visible
 // `documents_link`, so the admin's Documents Link toggles appeared to do nothing.
-export const MENU_ITEM_KEYS = ["forms", "reports", "available_forms"] as const;
+export const MENU_ITEM_KEYS = ["forms", "reports", "available_forms", "access_requests"] as const;
 export type MenuItemKey = (typeof MENU_ITEM_KEYS)[number];
 
 // Allow-list of keys that can be read/written. Never let an arbitrary key hit

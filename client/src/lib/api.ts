@@ -573,16 +573,20 @@ export const api = {
   },
 
   // Set a form's visibility. Switching to private grandfathers every School
-  // Contact that could see it; the response reports how many.
+  // Contact that could see it; the response reports how many, plus the flip
+  // instant the designer's warning needs.
   async setFormVisibility(
     id: number,
     visibility: FormVisibility
-  ): Promise<FormWithFields & { granted: number }> {
-    return request<FormWithFields & { granted: number }>(`/api/forms/${id}/visibility`, {
-      method: "PATCH",
-      auth: true,
-      body: { visibility },
-    });
+  ): Promise<FormWithFields & { granted: number; private_since: string | null }> {
+    return request<FormWithFields & { granted: number; private_since: string | null }>(
+      `/api/forms/${id}/visibility`,
+      {
+        method: "PATCH",
+        auth: true,
+        body: { visibility },
+      }
+    );
   },
 
   // --- Form access (docs/plans/public-private-forms.md §8) -----------------
@@ -592,7 +596,14 @@ export const api = {
     return request<AvailableForm[]>("/api/form-access/mine", { auth: true });
   },
 
-  /** Ask for access to a private form. Refused (400) for a declined row. */
+  /**
+   * Ask for access to a private form.
+   *
+   * A previously `denied` row (declined OR revoked) is reset to `pending` and a
+   * fresh `requested` event is written — asking again is always allowed, which is
+   * what makes the admin's "Remove access" reversible (§18). The refusals that
+   * remain are `already_readable`, `not_private` and `not_found`.
+   */
   async requestFormAccess(formId: number): Promise<{ ok: boolean }> {
     return request<{ ok: boolean }>("/api/form-access/requests", {
       method: "POST",
@@ -636,9 +647,25 @@ export const api = {
     return request<AccessGrantRow[]>(`/api/form-access/grants?form_id=${formId}`, { auth: true });
   },
 
-  /** Admin: the pending count for the Settings section title. */
-  async getAccessRequestSummary(): Promise<{ pending: number }> {
-    return request<{ pending: number }>("/api/form-access/summary", { auth: true });
+  /**
+   * Admin: the bell — the pending count and the newest few requests waiting.
+   *
+   * ONE request for both numbers, because they answer one question. Fetching the
+   * count and the list separately is how a badge comes to say 3 above a list of 2,
+   * with no way to tell which half is stale.
+   *
+   * `pending` is the true total; `requests` is a window of at most `limit` rows
+   * (server default 5, max 20) applied in SQL. ★ Never re-slice `requests` — a
+   * `slice(0, 5)` here is the slice-then-filter pattern this repo bans, and it
+   * makes the dropdown's "View all" footer a lie about how many are hidden.
+   */
+  async getAccessRequestNotifications(
+    limit = 5
+  ): Promise<{ pending: number; requests: AccessRequestRow[] }> {
+    return request<{ pending: number; requests: AccessRequestRow[] }>(
+      `/api/form-access/notifications?limit=${limit}`,
+      { auth: true }
+    );
   },
 
   /** Admin: one account's access rows, for the Edit User drawer. */
@@ -753,20 +780,6 @@ export const api = {
       method: "PATCH",
       auth: true,
       body: { restore: true },
-    });
-  },
-
-  // Ask the server to generate form fields from the linked Google Form. Not yet
-  // implemented server-side (needs the Google Forms OAuth scope) — returns 501
-  // with an actionable message until that credential is configured.
-  async generateFormFields(
-    id: number,
-    googleFormUrl: string
-  ): Promise<{ title: string; fields: unknown[] }> {
-    return request<{ title: string; fields: unknown[] }>(`/api/forms/${id}/generate-fields`, {
-      method: "POST",
-      auth: true,
-      body: { google_form_url: googleFormUrl },
     });
   },
 

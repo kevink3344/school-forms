@@ -185,7 +185,6 @@ The Form Designer is where you set the form's details and build its fields.
 | **Description** | An optional note shown to parents |
 | **Drive Folder ID** | Where generated documents are saved. A green **Valid** check confirms the folder is reachable. Leave blank to use the default folder. |
 | **Google Form URL** | An optional link to a matching Google Form, shown to staff |
-| **Generate form fields** | Reserved for automatic field creation from a Google Form |
 
 Click **Save** when you are finished. The button stays disabled until you make a change.
 

@@ -54,7 +54,12 @@ function secretMatches(expected: string, provided: string | undefined): boolean 
 }
 
 // PUBLIC (secret-guarded): POST /api/webhook/google
-// Body (same shape as the in-app submission): { form_id, answers: [{ field_id, value }] }
+// Body: { form_id, answers: [
+//   { field_id?, label, item_id?, value }   // field_id when the title matched
+// ] }
+//   `field_id` or `label` identifies the field (field_id wins). `item_id` is
+//   Google's per-question id — stable across retitling — and is bound to the
+//   field on first sight so a later rename still resolves.
 // Header: X-Webhook-Secret
 webhookRouter.post("/google", async (req, res, next) => {
   try {
@@ -186,8 +191,12 @@ submission. It:
 
 1. Reads the latest submitted response.
 2. Maps each **question title** to the matching **field_id** on your published form
-   (via `GET /api/forms/:id/public`).
+   (via `GET /api/forms/:id/public`), and carries Google's own **item id** for the
+   question as well, so a later retitle cannot break the mapping.
 3. Posts `{ form_id, answers }` to the webhook endpoint with the secret header.
+4. An answer whose title matches **nothing** is still sent, under its own `label` —
+   the server stores it as an ad-hoc field instead of dropping it. A question that
+   was never defined in the designer therefore works; it never loses a response.
 
 ```javascript
 /**
@@ -213,22 +222,31 @@ function onFormSubmit(e) {
   // 2. Build the answers array.
   const answers = [];
   for (const itemResponse of itemResponses) {
-    const title = itemResponse.getItem().getTitle();
+    const item = itemResponse.getItem();
+    const title = item.getTitle();
+    // Google's own id for this question, stable across renaming. Sent on every
+    // answer so the server can bind its field to this question permanently.
+    const itemId = item.getId();
     const raw = itemResponse.getResponse();
     // Normalize value: single value -> string; checkbox -> string[].
-    const value = Array.isArray(raw) ? raw.map((v) => String(v)) : String(raw);
+    // A blank answer must become "" — without the guard it would arrive as the
+    // literal string "null" and be stored as a real value.
+    const value = raw == null ? "" : Array.isArray(raw) ? raw.map(String) : String(raw);
 
     const fieldId = fieldMap[title];
-    if (fieldId) {
-      answers.push({ field_id: fieldId, value });
-    } else {
-      // Unmatched question — log and continue (don't block the whole submission).
-      console.log("No matching field for question: " + title);
-    }
+    answers.push(
+      fieldId
+        ? { field_id: fieldId, label: title, item_id: itemId, value } // defined field
+        : { label: title, item_id: itemId, value } // undefined field — captured, not dropped
+    );
   }
 
+  // ★ There is deliberately no "no answers mapped" abort here. An unmatched title
+  // is captured under its own label, so a form the staff never defined simply
+  // works. This only fires when the Google Form genuinely has no questions.
   if (answers.length === 0) {
-    throw new Error("No answers mapped to form fields. Check question titles against form labels.");
+    console.warn("No item responses to forward for form " + FORM_ID);
+    return;
   }
 
   // 3. Post to the webhook.
@@ -277,10 +295,37 @@ function getFieldMap(formId) {
 
 ### Important matching note
 
-The Apps Script maps **question title** → **field_id** by exact label match. So the
+The Apps Script maps **question title** → **field_id** by exact label match, so the
 Google Form question titles must **exactly match** the `label` values you set in the
-School Forms form designer. If a label changes, update the Google Form title (or the
-mapping) accordingly.
+School Forms form designer. If a title differs, the answer is not lost — it is stored
+as an ad-hoc field on the submission, and an admin can promote it to a real form
+field from the submission's detail view, which backfills every submission that
+carries that label.
+
+### What happens when a question is retitled
+
+Retitling a Google Form question used to be a silent, permanent failure: the title
+stopped matching, so `fieldMap[title]` was `undefined`, so the answer arrived with no
+`field_id` and was captured ad-hoc. Because the webhook still returned 201 and the
+Apps Script still reported success, nothing anywhere said a mapped field had gone
+blank — see `docs/plans/google-form-undefined-fields.md` §15 for the full incident.
+
+Three things now stand between a retitle and a lost answer, in order:
+
+1. **`item_id` takes over.** Every answer carries `item.getId()`, which Google keeps
+   stable across retitling. The server binds the id to the field the title matched,
+   the first time it sees them together, and resolves by id from then on — so a
+   retitle is a non-event for any field that has already been bound.
+2. **The ad-hoc fallback still catches everything else**, and keeps the title as the
+   label, so promoting it backfills the whole column.
+3. **The binding is learned, not configured.** There is no backfill to run and no
+   column to populate by hand. The first submission after deploying this script
+   teaches the mapping; nothing before that is needed, because every earlier answer
+   already matched by title.
+
+The honest limit: a question retitled **before** its field was ever bound arrives as
+one ad-hoc answer rather than a mapped one. It is not lost — promote it, or simply
+let the next submission bind it — but that single response needs a human glance.
 
 ### Set up the trigger
 

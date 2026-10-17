@@ -340,6 +340,90 @@ p { margin: 0; }
 }
 .icon-button:hover { background: var(--panel-bg); color: var(--text); }
 
+/* ===== Notification bell (docs/plans/access-requests.md §5) =====
+   The bell is an .icon-button with a count bubble on it, and the panel is
+   anchored to it the way the account menu is anchored to the user chip — the
+   same offset and the same z-index (210), so it clears the banner (201) and the
+   open drawer (200) without either dropdown needing its own stacking rules. */
+.notif-wrap { position: relative; }
+.notif-button { position: relative; }
+/* Orange, not navy: the banner is navy, so a navy bubble on it would read as
+   decoration rather than as a count. */
+.notif-badge {
+  position: absolute; top: 1px; right: 1px; min-width: 17px; height: 17px;
+  padding: 0 4px; border-radius: 9px;
+  background: var(--wcpss-orange); color: #fff;
+  font-family: var(--font-mono); font-size: 0.625rem; font-weight: 700;
+  line-height: 17px; text-align: center;
+}
+.notif-panel {
+  position: absolute; top: calc(100% + 8px); right: 0; z-index: 210;
+  width: 340px; padding: 6px;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: var(--radius); box-shadow: var(--shadow-card);
+}
+.notif-head {
+  display: flex; align-items: baseline; justify-content: space-between; gap: 8px;
+  padding: 8px 10px 10px; margin-bottom: 4px; border-bottom: 1px solid var(--border);
+}
+.notif-title { font-size: 0.8125rem; font-weight: 700; color: var(--text); }
+.notif-count { font-family: var(--font-mono); font-size: 0.6875rem; color: var(--text-muted); }
+.notif-error {
+  margin: 0 0 4px; padding: 8px 10px; border-radius: var(--radius-sm);
+  background: var(--danger-tint, #fdeef0); border: 1px solid var(--danger-line, #eec6cb);
+  color: var(--danger, #b93040); font-size: 0.75rem;
+}
+.notif-empty {
+  margin: 0; padding: 14px 10px; text-align: center;
+  font-size: 0.8125rem; color: var(--text-muted);
+}
+/* Five rows at a time is the server's cap, but the list scrolls anyway so a
+   future limit change cannot push the footer button off the screen. */
+.notif-list {
+  list-style: none; margin: 0; padding: 0;
+  display: flex; flex-direction: column; gap: 2px;
+  max-height: 60vh; overflow-y: auto;
+}
+.notif-item { padding: 8px 10px; border-radius: var(--radius-sm); }
+.notif-item:hover { background: var(--panel-bg); }
+.notif-item + .notif-item { border-top: 1px solid var(--line-soft); }
+.ni-top { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.ni-who {
+  font-size: 0.8125rem; font-weight: 700; color: var(--text);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.ni-when { flex-shrink: 0; font-size: 0.6875rem; color: var(--text-muted); }
+/* The form is the link to the request: which form, and where to read its history
+   before deciding. */
+.ni-form {
+  display: flex; align-items: center; gap: 6px; width: 100%; text-align: left;
+  background: none; border: none; padding: 4px 0 0; font-size: 0.75rem; color: var(--accent);
+}
+.ni-form:hover .ni-form-title { text-decoration: underline; }
+.ni-form-id { font-family: var(--font-mono); font-size: 0.6875rem; color: var(--text-muted); }
+.ni-form-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* The decline reason goes ABOVE the two buttons so the input does not shift the
+   Approve/Decline row it just replaced. */
+.ni-decline { display: flex; flex-direction: column; margin-top: 6px; }
+.ni-decline .edit-input { width: 100%; }
+.ni-actions { display: flex; gap: 6px; margin-top: 6px; }
+.notif-viewall {
+  display: block; width: 100%; margin-top: 4px; padding: 9px 10px;
+  background: none; border: none; border-top: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  font-size: 0.8125rem; font-weight: 600; color: var(--accent); text-align: center;
+}
+.notif-viewall:hover { background: var(--tint); }
+
+/* The row a deep link from the bell points at. An animation rather than a
+   transition: the class is added once and has to draw the eye at that moment,
+   and a transition needs a property change to run. */
+@keyframes row-flash-fade {
+  from { background: var(--orange-tint); }
+  to { background: transparent; }
+}
+table.grid tbody tr.row-flash { animation: row-flash-fade 2.4s ease-out; }
+
 /* ===== Control sizing =====
    Every action button, select and text input shares one height. These families
    were each sized from their own padding, and a <button> and a <select> compute
@@ -1311,6 +1395,16 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   /* The chip is only the avatar here, so the header would otherwise widen the
      menu past the right edge of the banner. */
   .banner .user-menu { min-width: 210px; }
+  /* The bell sits left of the avatar, so a 340px panel anchored to it would hang
+     off the left edge of a phone. Pin the panel to the banner instead. */
+  .notif-panel {
+    position: fixed;
+    top: calc(var(--banner-h) + 6px);
+    left: 12px;
+    right: 12px;
+    width: auto;
+  }
+  .notif-list { max-height: 55vh; }
   .banner .user-chip .avatar {
     width: 34px;
     height: 34px;

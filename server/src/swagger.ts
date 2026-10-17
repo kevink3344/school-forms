@@ -1922,14 +1922,29 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
-      "/api/form-access/summary": {
+      "/api/form-access/notifications": {
         get: {
           tags: ["Form Access"],
-          summary: "Pending access-request count — admin",
+          summary: "The administrator's bell — pending count and newest requests — admin",
           description:
-            "`{ pending: n }`, for the Settings section title. Rendered on the **closed** section, because with no push channel a count inside a closed section is a count nobody sees.",
+            "`{ pending: n, requests: [AccessRequestRow, ...] }` — the badge number and the dropdown list, in **one** read because they are one question.\n\n" +
+            "**Derived, never stored.** There is no notification row and no notifications table: this projects the `form_access` rows in `status = 'pending'`, so the bell *is* the queue and the two cannot disagree. A stored copy could drift into an alert whose Approve button acts on a request that was already decided.\n\n" +
+            "**A read.** It writes nothing — no \"seen\" flag, no read receipt. The count is `pending`, not \"not yet looked at\".\n\n" +
+            "`?limit=N` caps the list (default **5**, max **20**) and is applied in SQL; garbage or a non-positive value means the default. `pending` is the true total, so it may exceed `requests.length` — the dropdown's \"View all\" is how the reviewer reaches the rest, and clients must never re-slice the list.",
           security: [{ [bearerScheme]: [] }],
-          responses: { "200": { description: "OK — the pending count" } },
+          parameters: [
+            {
+              name: "limit",
+              in: "query",
+              required: false,
+              schema: { type: "integer", minimum: 1, maximum: 20, default: 5 },
+              description: "How many requests to list. Defaults to 5, capped at 20.",
+            },
+          ],
+          responses: {
+            "200": { description: "OK — the pending count and the newest pending requests" },
+            "403": { description: "Not an administrator" },
+          },
         },
       },
       "/api/form-access/user/{userId}": {

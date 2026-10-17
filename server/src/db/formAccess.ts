@@ -20,7 +20,7 @@ import { getClient } from "./pool.js";
 import { execute } from "./queries.js";
 import { getDialect } from "./dialect/index.js";
 import { getDbKind } from "./driver/index.js";
-import type { DbClient } from "./client.js";
+import { parseTimestamp, type DbClient } from "./client.js";
 import { isUnrestrictedRole, viewerId, type FormViewer } from "../access/formAccess.js";
 import type { FormAccessStatus, FormAccessEvent, FormVisibility } from "./schema.js";
 
@@ -238,27 +238,81 @@ export interface AccessRequestRow {
   school_name: string | null;
 }
 
+/**
+ * The queue's projection and its joins, written ONCE.
+ *
+ * The triage queue and the administrator's bell (§7.3) are two orders and two
+ * caps over the SAME question, so they must not carry two SELECT lists: a column
+ * added to one and not the other is a field that is present on the page and
+ * `undefined` in the bell, with nothing to error and point at it.
+ *
+ * `user_name`/`school_name` are LEFT JOINs rather than inner ones on purpose — a
+ * request whose account was deleted must still be visible to the administrator,
+ * and an inner join would drop it out of the queue that exists to answer it.
+ */
+const ACCESS_REQUEST_COLUMNS = `a.user_id, a.form_id, a.status, a.source, a.requested_at,
+            a.decided_at, a.decided_by, a.note,
+            u.display_name AS user_name, u.email AS user_email,
+            f.title AS form_title, f.code AS form_code,
+            s.name AS school_name`;
+
+const ACCESS_REQUEST_JOINS = `dbo.form_access a
+       JOIN dbo.forms f ON f.id = a.form_id
+       LEFT JOIN dbo.users u ON u.id = a.user_id
+       LEFT JOIN dbo.schools s ON s.id = u.school_id`;
+
 export async function listAccessRequests(
   organizationId: number,
   status: FormAccessStatus = "pending"
 ): Promise<AccessRequestRow[]> {
   return execute<AccessRequestRow>(
-    `SELECT a.user_id, a.form_id, a.status, a.source, a.requested_at,
-            a.decided_at, a.decided_by, a.note,
-            u.display_name AS user_name, u.email AS user_email,
-            f.title AS form_title, f.code AS form_code,
-            s.name AS school_name
-       FROM dbo.form_access a
-       JOIN dbo.forms f ON f.id = a.form_id
-       LEFT JOIN dbo.users u ON u.id = a.user_id
-       LEFT JOIN dbo.schools s ON s.id = u.school_id
+    `SELECT ${ACCESS_REQUEST_COLUMNS}
+       FROM ${ACCESS_REQUEST_JOINS}
       WHERE f.organization_id = @organizationId AND a.status = @status
       ORDER BY a.requested_at`,
     { organizationId, status }
   );
 }
 
-/** How many requests are waiting — the count on the closed Settings section. */
+/**
+ * The NEWEST pending requests, capped — what the administrator's bell lists
+ * (docs/plans/access-requests.md §5.2, §7.3).
+ *
+ * ★ The cap is applied in SQL, never by the caller and never in the component. A
+ * client-side `rows.slice(0, limit)` is the `slice(0, N).filter(pred)` pattern
+ * this repo bans: the bell would fetch the whole queue to render five rows, and
+ * its "View all" footer would be a lie about how many are hidden.
+ *
+ * ★ NEWEST first, where the queue is OLDEST first. Those are two different
+ * questions rather than two styles: triage wants the request that has waited
+ * longest, and a bell wants the arrival that just happened.
+ *
+ * `requested_at DESC` with `user_id DESC, form_id DESC` is a TOTAL order. A
+ * backfill or a batch grant writes several rows inside the same millisecond,
+ * and without a tie-breaker the database is free to return them in a different
+ * sequence for two identical calls — so the bell could show five rows and then
+ * five different ones.
+ */
+export async function listRecentAccessRequests(
+  organizationId: number,
+  limit: number
+): Promise<AccessRequestRow[]> {
+  return execute<AccessRequestRow>(
+    // `pageSize` carries the cap. It is a parameter here rather than a constant
+    // because the route owns the default and the maximum (see the route's
+    // `bellLimit`), and `selectPage` is what keeps the two dialects' paging
+    // syntax (`OFFSET/FETCH` vs `LIMIT/OFFSET`) out of this file.
+    dialect().selectPage({
+      select: ACCESS_REQUEST_COLUMNS,
+      from: ACCESS_REQUEST_JOINS,
+      where: "WHERE f.organization_id = @organizationId AND a.status = 'pending'",
+      orderBy: "a.requested_at DESC, a.user_id DESC, a.form_id DESC",
+    }),
+    { organizationId, pageSize: limit, offset: 0 }
+  );
+}
+
+/** How many requests are waiting — the bell's badge, and the page's Pending tab. */
 export async function countPendingAccessRequests(organizationId: number): Promise<number> {
   const rows = await execute<{ n: number }>(
     `SELECT COUNT(*) AS n
@@ -347,6 +401,47 @@ export async function listAccessEvents(
       ORDER BY e.id`,
     { userId, formId }
   );
+}
+
+/**
+ * When this form was last flipped **public → private** — the boundary an
+ * administrator needs in order to state the consequence of the flag.
+ *
+ * ★ DERIVED FROM THE AUDIT LOG, not from a `forms.visibility_changed_at` column,
+ * because §6.5 already decided where the moment lives: "binding the grandfather
+ * to the privatisation event instead makes it a row with a timestamp and an
+ * actor". Those `backfilled` rows ARE that timestamp, and they are written in the
+ * same transaction as the flip. A second copy on `dbo.forms` would be a second
+ * answer to "when did this happen" and could disagree with the first.
+ *
+ * ★ `forms.updated_at` must NOT be used for this, which is the trap: it moves on
+ * every title edit and every field reorder. Reading it here would name a date
+ * later than the flip and claim that accounts which were in fact grandfathered
+ * will have to ask.
+ *
+ * ★ `MAX`, not `MIN`. A form can be flipped private, back to public, and private
+ * again, and only the LAST flip sets the boundary for accounts that do not exist
+ * yet — anyone who registered during the public window was itself grandfathered
+ * by it. An earlier date would understate who has to request access.
+ *
+ * Returns `null` when no flip ever grandfathered anybody: a form created already
+ * private (§6.4), or one marked private while the organization had no School
+ * Contacts. There is genuinely no boundary date in that case, and the caller must
+ * say so rather than invent one.
+ */
+export async function getPrivateSince(formId: number): Promise<string | null> {
+  const rows = await execute<{ last_flip: unknown }>(
+    `SELECT MAX(created_at) AS last_flip
+       FROM dbo.form_access_events
+      WHERE form_id = @formId AND event = 'backfilled'`,
+    { formId }
+  );
+  // ★ The alias is deliberately not `created_at`. `normalizeRow` restores a real
+  // `Date` by column NAME (db/client.ts), so a name that is not in
+  // TIMESTAMP_COLUMNS would be served as a `Date` by SQL Server and as a raw
+  // string by Turso. Parse explicitly instead, and the two engines agree.
+  const at = parseTimestamp(rows[0]?.last_flip);
+  return at ? at.toISOString() : null;
 }
 
 /**

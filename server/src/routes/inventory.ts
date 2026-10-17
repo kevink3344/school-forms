@@ -73,7 +73,7 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/form-access/requests", auth: "admin", tags: "Form Access" },
   { method: "post", path: "/api/form-access/requests/decide", auth: "admin", tags: "Form Access" },
   { method: "get", path: "/api/form-access/grants", auth: "admin", tags: "Form Access" },
-  { method: "get", path: "/api/form-access/summary", auth: "admin", tags: "Form Access" },
+  { method: "get", path: "/api/form-access/notifications", auth: "admin", tags: "Form Access" },
   // Per-account access, for the admin's Edit User drawer.
   { method: "get", path: "/api/form-access/user/{userId}", auth: "admin", tags: "Form Access" },
   { method: "post", path: "/api/form-access/user/{userId}/remove", auth: "admin", tags: "Form Access" },

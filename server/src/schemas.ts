@@ -303,7 +303,6 @@ export const createFormSchema = z.object({
   // there is no account that "currently sees it", because it did not exist a
   // moment ago (docs/plans/public-private-forms.md §6.4). Omitted -> 'public'.
   visibility: z.enum(FORM_VISIBILITY).optional(),
-  generate_form_fields: z.boolean().optional(),
   // Optional on create. The New Form modal collects a title and an optional
   // school and nothing else — the admin lands in the designer and adds fields
   // there ("Create & Design"). Requiring a field here made that flow
@@ -325,7 +324,6 @@ export const updateFormSchema = z.object({
   code: formCodeSchema.optional(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
-  generate_form_fields: z.boolean().optional(),
   fields: z.array(fieldSchema).optional(),
 });
 

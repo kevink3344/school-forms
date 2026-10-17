@@ -8,6 +8,7 @@ import {
   listAccessGrantsFor,
   listAccessRequests,
   listLockedFormsFor,
+  listRecentAccessRequests,
   removeFormAccess,
   requestFormAccess,
   withdrawAccessRequest,
@@ -26,8 +27,8 @@ export const formAccessRouter = Router();
 //   * three SELF-SERVICE routes (`/mine`, `/requests`, `/requests/withdraw`) —
 //     any signed-in role, because the whole point is that a restricted person can
 //     ask for what they cannot read;
-//   * two ADMIN routes (`GET /requests`, `POST /requests/decide`) and one more
-//     (`GET /grants`) — admin only.
+//   * the ADMIN routes (`GET /requests`, `POST /requests/decide`, `GET /grants`,
+//     `GET /notifications`, `GET /user/:id`, `POST /user/:id/remove`) — admin only.
 //
 // ★ `POST /requests/decide` is ONE endpoint carrying a `decision` field, not
 // three routes, so the state change and its audit row cannot be written
@@ -168,14 +169,50 @@ formAccessRouter.get("/grants", requireAuth, requireRoles("admin"), async (req, 
   }
 });
 
-// Admin: the pending count, for the Settings section title.
+// Admin: the bell — the pending count and the newest few requests waiting.
 //
-// ★ This is NOT described as an "administrator alert" — §15 Q3 answered in-app
-// only, so the count IS the notification. It is rendered on the CLOSED section
-// title, because a count inside a closed section is a count nobody sees.
-formAccessRouter.get("/summary", requireAuth, requireRoles("admin"), async (req, res, next) => {
+// (docs/plans/access-requests.md §7.3. This REPLACES `GET /summary`, which
+// returned the count alone. The count and the list are ONE read because they are
+// one question, and two reads are how a badge comes to say 3 above a list of 2.)
+//
+// ★ DERIVED, never stored. There is no notification row anywhere in this feature:
+// the endpoint projects the `form_access` rows that ARE the queue. A stored copy
+// would be a second source of truth that can disagree with the first — and the
+// disagreement shows up as an alert whose Approve button acts on a request that
+// was already decided, which is the one failure an approval UI must not have. It
+// is also why the feature needs no table, no migration, and no backfill.
+//
+// ★ This is a READ. It writes nothing — no "seen" flag, no read receipt. The
+// badge counts `pending`, not "not yet looked at", so there is nothing to mark
+// and nothing that can drift out of step with the queue.
+//
+// ★ No reviewer gate is needed for the 60-second poll that reads this (the bell
+// refetches while the tab is visible): `/api/form-access/*` is not on the
+// bootstrap-exemption list and does not need to be, because the default budget
+// absorbs a per-minute read. Do not add an exemption.
+const BELL_DEFAULT_LIMIT = 5;
+const BELL_MAX_LIMIT = 20;
+
+/** The bell's cap. Anything that does not name a positive count means "default",
+ *  so `?limit=0`, `?limit=abc` and no parameter are the same request. */
+function bellLimit(raw: unknown): number {
+  const n = Number(raw);
+  if (!Number.isInteger(n) || n < 1) return BELL_DEFAULT_LIMIT;
+  return Math.min(n, BELL_MAX_LIMIT);
+}
+
+formAccessRouter.get("/notifications", requireAuth, requireRoles("admin"), async (req, res, next) => {
   try {
-    res.json({ pending: await countPendingAccessRequests(orgId(req.user!)) });
+    const organizationId = orgId(req.user!);
+    const [pending, requests] = await Promise.all([
+      countPendingAccessRequests(organizationId),
+      // ★ `pending` and `requests` can disagree in the one case that has a
+      // meaning: more than `limit` rows are waiting, so the list is a window onto
+      // a longer queue. The badge keeps the real number, and the "View all"
+      // footer is how the reviewer reaches the rest.
+      listRecentAccessRequests(organizationId, bellLimit(req.query.limit)),
+    ]);
+    res.json({ pending, requests });
   } catch (err) {
     next(err);
   }

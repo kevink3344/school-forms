@@ -6,12 +6,22 @@
 //   Body:   { form_id: <number>, answers: [{ field_id?, label?, value }] }
 //
 // The Google Form does NOT have to be defined in the School Forms designer.
-// Every answer carries its question title as `label`, and the numeric `field_id`
-// is added only when the title resolves against the published form's field list.
-// A title with no matching field is STILL forwarded — the server captures it as
-// a text field on the submission — so nothing is dropped.
+// Every answer carries its question title as `label` AND Google's own id for the
+// question as `item_id`; the numeric `field_id` is added only when the title
+// resolves against the published form's field list. A title with no matching
+// field is STILL forwarded — the server captures it as a text field on the
+// submission — so nothing is dropped.
 //
-// `field_id` wins when present; `label` is the fallback identity of a question.
+// `field_id` wins when present, then `label`, then `item_id`. Send all three
+// even though one would do: they are how the server learns which Google question
+// each of its fields mirrors, and after that a retitling here is harmless.
+//
+// ★ `label` alone is NOT a durable identity. `field_id` is derived from the
+// title (see `getFieldMap` below), so renaming a question used to remove
+// `field_id` from the payload entirely and disconnect the answer — it still
+// arrived, but landed as a per-submission text field instead of its mapped
+// column. `item_id` is assigned by Google, survives renaming, and is what lets
+// the server put a renamed answer back in the right place. Do not remove it.
 
 const API_BASE = 'https://webform-sandbox-addph8hsd9feghdp.eastus2-01.azurewebsites.net';
 const FORM_ID = 2;                       // numeric DB form_id, NOT a string
@@ -25,12 +35,17 @@ function onFormSubmit(e) {
   const fieldMap = getFieldMap(FORM_ID); // { "<label>": field_id }
 
   // 2. Build the answers array. EVERY answer carries the question title as
-  //    `label`; the numeric `field_id` is added only when the title matches a
-  //    defined field. An answer with no match is STILL sent — the server
-  //    captures it as a text field on the submission, so nothing is dropped.
+  //    `label` and Google's question id as `item_id`; the numeric `field_id` is
+  //    added only when the title matches a defined field. An answer with no match
+  //    is STILL sent — the server captures it as a text field on the submission,
+  //    so nothing is dropped.
   const answers = [];
   itemResponses.forEach((itemResponse) => {
-    const title = itemResponse.getItem().getTitle();
+    const item = itemResponse.getItem();
+    const title = item.getTitle();
+    // Google's own id for this question, stable across renaming. Sent on every
+    // answer so the server can bind its field to this question permanently.
+    const itemId = item.getId();
     const raw = itemResponse.getResponse();
     // Normalize: single value -> string; checkbox/array -> string[]; blank -> "".
     // (Without the `raw == null` guard a missing answer would become the literal
@@ -39,8 +54,8 @@ function onFormSubmit(e) {
 
     const fieldId = fieldMap[title];
     answers.push(fieldId
-      ? { field_id: fieldId, label: title, value }  // defined field: id + title
-      : { label: title, value });                    // undefined field: title only
+      ? { field_id: fieldId, label: title, item_id: itemId, value }  // defined field
+      : { label: title, item_id: itemId, value });                   // undefined field
   });
 
   // ★ No more "no answers mapped" abort. An unmatched title is captured as text,

@@ -7,6 +7,7 @@ import AdminDashboard from "./pages/admin/AdminDashboard";
 import AdminForms from "./pages/admin/AdminForms";
 import AdminFormDesigner from "./pages/admin/AdminFormDesigner";
 import AdminSettings from "./pages/admin/AdminSettings";
+import AccessRequests from "./pages/admin/AccessRequests";
 import WebhookLog from "./pages/admin/WebhookLog";
 import StaffQueue from "./pages/staff/StaffQueue";
 import StaffDocuments from "./pages/staff/StaffDocuments";
@@ -126,6 +127,22 @@ export default function App() {
           <ProtectedRoute roles={["admin"]}>
             <AppShell>
               <WebhookLog />
+            </AppShell>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Admin only. The queue itself has no visibility setting: hiding the list
+          of people waiting on a decision is the one thing this page must never
+          do. Only the SIDEBAR link is toggleable (menu_items), and the bell in
+          the banner is not toggleable at all — see docs/plans/access-requests.md
+          §5.4. */}
+      <Route
+        path="/admin/access-requests"
+        element={
+          <ProtectedRoute roles={["admin"]}>
+            <AppShell>
+              <AccessRequests />
             </AppShell>
           </ProtectedRoute>
         }

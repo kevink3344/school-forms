@@ -177,11 +177,17 @@ export default function AvailableForms() {
                         </span>
                         {f.description && <div className="cell-sub">{f.description}</div>}
                         {/* A previous decision is stated, not hidden — the person
-                            asked once and deserves to know what happened. */}
-                        {f.access === "denied" && (
+                            asked once and deserves to know what happened.
+                            ★ A REVOCATION IS NOT ANNOUNCED HERE. Removing an
+                            account's access is an administrative act, and the row
+                            simply returns to "Available to request" — looking
+                            exactly like a form they never held access to. The
+                            `revoked` event stays in the audit log, so the refusal
+                            and the removal remain distinguishable (§18.2) without
+                            the page narrating the removal back to the person. */}
+                        {f.access === "denied" && f.last_event !== "revoked" && (
                           <div className="cell-sub">
-                            {f.last_event === "revoked" ? "Access was removed" : "Declined"}
-                            {f.decided_at ? ` ${fmtDate(f.decided_at)}` : ""}
+                            Declined{f.decided_at ? ` ${fmtDate(f.decided_at)}` : ""}
                             {f.note ? ` — “${f.note}”` : ""}
                           </div>
                         )}

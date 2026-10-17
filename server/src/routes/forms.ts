@@ -20,7 +20,7 @@ import { createFormSchema, updateFormSchema, setVisibilitySchema } from "../sche
 import { validateDriveFolder } from "../google/docs.js";
 import { FORM_STATUS } from "../db/schema.js";
 import { canAccessForm } from "../access/formAccess.js";
-import { listAvailableFormsFor, setFormVisibility } from "../db/formAccess.js";
+import { getPrivateSince, listAvailableFormsFor, setFormVisibility } from "../db/formAccess.js";
 
 export const formsRouter = Router();
 
@@ -122,6 +122,11 @@ formsRouter.get("/available", requireAuth, requireRoles("staff", "cdm_contact", 
 });
 
 // Admin: get a form with its fields — org-scoped
+//
+// ★ Carries `private_since` (the last public → private flip, from the audit log)
+// because this is the admin designer's load path and the visibility control
+// states the consequence of the flag: everyone who registers after that moment
+// has to request access. Admin-only, so the extra read costs a hot path nothing.
 formsRouter.get("/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -130,7 +135,7 @@ formsRouter.get("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       res.status(404).json({ error: "Form not found" });
       return;
     }
-    res.json(form);
+    res.json({ ...form, private_since: await getPrivateSince(id) });
   } catch (err) {
     next(err);
   }
@@ -250,42 +255,6 @@ formsRouter.post("/:id/drive-validate", requireAuth, requireRoles("admin"), asyn
   }
 });
 
-// Admin: generate form fields from the linked Google Form.
-//
-// NOT YET IMPLEMENTED — reading a Google Form's questions requires the Google
-// Forms API (`https://www.googleapis.com/auth/forms.body.readonly`), which needs
-// a refresh token minted with that scope. Until that OAuth credential is
-// provided, this returns 501 with an actionable message so the designer can show
-// a clear "not configured yet" state instead of a generic failure.
-//
-// When the credential is available, replace the body with a call to
-// `fetchGoogleFormFields(url)` (see docs/plans/google-form-url.md §5.3) and
-// return `{ title, fields }`. The route deliberately does NOT persist — the
-// client merges the fields into the editor and the admin saves.
-formsRouter.post("/:id/generate-fields", requireAuth, requireRoles("admin"), async (req, res, next) => {
-  try {
-    const id = Number(req.params.id);
-    const existing = await getFormWithFields(id, req.user!.organization_id);
-    if (!existing) {
-      res.status(404).json({ error: "Form not found" });
-      return;
-    }
-    const url = typeof req.body?.google_form_url === "string" ? req.body.google_form_url.trim() : "";
-    if (!url) {
-      res.status(400).json({ error: "A Google Form URL is required" });
-      return;
-    }
-    res.status(501).json({
-      error:
-        "Automatic field generation isn't configured yet. Add the Google Forms OAuth scope " +
-        "to enable it, or add the fields manually.",
-      code: "GOOGLE_FORMS_NOT_CONFIGURED",
-    });
-  } catch (err) {
-    next(err);
-  }
-});
-
 // Admin: change a form's status — org-scoped. Three shapes, one route:
 //
 //   { status: "draft" | "published" }  explicitly set the status. Also used to
@@ -386,7 +355,13 @@ formsRouter.patch("/:id/visibility", requireAuth, requireRoles("admin"), async (
       res.status(404).json({ error: "Form not found" });
       return;
     }
-    res.json({ ...(await getFormWithFields(id, req.user!.organization_id)), granted: result.granted });
+    res.json({
+      ...(await getFormWithFields(id, req.user!.organization_id)),
+      granted: result.granted,
+      // Re-read after the flip, so the designer's message names the boundary the
+      // flip just created rather than the previous one.
+      private_since: await getPrivateSince(id),
+    });
   } catch (err) {
     next(err);
   }

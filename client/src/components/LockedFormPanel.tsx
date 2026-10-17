@@ -11,10 +11,11 @@ import type { AvailableForm } from "../types";
 // "there is nothing here". Those are the same pixels and different facts, and
 // only one of them is an invitation.
 //
-// ★ The `denied` state deliberately offers NO action. A decline is final from
-// the requester's side (§15 Q5), so an "Ask again" button would be a control the
-// API refuses — which reads as a bug in the feature rather than the policy it
-// is. "This has to be changed by an administrator" is the whole affordance.
+// ★ The `denied` state now offers **Request access again**: a `denied` row IS
+// re-requestable (§18), and the administrator decides. That is what makes
+// "Remove access" in the Edit User drawer reversible without an admin acting
+// first. The earlier "declines are final, so show no control" rule was REVERSED
+// on 2026-10-02 — an "Ask again" button that the API refuses was the worse bug.
 // ---------------------------------------------------------------------------
 
 function fmtDate(v: string | null | undefined): string {
@@ -38,6 +39,16 @@ export function LockedFormPanel({
   const [error, setError] = useState<string | null>(null);
 
   const label = `#${form.id} ${form.title}`;
+
+  // ★ A REVOKED grant is also `denied`, and the removal is NOT narrated back to
+  // the person. It is an administrative act, so the row is presented exactly like
+  // a form they never held — the ordinary "ask an administrator" state — with the
+  // same Request access button, because a `denied` row is re-requestable (§18).
+  // The `revoked` event stays in the audit log, so an administrator reading the
+  // history can still tell a refusal from a removal (§18.2). AvailableForms
+  // suppresses the same sentence for the same reason; this keeps the two pages
+  // from telling the same person different stories about one row.
+  const revoked = form.access === "denied" && form.last_event === "revoked";
 
   // ★ NOT optimistic. The API refuses a `denied` row and a form that is already
   // public, so a row that moved on a refusal would be a lie. Re-render from the
@@ -75,18 +86,11 @@ export function LockedFormPanel({
         </>
       );
     }
-    if (form.access === "denied") {
-      // A revoked grant is also `denied`; the latest event is what tells them
-      // apart, and the wording has to follow it or the panel contradicts the log.
-      const revoked = form.last_event === "revoked";
+    if (form.access === "denied" && !revoked) {
       return (
         <>
           <span className="locked-text">
-            {revoked ? (
-              <>Your access to <strong>{label}</strong> was removed</>
-            ) : (
-              <>Your request for <strong>{label}</strong> was declined</>
-            )}
+            Your request for <strong>{label}</strong> was declined
             {form.decided_at ? ` on ${fmtDate(form.decided_at)}` : ""}.
             {form.note ? <em className="locked-note"> “{form.note}”</em> : null}
           </span>
@@ -121,7 +125,8 @@ export function LockedFormPanel({
     );
   })();
 
-  const Icon = form.access === "pending" ? Clock : form.access === "denied" ? Ban : Lock;
+  const Icon =
+    form.access === "pending" ? Clock : form.access === "denied" && !revoked ? Ban : Lock;
 
   return (
     <div className={`locked-panel${compact ? " locked-panel--compact" : ""}`}>

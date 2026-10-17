@@ -181,10 +181,11 @@ per part and figure captions.
 
 The guide must match the shipped UI. Two things to verify before publishing:
 
-1. **The Google Form URL / Generate form fields controls** are present but the generation is
-   **not yet functional** (needs the Google Forms OAuth scope). The guide should describe the
-   URL field as informational and either omit or clearly mark the generate feature as
-   "coming soon".
+1. **The Google Form URL control** is present but is informational only — it is a link shown to
+   staff, nothing is fetched from it. An earlier **Generate form fields** checkbox was removed
+   from the designer (the feature was cancelled, not merely unfinished), so the guide must not
+   describe or promise automatic field generation. The `docs/plans/google-form-url.md` plan that
+   specified it is abandoned.
 2. **Menu Settings / Documents Link** can hide sidebar items — the guide should note that a
    missing menu item may be hidden by an admin rather than broken.
 

@@ -468,6 +468,39 @@ asking?"*, there is no row to read and no way to reconstruct the answer. Binding
 **privatisation event** instead makes it a row with a timestamp and an actor, and makes the promise
 testable (§12).
 
+### 6.6 ★ Reading the moment back — `getPrivateSince` (added 2026-10-16)
+
+§6.5's row is not only an audit artifact: it is the **only** record of when a form became private, and
+the designer now shows that date to the admin (§19.1). `getPrivateSince(formId)` in
+`server/src/db/formAccess.ts` recovers it as
+
+```sql
+SELECT MAX(created_at) AS last_flip FROM form_access_events
+WHERE form_id = @formId AND event = 'backfilled'
+```
+
+Three decisions inside that one line, each of which is wrong if reversed:
+
+- **`backfilled`, not a new `visibility_changed_at` column.** The event already exists, is already
+  written in the same transaction as the flip (`setFormVisibility`), and already carries an actor. A
+  column would be a second source of truth for a fact the audit log already owns, and would be NULL for
+  every form flipped before it was added — silently regressing exactly the history §6.5 is protecting.
+- **`MAX`, not `MIN`.** A form can be flipped public → private → public → private. Only the **last**
+  flip is the boundary for an account that does not exist yet; an earlier one would name a date before a
+  later public window and claim people who saw the form during that window must request access.
+- **Never `forms.updated_at`.** It is the tempting one-liner and it is wrong: `updated_at` moves on every
+  title edit and field reorder, so it names a date *after* the flip and produces the same false claim.
+
+It returns `null` — not a zero date, and not the form's own creation date — when no flip ever
+grandfathered anybody. Two real cases produce that: a form created already private (§6.4), and a form
+privatised while the organization had no School Contacts at all. The designer then says so in words
+rather than inventing a boundary (see §19.1).
+
+Note the SQL aliases the column `last_flip` rather than `created_at` deliberately: `normalizeRow`
+(`db/client.ts`) restores a real `Date` for column names listed in `TIMESTAMP_COLUMNS`, so a name
+outside that set arrives as a `Date` under SQL Server and a raw string under Turso. The aliased value
+goes through `parseTimestamp`, which handles both.
+
 ---
 
 ## 7. Enforcement
@@ -972,7 +1005,7 @@ One page, organisation-scoped, listing **every form the caller is entitled to kn
 | **My forms** | every form the caller can read — public forms, plus private forms they hold a grant for | **Open** → the normal queue/report for that form |
 | **Available to request** | private forms in the organisation the caller **cannot** read and has **no row** for | **Request access** |
 | **Requested** | private forms with a `pending` row | **Withdraw request** + *"waiting since 28 Sep"* |
-| *(a fourth, folded into the third)* | private forms with a `denied` row | **no action** — *"Declined 28 Sep"* / *"Access removed 28 Sep"* + the admin's note ⟵ **§15 Q5** |
+| *(also rendered in **Available to request**)* | private forms with a `denied` row | **Request access** — plus *"Declined 28 Sep"* + the admin's note when the refusal was a **decline**. A **revocation** is deliberately **not** narrated here: the row reads like a form the person never held (§18.1). ⟵ **§15 Q5**, superseded by **§18** |
 
 **★ The `denied` rows are shown, not hidden.** §15 Q5 answered that a decline is final from the requester's
 side, and the temptation is to hide the form entirely so the person stops thinking about it. That is worse:
@@ -1374,7 +1407,9 @@ rather than quietly applied.
 | `RequestRefusal` | included `"denied"` | removed — the union is `already_readable \| not_private \| not_found` |
 | `POST /requests` | mapped the `denied` refusal to a 400 | that branch is gone |
 | `AvailableForms` grouping | `denied` → the *Requested* group, no action | `denied` → the *Available to request* group, with **Request access** |
+| `AvailableForms` denied sub-line | *"Declined 28 Sep"* / *"Access removed 28 Sep"* + the note | unchanged for a **decline**; **suppressed entirely for a revocation** — the row reads exactly like a form the person never held, and the `revoked` event stays in the log |
 | `LockedFormPanel` | `denied` showed "This has to be changed by an administrator" | shows the reason **and** a **Request access again** button |
+| `LockedFormPanel` (**2026-10-16**) | *"Your access to #2 CDM Google Form was removed on 16 Oct"* | **suppressed for a revocation**, same rule as the Available Forms row above: the panel falls through to the ordinary "*#2 CDM Google Form* is a private form. Ask an administrator for access." state with the `Lock` icon and a **Request access** button. No page tells the person their access was revoked; the `revoked` event remains in the log for administrators |
 | `AdminSettings` drawer copy | "cannot ask again" | "can ask for access again — approving that request restores it" |
 
 ### 18.2 ★ What is deliberately NOT lost
@@ -1430,3 +1465,42 @@ the API's refusal; the code and the copy were then brought into line together.
 **★ Generalise: a probe that asserts the CURRENT behaviour will happily enshrine a contradiction between
 what the UI promises and what the API does.** The check that caught this was the one written from the
 *requirement* rather than from the implementation.
+
+---
+
+## 19. ★ Added 2026-10-16 — telling the admin who the flip does *not* cover
+
+### 19.1 The consequence message under **Visibility**
+
+Flipping a form to **Private** is the only action in the designer with a side effect that reaches other
+people's accounts: §6's grandfather grants every School Contact who did not already have a row. An admin
+who does not know that will assume the flip is retroactive — *"nobody new can see it"* — and will be
+surprised a week later when a newly registered School Contact sees the form.
+
+So the designer states the boundary in words, immediately under the control and in bold:
+
+> **Users who register after 16 Oct 2026 will need to request access.**
+
+| Detail | Decision |
+|---|---|
+| Placement | In the **Visibility** card, under the select's description — next to the control that causes it, not in a help article |
+| Weight | **Bold**, because it is a consequence, not a description of the setting |
+| Date source | `private_since` from the API (§6.6) — the *last* `backfilled` event, never `updated_at` and never the form's creation date |
+| Shown when | `form.visibility === "private"` only — on a public form the sentence has no referent |
+| `private_since === null` | A **different sentence**, not a blank date: *no account existed to keep when this form was made private*, so every School Contact is covered by §9's request flow. Two genuinely different situations (§6.4's "created already private", and a flip with zero School Contacts) and the copy must not pretend one is the other |
+| Formatted | Local `fmtDate()` in `AdminFormDesigner.tsx`, matching `AvailableForms.tsx`'s day/month/year shape, so one date reads the same on both pages |
+
+**Why this is copy and not a rule.** It changes no permission. It exists so that the *administrator*
+understands the grandfather, because the grandfather is invisible from the admin's side: the grants it
+creates are rows in `form_access`, not something the designer otherwise exposes. A date the admin can
+read is the difference between a deliberate decision and an unexplained one.
+
+### 19.2 What this deliberately did NOT change
+
+**The grandfather itself (§6) is untouched.** No grant was added, removed or backfilled differently — the
+message only narrates what §6 already does. In particular the flip still does not re-grant an account
+whose row is `denied` (§6.4), so the sentence stays true for a person who was refused or revoked.
+
+**The audit log is still the record.** `private_since` is *derived*, never stored: the `backfilled`
+events remain the sole source of truth, so a correction to that history needs no migration and cannot
+drift from a column.

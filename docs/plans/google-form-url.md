@@ -1,8 +1,34 @@
 # Plan — Google Form URL field + field import
 
-**Status:** Draft for review
+**Status:** ⛔ **CANCELLED 2026-10-16** — the field-import half is abandoned; only the URL field shipped.
 **Date:** 2026-09-13
 **Area:** Admin → Form Designer (`/admin/forms/:id`)
+
+---
+
+## 0. Cancellation notice (2026-10-16)
+
+**Automatic field import will not be built.** The admin decision was that the feature is not
+wanted, not merely that it is unfinished — so it was removed rather than left dormant:
+
+| Removed | Where |
+| --- | --- |
+| **Generate form fields** checkbox + "Generate fields now" button | `client/src/pages/admin/AdminFormDesigner.tsx` |
+| `handleGenerateFields` handler and its `generateFormFields` / `generating` / `generateMsg` state | same file |
+| `api.generateFormFields()` client wrapper | `client/src/lib/api.ts` |
+| `POST /api/forms/:id/generate-fields` route (was a 501 stub — `GOOGLE_FORMS_NOT_CONFIGURED`) | `server/src/routes/forms.ts` |
+| `generate_form_fields` request keys | `server/src/schemas.ts` (`createFormSchema`, `updateFormSchema`) |
+| Guide/plan rows describing the control | `docs/guides/user-guide.md`, `docs/plans/user-guide.md`, `docs/plans/user-roles.md` |
+
+`POST /:id/generate-fields` was never reachable in practice: it validated the form and the URL
+and then always answered `501`, because the Google Forms OAuth scope from §2 was never minted.
+`generate_form_fields` was written into the request body and **read back by nothing** — it never
+reached the database or changed any behavior, so deleting it loses no data and no semantics.
+
+**What survives, deliberately:** the **Google Form URL** field itself. It is still stored on
+`dbo.forms.google_form_url` and still shown to staff as a link, which is all §1 items 1 and 3
+ever needed. Sections below that describe *reading* the form (§2, §5.3, §5.4, §6.2, §6.3, §7,
+§10, §11) are kept only as a record of what was considered; do not implement them.
 
 ---
 

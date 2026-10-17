@@ -22,7 +22,7 @@
  *   4. Every row-level site that accepts a form id applies the check (§7.2).
  *   5. Both dialects declare both tables and the column, and the timestamp
  *      columns are registered (or the two engines disagree about the shape).
- *   6. The seven routes are registered in the inventory AND documented in
+ *   6. The ten routes are registered in the inventory AND documented in
  *      Swagger — the existing coverage test proves the second half.
  */
 import { readFileSync } from "node:fs";
@@ -255,7 +255,7 @@ describe("route registration", () => {
     "/api/form-access/requests/withdraw",
     "/api/form-access/requests/decide",
     "/api/form-access/grants",
-    "/api/form-access/summary",
+    "/api/form-access/notifications",
     // Per-account access, for the admin's Edit User drawer.
     "/api/form-access/user/{userId}",
     "/api/form-access/user/{userId}/remove",
@@ -295,7 +295,7 @@ describe("route registration", () => {
       ["get", "/requests"],
       ["post", "/requests/decide"],
       ["get", "/grants"],
-      ["get", "/summary"],
+      ["get", "/notifications"],
     ] as const) {
       const needle = `formAccessRouter.${method}("${path}"`;
       const idx = ROUTER.indexOf(needle);
@@ -401,5 +401,112 @@ describe("per-account access (the Edit User drawer)", () => {
     const schema = source("schemas.ts").slice(source("schemas.ts").indexOf("removeAccessSchema"));
     const body = schema.slice(0, schema.indexOf("});"));
     expect(body).not.toContain("user_id");
+  });
+});
+
+// -----------------------------------------------------------------------------
+// 8. The bell — a projection of the queue, never a copy of it
+// (docs/plans/access-requests.md §5, §7, §11.)
+// -----------------------------------------------------------------------------
+describe("the administrator's bell", () => {
+  const SWAGGER = source("swagger.ts");
+  /** The `/notifications` handler, from its registration to the end of its body. */
+  const NOTIFICATIONS = (() => {
+    const idx = ROUTER.indexOf('formAccessRouter.get("/notifications"');
+    expect(idx, "GET /notifications is not registered").toBeGreaterThan(-1);
+    return ROUTER.slice(idx, ROUTER.indexOf("\n});", idx));
+  })();
+  /** The one query behind the dropdown list. */
+  const RECENT = (() => {
+    const idx = DATA.indexOf("export async function listRecentAccessRequests");
+    expect(idx, "listRecentAccessRequests does not exist").toBeGreaterThan(-1);
+    return DATA.slice(idx, DATA.indexOf("\n}", idx));
+  })();
+  /** The count behind the badge. */
+  const COUNT = (() => {
+    const idx = DATA.indexOf("export async function countPendingAccessRequests");
+    expect(idx, "countPendingAccessRequests does not exist").toBeGreaterThan(-1);
+    return DATA.slice(idx, DATA.indexOf("\n}", idx));
+  })();
+
+  it("★ replaces /summary rather than sitting beside it", () => {
+    // ★ One caller, one question. Keeping both would leave two reads that answer
+    // "how many are waiting" and can therefore return two different numbers.
+    expect(ROUTER).not.toContain('"/summary"');
+    expect(INVENTORY).not.toContain('"/api/form-access/summary"');
+    expect(SWAGGER).not.toContain('"/api/form-access/summary"');
+  });
+
+  it("is registered in the inventory and documented", () => {
+    // Without the inventory row the Swagger coverage test fails; without the path
+    // list above, nothing would notice the route had gone missing.
+    expect(INVENTORY).toContain('"/api/form-access/notifications"');
+    expect(SWAGGER).toContain('"/api/form-access/notifications"');
+  });
+
+  it("★ writes nothing — there is no notification row to create", () => {
+    // ★ The defect this guards: a stored notification is a second source of truth
+    // that can drift from `form_access`, and the drift surfaces as an alert whose
+    // Approve button acts on a request that was already decided. It also needs a
+    // "seen" cursor to distinguish "unread" from "pending", which is a third
+    // thing to keep in step. The bell reads the queue; it never annotates it.
+    expect(NOTIFICATIONS).not.toMatch(/INSERT\s+INTO|UPDATE\s+dbo|DELETE\s+FROM/i);
+    expect(NOTIFICATIONS).not.toMatch(/\bseen\b|unread|markAsRead/i);
+  });
+
+  it("★ reads the SAME pending set the count counts", () => {
+    // The badge and the list must be two projections of one predicate. If the
+    // list ever filtered on anything extra (a `source`, a school, a date), the
+    // badge would say 4 above a list of 2 with no way to tell why.
+    expect(NOTIFICATIONS).toContain("countPendingAccessRequests");
+    expect(NOTIFICATIONS).toContain("listRecentAccessRequests");
+    expect(RECENT).toContain("a.status = 'pending'");
+    expect(COUNT).toContain("a.status = 'pending'");
+  });
+
+  it("★ caps in SQL, never in the presentation", () => {
+    // ★ A client-side `rows.slice(0, 5)` is the slice-then-filter pattern this
+    // repo bans: it fetches the whole queue to render five rows, and any count
+    // derived from the sliced array is a count of the window, not of the queue.
+    expect(RECENT).toContain("dialect().selectPage(");
+    expect(RECENT).toMatch(/pageSize:\s*limit/);
+    expect(RECENT).not.toMatch(/\.slice\(/);
+    // `TOP n` is banned in shared query files — `driver/libsql.test.ts` asserts
+    // it repo-wide, and `selectPage` is what keeps the two dialects' paging
+    // syntax out of this file.
+    expect(DATA).not.toMatch(/SELECT\s+TOP\b/i);
+  });
+
+  it("clamps the limit at the edge, so no caller can widen it", () => {
+    // A `?limit=100000` would make the badge's "5 newest" a lie in the other
+    // direction, and an unbounded read is what a reviewer would trust.
+    expect(ROUTER).toContain("BELL_DEFAULT_LIMIT = 5");
+    expect(ROUTER).toContain("BELL_MAX_LIMIT = 20");
+    expect(ROUTER).toMatch(/Math\.min\(n,\s*BELL_MAX_LIMIT\)/);
+    expect(NOTIFICATIONS).toContain("bellLimit(req.query.limit)");
+  });
+
+  it("★ orders NEWEST first with a TOTAL order", () => {
+    // ★ The queue is oldest-first because triage wants the longest waiter; the
+    // bell wants the arrival that just happened. Two questions, two orders.
+    //
+    // ★ The tie-breaker is the load-bearing half. A backfill or a batch grant
+    // writes several rows inside the same millisecond, and with a non-total
+    // order the database may return them in a different sequence for two
+    // identical calls — so the bell would show five rows, then five others.
+    const orderBy = /orderBy:\s*"([^"]+)"/.exec(RECENT);
+    expect(orderBy, "listRecentAccessRequests has no orderBy").not.toBeNull();
+    expect(orderBy![1].startsWith("a.requested_at DESC")).toBe(true);
+    expect(
+      orderBy![1].split(",").length,
+      "the bell's order is not total — a second call can return different rows"
+    ).toBeGreaterThan(1);
+  });
+
+  it("leaves the triage queue's order alone", () => {
+    // The queue is the surface an administrator works through, so its
+    // oldest-first order is a decision, not an oversight. The bell must not
+    // reorder it on the way past.
+    expect(DATA).toMatch(/ORDER BY a\.requested_at`/);
   });
 });

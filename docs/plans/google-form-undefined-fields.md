@@ -21,9 +21,10 @@ New behaviour, in one sentence:
 > nothing becomes a per-submission `text` field so the answer is never lost.**
 
 This is a **capture / safety-net** feature. It deliberately does **not** promote the captured
-names into real form fields (see §11); the "proper" path — importing the Google Form's questions
-as designer fields — is [`google-form-url.md`](./google-form-url.md), which still returns `501`
-until the Forms OAuth scope is configured.
+names into real form fields (see §11); the path that would have done so — importing the Google
+Form's questions as designer fields — was [`google-form-url.md`](./google-form-url.md), which was
+**cancelled and removed on 2026-10-16** (§0 there). This safety net is therefore the permanent
+answer for a form whose questions were never defined here, not a stopgap.
 
 ---
 
@@ -34,7 +35,7 @@ tracked files, the nearest app-side messages are:
 
 | String | Where | When it fires |
 | --- | --- | --- |
-| `"No fields found in that Google Form."` | `client/src/pages/admin/AdminFormDesigner.tsx:217` | Admin presses **Generate fields now** and the fetch returns none |
+| `"No fields found in that Google Form."` | `client/src/pages/admin/AdminFormDesigner.tsx` (removed 2026-10-16) | Fired when the admin pressed **Generate fields now** and the fetch returned none. **This string no longer exists in the codebase** — the whole control was deleted with the feature |
 | `"No answers mapped to form fields. Check question titles against field labels."` | `docs/scripts/form-2.md:40`, `docs/plans/google-script.md:41` | **The Apps Script itself throws** when the title→id map produced zero answers |
 
 So the failure the user is seeing is almost certainly the **Apps Script aborting before it ever
@@ -190,6 +191,32 @@ export const createWebhookSubmissionSchema = z.object({
 `server/src/webhook/intake.ts` swaps `createSubmissionSchema` → `createWebhookSubmissionSchema`.
 The other two callers are untouched.
 
+### 4.4 After (additive, follow-up — see §15)
+
+Each answer item may also carry an **optional `item_id`** — Google's own id for the question
+(`item.getId()`), which is the only identity a retitle cannot destroy:
+
+```jsonc
+{
+  "form_id": 2,
+  "answers": [
+    { "label": "Student name", "item_id": "1234567890", "value": "Ada" }
+  ]
+}
+```
+
+**Rules** (extending 4.2)
+
+5. `item_id` is accepted as a **string or a number** — its shape is Google's business, and a
+   spreadsheet round-trip can coerce it. `normalizeItemId` folds both onto the one string stored in
+   `form_fields.source_item_id`, trimming and slicing to the column's 64 chars. It carries **no
+   `.max()`** for the same reason `label` has none: an over-long value is truncated, never a 400.
+6. Resolution order is **`field_id` → `label` → `item_id`** (see §15 for why the new tier is last).
+7. `item_id` is never required and never an identity on its own — it only ever *diverts an answer
+   that would otherwise have been captured*. Pre-§15 payloads keep resolving identically.
+8. An answer still must carry `field_id` or a non-empty `label`; `item_id` does **not** satisfy that
+   refine, because it only resolves against a field that has already been bound.
+
 ---
 
 ## 5. Server behaviour — the resolution algorithm
@@ -314,14 +341,18 @@ function onFormSubmit(e) {
 
   const answers = [];
   itemResponses.forEach(function (itemResponse) {
-    const title = itemResponse.getItem().getTitle();
+    const item = itemResponse.getItem();
+    const title = item.getTitle();
+    // Google's own id for this question — stable across renaming (see §12).
+    const itemId = item.getId();
     const raw = itemResponse.getResponse();
     const value = Array.isArray(raw) ? raw.map(String) : String(raw);
 
     const fieldId = fieldMap[title];
-    // ★ Always carry the title; add field_id only when it resolves.
-    answers.push(fieldId ? { field_id: fieldId, label: title, value }
-                         : { label: title, value });
+    // ★ Always carry the title; add field_id only when it resolves, and always
+    // carry item_id so the server can bind its field to this question.
+    answers.push(fieldId ? { field_id: fieldId, label: title, item_id: itemId, value }
+                         : { label: title, item_id: itemId, value });
   });
 
   // ★ No more "no answers mapped" abort — an unmapped title is captured as text.
@@ -496,9 +527,11 @@ in its CHECK on every deployment, and the plan adds no columns.
 - **Promoting captured names into real form fields.** A captured field lives on **one** submission;
   it is not a column in the grid, reports, exports, or the designer. This is the correct scope for
   "capture what arrived", but an admin who wants `"Student ID"` as a real column must still define it.
-- **Importing Google questions automatically.** That is [`google-form-url.md`](./google-form-url.md)
-  / **Generate fields now** (`server/src/routes/forms.ts:265`), which returns `501` until the Forms
-  OAuth scope exists. This plan is the safety net that makes the webhook useful *before* that lands.
+- **Importing Google questions automatically.** That was [`google-form-url.md`](./google-form-url.md)
+  / **Generate fields now** (`server/src/routes/forms.ts:265`). **Both were removed on 2026-10-16**
+  — the import feature was cancelled, not deferred (see `google-form-url.md` §0), so this escalation
+  path is now the *permanent* answer, not a stopgap: an admin promotes the captured names they want
+  as real columns. Do not plan around an automatic import arriving later.
 - **Outbound webhooks** (`docs/features/webhook.md`) — unrelated.
 - **Google file uploads → Drive/`google_doc` typing** for captured fields (they are always `text`).
 
@@ -598,3 +631,50 @@ a defined field is stored as today, and a title that matches nothing is stored a
 and already cascades with its submission, so **there is no migration**. The change is confined to
 the webhook schema, the submission-intake mapping, one new pure+tested module, and a detail-page card
 (the ad-hoc API/CSS exist but were never wired into any page). The in-app parent path is untouched.
+
+---
+
+## 15. Follow-up (implemented): retitle-resilience via `form_fields.source_item_id`
+
+§5's title fallback is a *safety net*, not a stable identity, and it has one hole that this plan
+deliberately left open: **`label` is the only identity available for an undefined question, so
+retitling a question in Google disconnects its answer.** The answer still arrives and is still
+captured — nothing is lost — but it lands in `submission_adhoc_fields` instead of its mapped column,
+with no error, no alert, and a webhook log row that says `succeeded`. The only symptom is an extra
+field on one submission, which is why it can go unnoticed for weeks.
+
+`field_id` cannot close this hole, which is the non-obvious part: it is **not** a Google identifier.
+It is `form_fields.id`, this app's own counter, and the Apps Script can only produce it by matching
+the question's *title* against `GET /api/forms/:id/public` (see `getFieldMap`). A retitle therefore
+removes `field_id` from the payload entirely — the one field that looked stable disappears precisely
+when it is needed.
+
+**The fix is a third identity tier plus a learned binding.**
+
+- `form_fields.source_item_id` (`NVARCHAR(64) NULL`, matching `public_id`; precedent:
+  `schools.source_id`) holds Google's own id for the question — `item.getId()`, an opaque string
+  Google assigns to the question itself and preserves across retitling.
+- The Apps Script now sends `item_id` on **every** answer, alongside `label` and the resolve-only
+  `field_id`. `FormApp` is a built-in service, so this needs **no OAuth scope** — unlike the `501`
+  *Generate fields now* path, which never worked and was removed on 2026-10-16.
+- `planSubmissionFields` resolves in the order **`field_id` → `label` → `item_id`**. The new tier is
+  deliberately LAST: every payload accepted today must resolve to exactly the field it resolves to
+  today, and only the answers that would otherwise have been *captured* are diverted.
+- **The binding is learned, never configured.** An answer that resolves by id or label while carrying
+  an `item_id` the field has not yet stored proposes `{ field_id, item_id }`; `createSubmission`
+  writes it best-effort (`bindFormFieldSourceItemIds`) after the submission is committed. So there is
+  **no backfill to run** — which matters, because the obvious backfill source (*Generate fields now*)
+  was **removed on 2026-10-16** along with the rest of the cancelled import feature
+  (`google-form-url.md` §0), and no operator can reach the database. Ordinary traffic builds
+  the association, the steady state proposes nothing, and the hot path pays no write.
+- The write is guarded so a wrong binding can never be made silently: it is scoped to the form, it
+  **never overwrites an existing `source_item_id`**, and an item id already claimed by a sibling
+  field is skipped (two fields sharing one Google question would make a retitle ambiguous).
+
+**What this does and does not change.** From the first submission after a retitle, an answer the old
+code would have captured resolves to its field again. The *very first* post-retitle submission may
+still be captured when the script has not been redeployed or the field was never bound — but that
+same submission is what teaches the binding, and *"Promote to form field"* (§11) backfills it along
+with every other submission carrying that title. So the practical failure mode shrinks from "silently
+permanent" to "at most one response, recoverable in one click". **No silent data loss remains, and
+unlike §7's card nothing here has to be noticed to work.**
