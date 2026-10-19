@@ -421,6 +421,24 @@ export const webhookAnswerSchema = z
   .object({
     field_id: z.coerce.number().int().positive().nullable().optional(),
     label: z.string().nullable().optional(),
+    // Google's own id for the question (`item.getId()` in the Apps Script) — the
+    // one identity a RETITLE cannot destroy.
+    //
+    // ★ This is not `field_id`. `field_id` is `form_fields.id`, this app's own
+    // counter, which the Apps Script can only produce by matching the question's
+    // TITLE against `GET /api/forms/:id/public`. So a retitle makes `field_id`
+    // vanish from the payload entirely — and with it the only identity the
+    // webhook had. `item_id` is assigned by Google, survives retitling, and is
+    // what `form_fields.source_item_id` stores once an answer has proven the
+    // pairing.
+    //
+    // Accepted as a string OR a number because its shape is Google's business:
+    // the Apps Script forwards `item.getId()` verbatim and a spreadsheet
+    // round-trip can turn it into a number. No `.max()`, and for the same reason
+    // `label` has none — the value is truncated on capture rather than allowed to
+    // 400 a submission. It is never used as a lookup key on its own; see
+    // `planSubmissionFields`.
+    item_id: z.union([z.string(), z.number()]).nullable().optional(),
     value: answerValue,
   })
   .refine((a) => a.field_id != null || (a.label ?? "").trim() !== "", {

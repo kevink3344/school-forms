@@ -25,6 +25,14 @@ yarn-debug.log*
 yarn-error.log*
 pnpm-debug.log*
 
+# Local-only working files: ad-hoc data drops, recovery exports, scratch
+# analysis. Never committed. Spreadsheets dropped here contain student PII.
+/.local/
+
+# HARD RULE: no student response data in git, wherever it is dropped.
+*.xlsx
+*.xls
+
 # Editor / OS
 .vscode/*
 !.vscode/extensions.json

@@ -10,12 +10,31 @@
 // and cover every edge case in §8 of the plan.
 //
 // THE ONE IDEA
-// An inbound answer can identify itself two ways: by `field_id` (how the webhook
-// has always worked) or by the Google Form question title in `label` (the only
-// identity available when a form was never defined in this app's designer). A
-// title that matches a defined field is stored against that field exactly as
-// before; a title that matches nothing becomes a per-submission `text` field, so
-// an answer is never dropped.
+// An inbound answer can identify itself three ways: by `field_id` (how the
+// webhook has always worked), by the Google Form question title in `label` (the
+// only identity available when a form was never defined in this app's designer),
+// or by `item_id` (Google's own id for the question). A title that matches a
+// defined field is stored against that field exactly as before; a title that
+// matches nothing becomes a per-submission `text` field, so an answer is never
+// dropped.
+//
+// ★ WHY THERE ARE THREE, AND WHY `item_id` IS LAST
+// `field_id` is NOT a Google identifier: it is `form_fields.id`, this app's own
+// counter, and the Apps Script can only obtain it by matching the question's
+// TITLE against `GET /api/forms/:id/public`. So retitling a question in Google
+// removes `field_id` from the payload entirely — the very identity that was
+// supposed to make the mapping robust disappears precisely when it is needed.
+//
+// `item_id` is Google's own (`item.getId()`), stable across retitling, and is
+// therefore the one identity a rename cannot destroy. It is tried LAST, after
+// `field_id` and `label`, so that every payload the webhook accepts today
+// resolves to exactly the field it resolves to today; `item_id` only ever
+// decides answers that would otherwise have been CAPTURED. Adding it as the
+// last resort is what makes this change additive rather than a remapping.
+//
+// A field learns its `item_id` from the first answer that arrives while the
+// title still matches (`FieldPlan.learned`), so no backfill is needed: raw
+// traffic builds the association, and once it exists a rename is a non-event.
 // -----------------------------------------------------------------------------
 
 export interface IncomingAnswer {
@@ -23,6 +42,15 @@ export interface IncomingAnswer {
   field_id?: number | null;
   /** The Google Form question title — always sent by the current Apps Script. */
   label?: string | null;
+  /**
+   * Google's own id for the question (`item.getId()`), when the caller sent one.
+   *
+   * Both a string and a number are accepted because the shape is Google's, not
+   * this app's: the Apps Script forwards `item.getId()` verbatim and a
+   * spreadsheet round-trip can turn it into a number. `normalizeItemId` folds
+   * both onto one string so a later `"123"` and `123` are one identity.
+   */
+  item_id?: string | number | null;
   value: string | number | boolean | string[] | null;
 }
 
@@ -41,6 +69,12 @@ export interface MatchedField {
   id: number;
   label: string;
   type: string;
+  /**
+   * Google's own id for the question this field mirrors, or null/absent when it
+   * has none yet. Declared optional so a caller that has no Google form behind
+   * it (a DB-free test, the in-app parent path) need not invent a value.
+   */
+  source_item_id?: string | null;
 }
 
 export interface FieldPlan {
@@ -50,14 +84,53 @@ export interface FieldPlan {
   captured: { label: string; value: IncomingAnswer["value"]; sort_order: number }[];
   /** Best-effort school name from a School-labelled answer (plan §5.3). */
   schoolName: string | null;
+  /**
+   * `item_id`s this payload proved for a field that did not have one yet —
+   * `→ form_fields.source_item_id`, written by `createSubmission`.
+   *
+   * ★ This is the whole migration. Rather than a backfill nobody can run (it
+   * needs a Google API scope this app does not have), a field learns its
+   * question's id from ordinary traffic: while the title still matches, every
+   * submission re-supplies the pairing, and the first one to arrive persists it.
+   * After that the title is optional and a retitle no longer disconnects
+   * anything.
+   *
+   * Computed HERE, purely, so the "is this binding safe to write?" decision is
+   * unit-testable without a database — it needs to know every field on the form,
+   * which is exactly what this function is already handed.
+   */
+  learned: { field_id: number; item_id: string }[];
 }
 
 /** `submission_adhoc_fields.label` is `NVARCHAR(200)`. */
 const MAX_LABEL_LENGTH = 200;
 
+/** `form_fields.source_item_id` is `NVARCHAR(64)`. */
+export const MAX_ITEM_ID_LENGTH = 64;
+
 /** Trim + case-fold, so `" Student Name "` and `"student name"` are one label. */
 export function normalizeLabel(s: string): string {
   return s.trim().toLowerCase();
+}
+
+/**
+ * Fold a wire `item_id` onto the one string form stored in
+ * `form_fields.source_item_id`, or null when there is no usable value.
+ *
+ * ★ The trailing slice is the same call the capture path makes for an over-long
+ * title, and for the same reason: a value that does not fit the column is
+ * TRUNCATED, never rejected. An item id that overran `NVARCHAR(64)` would
+ * otherwise turn a parent's submission into a 400 or a 500, which is a far worse
+ * outcome than a shortened lookup key that simply never matches.
+ *
+ * Accepts `number` as well as `string` because `item.getId()` reaches us through
+ * a spreadsheet-apps payload and a round-trip can coerce it; `String(123)` and
+ * `"123"` must be the SAME identity or a field would acquire two.
+ */
+export function normalizeItemId(v: string | number | null | undefined): string | null {
+  if (v === null || v === undefined) return null;
+  const s = (typeof v === "number" ? String(v) : v).trim();
+  return s === "" ? null : s.slice(0, MAX_ITEM_ID_LENGTH);
 }
 
 /**
@@ -102,22 +175,34 @@ export function planSubmissionFields(
 ): FieldPlan {
   const byId = new Map<number, MatchedField>();
   const byLabel = new Map<string, MatchedField>();
+  // Google's item id → the field that has claimed it. Empty for every form whose
+  // fields have never been matched against a payload, which is why relying on it
+  // alone would change nothing today; it earns its keep on later submissions.
+  const byItemId = new Map<string, MatchedField>();
   for (const raw of formFields) {
     const id = Number(raw.id);
     if (!Number.isFinite(id)) continue;
     // Normalise the id onto the stored copy, so `values[].field_id` is a real
     // number even when the caller passed the driver's string.
-    const field: MatchedField = { id, label: raw.label, type: raw.type };
+    const field: MatchedField = { id, label: raw.label, type: raw.type, source_item_id: raw.source_item_id ?? null };
     byId.set(id, field);
     // First field wins on a duplicate label: the designer's own order decides,
     // rather than whichever row the database happens to return last.
     const key = normalizeLabel(field.label);
     if (!byLabel.has(key)) byLabel.set(key, field);
+    // Same first-wins rule for a duplicate item id, so a form that somehow holds
+    // two fields claiming one Google question stays deterministic rather than
+    // resolving differently on different runs.
+    const itemKey = normalizeItemId(field.source_item_id);
+    if (itemKey && !byItemId.has(itemKey)) byItemId.set(itemKey, field);
   }
 
   const values: FieldPlan["values"] = [];
   const captured: FieldPlan["captured"] = [];
   const seen = new Set<string>();
+  // Keyed by item id, so at most one field is ever bound to a given Google
+  // question and a payload repeating an answer cannot bind twice.
+  const learned = new Map<string, number>();
   let schoolName: string | null = null;
 
   answers.forEach((a, index) => {
@@ -131,9 +216,24 @@ export function planSubmissionFields(
     let field: MatchedField | undefined;
     if (a.field_id != null) field = byId.get(Number(a.field_id));
     if (!field && a.label) field = byLabel.get(normalizeLabel(a.label));
+    // ★ LAST, and deliberately so. `item_id` is the strongest identity Google
+    // offers — it survives a retitle — but it is consulted only once `field_id`
+    // and `label` have both failed, because anything that resolves today must go
+    // on resolving exactly as it does today. The answers that reach this line are
+    // the ones that would otherwise have been CAPTURED, and diverting those is
+    // the entire point of the column.
+    const itemId = normalizeItemId(a.item_id);
+    if (!field && itemId) field = byItemId.get(itemId);
 
     if (field) {
       values.push({ field_id: field.id, value: a.value });
+      // Learn the pairing while a title still vouches for it, so a LATER retitle
+      // has something to fall back on. `!field.source_item_id` means this field
+      // has no id yet; `!byItemId.has(itemId)` means no sibling already owns this
+      // question — binding both would give one Google question two owners.
+      if (itemId && !field.source_item_id && !byItemId.has(itemId) && !learned.has(itemId)) {
+        learned.set(itemId, field.id);
+      }
     } else {
       // Defensive fallback: the webhook schema already refuses an answer with
       // neither identity (plan §8 case 9), so this only ever names a positional
@@ -163,7 +263,12 @@ export function planSubmissionFields(
     }
   });
 
-  return { values, captured, schoolName };
+  return {
+    values,
+    captured,
+    schoolName,
+    learned: [...learned].map(([item_id, field_id]) => ({ field_id, item_id })),
+  };
 }
 
 /**

@@ -25,7 +25,10 @@ import {
 
 const FIELDS: MatchedField[] = [
   { id: 9, label: "Student Name", type: "text" },
-  { id: 10, label: "School", type: "text" },
+  // `School` is the ALREADY-BOUND field, so the collision guard has something to
+  // collide with: item 555 belongs to it and must never be re-learned by another
+  // field (see the "item_id" block at the end of this file).
+  { id: 10, label: "School", type: "text", source_item_id: "555" },
 ];
 
 const SCHOOL_LABELS = ["school", "school name"];
@@ -252,6 +255,193 @@ describe("adhocRowsMatchingLabel — promotion selects what capture would", () =
   it("does not match on a substring", () => {
     // "Student" must not sweep up both "Student ID" and "Student Name".
     expect(adhocRowsMatchingLabel(rows, "Student")).toEqual([]);
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Retitle-resilience (`form_fields.source_item_id`,
+// docs/plans/google-form-undefined-fields.md §15).
+//
+// The incident these prevent: a question titled "Course choice #1" was retitled in
+// Google. The Apps Script resolves `field_id` by TITLE, so the retitle removed
+// `field_id` from the payload entirely; the answer matched no field, was captured
+// as ad-hoc text, and the mapped column went silently blank for 68 submissions
+// before anyone noticed. Google's own item id is the one identity a retitle
+// cannot destroy — so these tests are about (a) a renamed question still landing
+// on its field, and (b) the binding being LEARNED from ordinary traffic rather
+// than configured, because there is no backfill anyone could run.
+// -----------------------------------------------------------------------------
+describe("planSubmissionFields — item_id (surviving a question retitle)", () => {
+  it("resolves a RENAMED question through the field's stored item id", () => {
+    // ★ The headline case. The title is new so the label cannot match, and the
+    // Apps Script could not resolve `field_id` for the same reason — `item_id` is
+    // the only thing left that identifies the question. Without this the answer
+    // is captured instead, which is exactly what happened in production.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ label: "Course choice #1 (2026-27)", item_id: "555", value: "Spanish" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.values).toEqual([{ field_id: 10, value: "Spanish" }]);
+    expect(plan.captured).toEqual([]);
+  });
+
+  it("still CAPTURES a renamed question when the field was never bound", () => {
+    // The honest limit of the fix, and it must not silently become a value: with
+    // no stored item id there is nothing to match on, so the answer is captured
+    // (never dropped). This submission is also what teaches the binding below.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ label: "Course choice #1 (2026-27)", item_id: "777", value: "Spanish" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.values).toEqual([]);
+    expect(plan.captured.map((c) => c.label)).toEqual(["Course choice #1 (2026-27)"]);
+  });
+
+  it("does NOT let item_id outrank a title that still matches", () => {
+    // The new tier is LAST on purpose: every payload that resolves today must go
+    // on resolving to the same field. Here the title says `Student Name` (9) while
+    // the item id belongs to `School` (10) — an inconsistency that only a stale
+    // binding could produce. The title wins, so nothing is remapped.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ label: "Student Name", item_id: "555", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.values).toEqual([{ field_id: 9, value: "Ada" }]);
+  });
+
+  it("learns the binding on first sight, from a title match", () => {
+    // How the column is populated at all. `Student Name` (9) has no item id, and
+    // the answer still carries the old title, so this is the moment the pairing is
+    // provable — and the only moment, since the next submission may be renamed.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: "123", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([{ field_id: 9, item_id: "123" }]);
+  });
+
+  it("learns it from a LABEL-only match too (a form with no resolvable field_id)", () => {
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ label: "Student Name", item_id: "123", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([{ field_id: 9, item_id: "123" }]);
+  });
+
+  it("proposes NOTHING once the field is already bound (the steady state)", () => {
+    // If this ever fails, every submission of every form issues an UPDATE forever
+    // — a silent write on the hot path for no benefit.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ label: "School", item_id: "555", value: "Broughton" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([]);
+  });
+
+  it("proposes NOTHING when the answer carries no item_id", () => {
+    // Every payload from an un-updated Apps Script takes this path, so it must
+    // stay a no-op rather than binding a field to nothing.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([]);
+  });
+
+  it("never gives ONE item id two owners", () => {
+    // Item 555 already belongs to `School` (10). If `Student Name` (9) could claim
+    // it too, a later retitle would have two fields eligible for the same question
+    // and no rule to choose between them.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: "555", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([]);
+  });
+
+  it("binds an item id to at most ONE field when a payload repeats it", () => {
+    // A duplicated answer is malformed, so the outcome must be deterministic
+    // rather than "whichever field the payload happened to list last".
+    const plan = planSubmissionFields(
+      FIELDS,
+      [
+        { field_id: 9, label: "Student Name", item_id: "123", value: "Ada" },
+        { field_id: 9, label: "Student Name", item_id: "123", value: "Ada" },
+      ],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([{ field_id: 9, item_id: "123" }]);
+  });
+
+  it("folds a NUMBER item id onto the stored string, so a field cannot acquire two", () => {
+    // `item.getId()` reaches us through a JSON payload a spreadsheet can coerce.
+    // `123` and `"123"` must be one identity or the guard above compares nothing.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: 123, value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([{ field_id: 9, item_id: "123" }]);
+  });
+
+  it("truncates an absurd item id to the column's 64 chars instead of failing", () => {
+    // Same rule the captured LABEL follows: a value that does not fit is
+    // shortened, never allowed to 400 or 500 a parent's submission.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: "9".repeat(500), value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([{ field_id: 9, item_id: "9".repeat(64) }]);
+  });
+
+  it("ignores a blank item id rather than binding on empty", () => {
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: "   ", value: "Ada" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([]);
+  });
+
+  it("leaves a blank field's answer alone (nothing to bind)", () => {
+    // A blank answer is skipped before matching, so it can never teach a binding.
+    const plan = planSubmissionFields(
+      FIELDS,
+      [{ field_id: 9, label: "Student Name", item_id: "123", value: "" }],
+      SCHOOL_LABELS
+    );
+    expect(plan.values).toEqual([]);
+    expect(plan.learned).toEqual([]);
+  });
+
+  it("binds every unbound field from a single submission", () => {
+    // The real shape of the first submission after deployment: no field is bound
+    // yet, so one payload teaches the whole mapping at once.
+    const unbound: MatchedField[] = [
+      { id: 9, label: "Student Name", type: "text" },
+      { id: 10, label: "School", type: "text" },
+    ];
+    const plan = planSubmissionFields(
+      unbound,
+      [
+        { field_id: 9, label: "Student Name", item_id: "123", value: "Ada" },
+        { label: "School", item_id: "555", value: "Broughton" },
+      ],
+      SCHOOL_LABELS
+    );
+    expect(plan.learned).toEqual([
+      { field_id: 9, item_id: "123" },
+      { field_id: 10, item_id: "555" },
+    ]);
   });
 });
 

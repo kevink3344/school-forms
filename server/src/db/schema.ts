@@ -308,6 +308,19 @@ export interface FormField {
   // ones created later — so existing rows keep behaving as they always did. An
   // empty array is the distinct "granted to nobody" state. See fieldAccessRoles.
   roles: string[] | null;
+  // Google's own id for the question this field mirrors — `item.getId()` in the
+  // Apps Script. NULL for a field with no Google question behind it (one created
+  // in this app's designer) and for every row written before the column existed.
+  //
+  // ★ The answer to "doesn't each question have a stable id?": Google's does, but
+  // it is THIS column, and it is only populated once an inbound answer has been
+  // matched to the field by another route. `id` above is `form_fields.id`, this
+  // app's own counter, and is NOT a Google identifier.
+  //
+  // Read by `planSubmissionFields` as the last-resort identity, so a question
+  // retitled in Google still resolves to its field. Never used as a primary key
+  // and never written by the designer — see `bindFormFieldSourceItemIds`.
+  source_item_id: string | null;
 }
 
 // Resolve the roles that may access an internal (staff_only) field.
@@ -1230,6 +1243,28 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // treated as visible to all current roles (admin + staff).
   `IF COL_LENGTH('dbo.form_fields', 'roles') IS NULL
      ALTER TABLE dbo.form_fields ADD roles NVARCHAR(MAX) NULL;`,
+
+  // Google's own id for the question this field mirrors — `item.getId()` in the
+  // Apps Script, an opaque numeric string Google assigns to the question itself.
+  //
+  // ★ WHY THIS EXISTS. Until this column, a Google question could only be
+  // recognised by its TITLE, which is what the Apps Script matches against to
+  // resolve `field_id` (see `getFieldMap` in docs/scripts/form-2.md). So retitling
+  // a question in Google silently disconnected it from its field: the title
+  // stopped resolving, the answer arrived with no `field_id`, matched nothing, and
+  // was captured into `submission_adhoc_fields` instead of the mapped column. The
+  // answer was never LOST — capture is the deliberate safety net — but the field
+  // went quiet with no error, no alert, and no log row saying anything but
+  // `succeeded`. Google's item id is stable across retitling, so storing it turns
+  // a rename from an incident into a non-event.
+  //
+  // NVARCHAR(64) matches `submissions.public_id`: the value is opaque, and the
+  // mapping module slices to this width so an absurd one cannot 500 an intake.
+  //
+  // Precedent: `dbo.schools.source_id` — an external system's own key, kept beside
+  // the local one rather than replacing it.
+  `IF COL_LENGTH('dbo.form_fields', 'source_item_id') IS NULL
+     ALTER TABLE dbo.form_fields ADD source_item_id NVARCHAR(64) NULL;`,
 
   // One-time backfill: existing staff-only fields default to admin + staff, the
   // two roles that existed before this feature. Explicitly stored so the value is

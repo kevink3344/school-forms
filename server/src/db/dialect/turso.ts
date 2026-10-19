@@ -160,7 +160,8 @@ const TURSO_DDL: string[] = [
      staff_only  BOOLEAN NOT NULL DEFAULT 0,
      sort_order  INTEGER NOT NULL DEFAULT 0,
      placeholder TEXT,
-     roles       TEXT
+     roles       TEXT,
+     source_item_id TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS IX_form_fields_form ON form_fields(form_id)`,
 
@@ -554,6 +555,21 @@ export const tursoDialect: Dialect = {
       // BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
       table: "submissions",
       column: "declared_school_name",
+      definition: "TEXT",
+    },
+    {
+      // Google's own id for the question a form field mirrors
+      // (`item.getId()` in the Apps Script). It exists to make retitling a
+      // question in Google a non-event: the title is the identity the Apps
+      // Script matches on, so a rename used to disconnect the question from its
+      // field and divert the answer into `submission_adhoc_fields`.
+      //
+      // In `TURSO_DDL` as well, so a fresh database gets it from CREATE TABLE;
+      // this entry is for a database created before the column existed. It is a
+      // plain opaque string — NOT a boolean and NOT a timestamp — so it must not
+      // appear in BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
+      table: "form_fields",
+      column: "source_item_id",
       definition: "TEXT",
     },
   ],

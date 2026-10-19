@@ -1,7 +1,7 @@
 import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
-import { planSubmissionFields, adhocRowsMatchingLabel, type IncomingAnswer } from "../webhook/field-mapping.js";
+import { planSubmissionFields, normalizeItemId, adhocRowsMatchingLabel, type IncomingAnswer } from "../webhook/field-mapping.js";
 import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES, normalizeSchoolKey } from "./schema.js";
 import type { FormVisibility, SchoolAlias } from "./schema.js";
 import { findAliasedSchoolId, invalidateSchoolAliasCache } from "./school-alias-cache.js";
@@ -1351,7 +1351,7 @@ export async function restoreForm(id: number, organizationId?: number | null): P
 
 export async function listFormFields(formId: number): Promise<FormField[]> {
   const rows = await execute<FormField>(
-    `SELECT id, form_id, label, type, options, required, staff_only, sort_order, placeholder, roles
+    `SELECT id, form_id, label, type, options, required, staff_only, sort_order, placeholder, roles, source_item_id
      FROM dbo.form_fields WHERE form_id = @formId ORDER BY sort_order`,
     { formId }
   );
@@ -2301,6 +2301,95 @@ async function findSchoolIdByName(name: string): Promise<number | null> {
   return findAliasedSchoolId(name);
 }
 
+// -----------------------------------------------------------------------------
+// Learning a field's Google item id (`form_fields.source_item_id`)
+// -----------------------------------------------------------------------------
+// Google assigns each question an id that survives retitling (`item.getId()`),
+// but this app has no way to ASK Google for it — that would need an OAuth scope
+// the integrated Forms features deliberately do not request
+// (docs/plans/google-form-undefined-fields.md §11), and the firewall rules out
+// running a backfill from an operator's machine. So a field LEARNS its id from
+// ordinary traffic instead: every submission supplies the pairing while the
+// question's title still matches, and the first one to arrive persists it. After
+// that the title is optional, and retitling the question no longer disconnects
+// anything.
+//
+// Computed by `planSubmissionFields` (pure, and unit-tested without a database)
+// and written here. Steady state is an EMPTY list — a bound field proposes
+// nothing, so the hot path pays no write.
+//
+// ★ CONFINED BY THREE GUARDS, because a wrong binding here would misroute
+// answers silently instead of loudly:
+//   1. `form_id = @formId` — a proposal can only ever touch its own form.
+//   2. `source_item_id IS NULL` — an EXISTING binding is never redirected. If a
+//      title were edited to match a different question, the stored id would
+//      otherwise be rewritten to point at it, turning one silent symptom into a
+//      permanent one.
+//   3. An item id already claimed by a sibling field is skipped. Two fields
+//      holding the same Google question would make a retitle ambiguous, so first
+//      claim wins.
+// `reconcileFormFields` and `promoteAdhocFieldToFormField` both use explicit
+// column lists and so cannot disturb what this writes; neither must ever write
+// this column.
+export async function bindFormFieldSourceItemIds(
+  formId: number,
+  bindings: { field_id: number; item_id: string }[]
+): Promise<number> {
+  if (bindings.length === 0) return 0;
+
+  // One read for the whole form, so "does a sibling already own this question?"
+  // is answered against committed state. It is also what makes guard 2 cheap:
+  // a field that already holds ANY id is skipped without a statement.
+  const rows = await execute<{ id: number; source_item_id: string | null }>(
+    `SELECT id, source_item_id FROM dbo.form_fields WHERE form_id = @formId`,
+    { formId }
+  );
+  const claimed = new Map<string, number>();
+  const current = new Map<number, string | null>();
+  for (const row of rows) {
+    const id = Number(row.id);
+    const held = normalizeItemId(row.source_item_id);
+    current.set(id, held);
+    if (held && !claimed.has(held)) claimed.set(held, id);
+  }
+
+  let written = 0;
+  for (const binding of bindings) {
+    const fieldId = Number(binding.field_id);
+    const itemId = normalizeItemId(binding.item_id);
+    // A binding for a field that is not on this form is a bug, not data.
+    if (!itemId || !current.has(fieldId)) continue;
+    // Guard 2 — already bound. This is the steady state.
+    if (current.get(fieldId) !== null) continue;
+    // Guard 3 — a sibling owns this question.
+    const owner = claimed.get(itemId);
+    if (owner !== undefined && owner !== fieldId) continue;
+
+    // `updateReturning` + `returning: ["id"]` rather than `execute` for the same
+    // reason `archiveSubmission` uses it: `db.query()` hands back a bare row
+    // array with no affected-row count on either driver, so this is the only way
+    // to know the row actually changed. `source_item_id IS NULL` re-states guard
+    // 2 in the WHERE clause so a concurrent submission that bound the field
+    // between the read above and here cannot be overwritten — the loser simply
+    // reports 0 and the winner's identical value stands.
+    const changed = await execute<{ id: number }>(
+      dialect().updateReturning({
+        table: "form_fields",
+        set: "source_item_id = @itemId",
+        where: "id = @fieldId AND form_id = @formId AND source_item_id IS NULL",
+        returning: ["id"],
+      }),
+      { itemId, fieldId, formId }
+    );
+    if (changed.length > 0) {
+      claimed.set(itemId, fieldId);
+      current.set(fieldId, itemId);
+      written += 1;
+    }
+  }
+  return written;
+}
+
 export async function createSubmission(
   form: Form,
   // ★ Widened for the webhook (docs/plans/google-form-undefined-fields.md §5): an
@@ -2406,6 +2495,30 @@ export async function createSubmission(
           JSON.stringify(v.value),
       }
     );
+  }
+
+  // Google's item id, learned from the answers that just resolved above: while a
+  // question's title still matches, every submission re-supplies the pairing, and
+  // this is where the first one is kept. See `bindFormFieldSourceItemIds` for the
+  // guards that stop a wrong id ever being written, and note this is a no-op in
+  // steady state.
+  //
+  // ★ Best-effort, and deliberately NOT fatal. The submission is already
+  // committed by this point, so throwing would fail an intake that actually
+  // succeeded — the webhook log would say `failed` for a submission that is
+  // sitting in the database, and the Apps Script's retry would duplicate it. A
+  // lost binding costs nothing either: the next submission proposes the same
+  // pairing again, because the title still matches. Self-healing is exactly why
+  // no backfill script was needed.
+  if (plan.learned.length > 0) {
+    try {
+      await bindFormFieldSourceItemIds(form.id, plan.learned);
+    } catch (err) {
+      console.warn(
+        `Could not record Google item ids for form ${form.id} (will retry on the next submission):`,
+        err instanceof Error ? err.message : err
+      );
+    }
   }
 
   // Captured fields: a question the Google Form asked that this form does not
