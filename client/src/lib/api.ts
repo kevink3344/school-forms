@@ -739,6 +739,9 @@ export const api = {
       code?: string;
       doc_folder_id?: string | null;
       google_form_url?: string | null;
+      // Submission Detail Link: which answers make up the grid link's text, in
+      // display order. `null` / `[]` clears the choice.
+      link_field_ids?: number[] | null;
       fields: {
         id?: number;
         label: string;

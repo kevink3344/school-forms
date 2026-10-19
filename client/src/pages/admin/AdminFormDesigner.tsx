@@ -94,6 +94,12 @@ export default function AdminFormDesigner() {
   // staff so they can open the original alongside the submission, and nothing
   // is read back from it.
   const [googleFormUrl, setGoogleFormUrl] = useState("");
+  // Submission Detail Link (docs/plans/submission-link-label.md): the field ids
+  // whose answers make up the Submissions grid's link text, in display order.
+  // Empty means "not configured", which keeps the first-non-staff-answer label.
+  // Saved with the form's own Save button — unlike visibility it has no side
+  // effect on another table, so it needs no separate endpoint.
+  const [linkFieldIds, setLinkFieldIds] = useState<number[]>([]);
   // Visibility is saved on its own (it has a side effect on form_access), so it
   // carries its own busy flag and message rather than joining the form's dirty
   // state — a pending change here must never look like an unsaved form edit.
@@ -157,6 +163,7 @@ export default function AdminFormDesigner() {
         setPrefix(f.code ?? "");
         setDocFolderId(f.doc_folder_id ?? "");
         setGoogleFormUrl(f.google_form_url ?? "");
+        setLinkFieldIds(f.link_field_ids ?? []);
       })
       .catch(() => setError("Could not load form"))
       .finally(() => {
@@ -288,6 +295,9 @@ export default function AdminFormDesigner() {
         ...(prefix.trim() ? { code: prefix.trim() } : {}),
         doc_folder_id: docFolderId.trim() || null,
         google_form_url: googleFormUrl.trim() || null,
+        // Sent as an array (not omitted) so clearing every chip is a real
+        // clear rather than "leave the stored selection alone".
+        link_field_ids: linkFieldIds,
         fields: fields.map((f, i) => ({
           id: f.id || undefined,
           label: f.label,
@@ -315,6 +325,7 @@ export default function AdminFormDesigner() {
       setPrefix(fresh.code ?? "");
       setDocFolderId(fresh.doc_folder_id ?? "");
       setGoogleFormUrl(fresh.google_form_url ?? "");
+      setLinkFieldIds(fresh.link_field_ids ?? []);
       setDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save form");
@@ -604,6 +615,140 @@ export default function AdminFormDesigner() {
                 Optional link to the source Google Form. Shown to staff so they can open it.
               </div>
             </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Submission Detail Link (docs/plans/submission-link-label.md). Sits
+          immediately above Visibility because both are "how this form presents
+          itself" settings, and both are read at a glance rather than edited
+          field by field.
+
+          ★ Only the link TEXT changes. The href is still the submission's own
+          page, which is why this is a display setting and not a navigation one.
+          Selecting nothing keeps the pre-existing behaviour (the first
+          non-staff-only answer), so a form that has never been touched here
+          looks exactly as it did. */}
+      <div className="card">
+        <div className="card-head">
+          <h3>Submission Detail Link</h3>
+        </div>
+        <div className="card-body">
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 10 }}>
+            Choose the answers that make up the link in the Submissions list. They are
+            joined with a space, in the order chosen. The link still opens the submission.
+          </div>
+
+          {linkFieldIds.length > 0 && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginBottom: 10 }}>
+              {linkFieldIds.map((fieldId, index) => {
+                const field = fields.find((f) => Number(f.id) === fieldId);
+                return (
+                  <div
+                    key={fieldId}
+                    style={{ display: "flex", alignItems: "center", gap: 8, flexWrap: "wrap" }}
+                  >
+                    <span className="cell-sub" style={{ minWidth: 18 }}>
+                      {index + 1}.
+                    </span>
+                    <span>{field ? field.label : `Field ${fieldId} (removed)`}</span>
+                    <span style={{ display: "inline-flex", gap: 4, marginLeft: "auto" }}>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Move ${field ? field.label : "field"} up`}
+                        title="Move up"
+                        disabled={index === 0}
+                        onClick={() => {
+                          setLinkFieldIds((prev) => {
+                            const next = [...prev];
+                            [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                            return next;
+                          });
+                          setDirty(true);
+                        }}
+                      >
+                        <ArrowUp size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Move ${field ? field.label : "field"} down`}
+                        title="Move down"
+                        disabled={index === linkFieldIds.length - 1}
+                        onClick={() => {
+                          setLinkFieldIds((prev) => {
+                            const next = [...prev];
+                            [next[index], next[index + 1]] = [next[index + 1], next[index]];
+                            return next;
+                          });
+                          setDirty(true);
+                        }}
+                      >
+                        <ArrowDown size={13} />
+                      </button>
+                      <button
+                        type="button"
+                        className="icon-button"
+                        aria-label={`Remove ${field ? field.label : "field"} from the link`}
+                        title="Remove"
+                        onClick={() => {
+                          setLinkFieldIds((prev) => prev.filter((id) => id !== fieldId));
+                          setDirty(true);
+                        }}
+                      >
+                        <X size={13} />
+                      </button>
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          <select
+            className="edit-select"
+            aria-label="Add a field to the submission link"
+            value=""
+            onChange={(e) => {
+              const id = Number(e.target.value);
+              if (!id) return;
+              setLinkFieldIds((prev) => (prev.includes(id) ? prev : [...prev, id]));
+              setDirty(true);
+            }}
+          >
+            <option value="">
+              {linkFieldIds.length === 0 ? "Add a field…" : "Add another field…"}
+            </option>
+            {/* Parent-facing fields only: a staff-only answer is not part of what
+                the parent submitted, so it cannot name their submission. */}
+            {formFields
+              .filter((f) => !linkFieldIds.includes(Number(f.id)))
+              .map((f) => (
+                <option key={f.id} value={String(f.id)}>
+                  {f.label}
+                </option>
+              ))}
+          </select>
+
+          <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 8 }}>
+            {linkFieldIds.length === 0 ? (
+              <>
+                No fields chosen — the list shows the first answer on the form. If that
+                answer is blank, the link reads “None”.
+              </>
+            ) : (
+              <>
+                Example:{" "}
+                <strong style={{ color: "var(--text)" }}>
+                  {linkFieldIds
+                    .map((id) => fields.find((f) => Number(f.id) === id)?.label ?? "")
+                    .filter(Boolean)
+                    .join(" ") || "None"}
+                </strong>
+                . If every chosen answer is blank, the link reads “None”.
+              </>
+            )}
           </div>
         </div>
       </div>

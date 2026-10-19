@@ -286,6 +286,19 @@ export interface Form {
   // private form still serves its questions publicly and still accepts answers
   // (see docs/plans/public-private-forms.md §3.2).
   visibility: FormVisibility;
+  // Which answers make up the submission-grid link TEXT (`link_label`), in the
+  // order they are joined with a single space. Stored as a JSON array of
+  // `form_fields.id` values, e.g. `[4,5]` for First Name + Last Name.
+  //
+  // ★ IDs, not labels. Labels are editable and not unique — this app already has
+  // a form with both "School Name" and "School Name (1)" — so a label-based
+  // configuration would silently re-point when a field was renamed, and could
+  // not tell two same-named fields apart. The label is resolved at read time.
+  //
+  // NULL / empty means "not configured", which keeps the pre-existing behaviour
+  // (the first non-staff-only answer) for every form that predates this column.
+  // The link's TARGET is never affected: only the text in the grid changes.
+  link_field_ids: number[] | null;
   // Number of submissions attached to this form. Populated by listForms (computed
   // subquery) so the admin Forms list can gate the Delete action. A form with any
   // submissions is NOT deletable (submissions.form_id cascades on delete).
@@ -1265,6 +1278,17 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // the local one rather than replacing it.
   `IF COL_LENGTH('dbo.form_fields', 'source_item_id') IS NULL
      ALTER TABLE dbo.form_fields ADD source_item_id NVARCHAR(64) NULL;`,
+
+  // Submission Detail Link — which answers make up the grid link's text
+  // (docs/plans/submission-link-label.md). A JSON array of `form_fields.id`
+  // values, in display order; NULL means "not configured", which keeps the
+  // first-non-staff-field behaviour every existing form already has.
+  //
+  // NVARCHAR(MAX) rather than a fixed width for the same reason `roles` and
+  // `view_columns` use it: the array is parsed as JSON, never compared in SQL,
+  // so there is no key length to bound.
+  `IF COL_LENGTH('dbo.forms', 'link_field_ids') IS NULL
+     ALTER TABLE dbo.forms ADD link_field_ids NVARCHAR(MAX) NULL;`,
 
   // One-time backfill: existing staff-only fields default to admin + staff, the
   // two roles that existed before this feature. Explicitly stored so the value is

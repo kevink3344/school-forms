@@ -37,6 +37,33 @@ export function submissionValuePredicate(label?: string): string {
 }
 
 /**
+ * The WHERE predicate of `submissionLinkLabelSubquery`, shared by both dialects.
+ *
+ * `s` is the outer submission alias; `ff` is the field row the value was joined
+ * to. The configured ids arrive as a JSON array in `f.link_field_ids`, and the
+ * membership test is the dialect's own JSON reader (`json_each` on libSQL,
+ * `OPENJSON` on SQL Server) — see each dialect for the exact spelling.
+ *
+ * ★ The `ff.form_id = s.form_id` guard is not decoration: it makes a stale id
+ * (a field deleted from another form, or a hand-edited value) unable to pull
+ * another form's answer into this submission's label.
+ */
+export function submissionLinkFieldPredicate(fieldIdsExpr: string): string {
+  return `ff.form_id = s.form_id AND ff.id IN (${fieldIdsExpr})`;
+}
+
+/**
+ * The "not configured" test for `forms.link_field_ids`: NULL or a blank string.
+ *
+ * Both mean the same thing — the admin has not chosen any fields — and both must
+ * fall back to the pre-existing first-non-staff-answer behaviour. Kept here so
+ * the two dialects cannot disagree about what "unset" is.
+ */
+export function linkFieldIdsUnset(): string {
+  return "(f.link_field_ids IS NULL OR LTRIM(RTRIM(f.link_field_ids)) = '')";
+}
+
+/**
  * The labels that identify a form's "which school?" field.
  *
  * A district-wide form (e.g. CDM) collects the school as a parent ANSWER rather

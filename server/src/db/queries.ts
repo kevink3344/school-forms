@@ -1199,11 +1199,12 @@ export async function listForms(
   return execute<Form>(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
             f.status, f.pre_archive_status, f.view_columns, f.code, f.submission_seq,
-            f.doc_folder_id, f.google_form_url, f.visibility, f.created_at, f.updated_at,
+            f.doc_folder_id, f.google_form_url, f.visibility, f.link_field_ids,
+            f.created_at, f.updated_at,
             (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
     params
-  );
+  ).then(parseFormRowList);
 }
 
 // Count the submissions attached to a form. Used to guard form deletion: a form
@@ -1283,11 +1284,11 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
             pre_archive_status, view_columns, code, submission_seq, doc_folder_id,
-            google_form_url, visibility, created_at, updated_at
+            google_form_url, visibility, link_field_ids, created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
-  return rows[0] ?? null;
+  return rows[0] ? parseFormRow(rows[0]) : null;
 }
 
 // Archive a form (org-scoped): retire it without destroying anything.
@@ -1398,6 +1399,60 @@ function parseFormFieldOptions(raw: string[] | string | null | undefined): strin
   }
 }
 
+// Parse `forms.link_field_ids` — the answers that make up the submission-grid
+// link text (docs/plans/submission-link-label.md).
+//
+// Returns `number[] | null` with the ORDER preserved: the array is the display
+// order, so sorting or de-duplicating here would silently reorder an admin's
+// choice. Non-numeric / non-positive entries are dropped rather than coerced,
+// because a `0` or `"abc"` can never match a `form_fields.id` and would only
+// reach the SQL as a pointless predicate. An empty result means "not
+// configured", the same as NULL.
+export function parseLinkFieldIds(raw: number[] | string | null | undefined): number[] | null {
+  if (raw == null) return null;
+  let list: unknown[] | null = null;
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (typeof raw === "string") {
+    if (raw.trim() === "") return null;
+    try {
+      const parsed: unknown = JSON.parse(raw);
+      list = Array.isArray(parsed) ? parsed : null;
+    } catch {
+      return null;
+    }
+  }
+  if (!list) return null;
+  const ids: number[] = [];
+  for (const value of list) {
+    const id = Number(value);
+    if (Number.isInteger(id) && id > 0) ids.push(id);
+  }
+  return ids.length > 0 ? ids : null;
+}
+
+/** Apply the `link_field_ids` parse to one form row. */
+function parseFormRow<T extends { link_field_ids?: number[] | string | null }>(row: T): T {
+  return { ...row, link_field_ids: parseLinkFieldIds(row.link_field_ids) };
+}
+
+/** Apply the `link_field_ids` parse to every form row. */
+function parseFormRowList<T extends { link_field_ids?: number[] | string | null }>(rows: T[]): T[] {
+  return rows.map(parseFormRow);
+}
+
+/**
+ * Serialise `link_field_ids` for storage.
+ *
+ * An empty selection is stored as NULL rather than `'[]'`: both mean "not
+ * configured", and NULL is the value every form that predates the column has —
+ * one representation keeps the SQL's "unset" test honest.
+ */
+function serializeLinkFieldIds(ids: number[] | null | undefined): string | null {
+  if (!ids || ids.length === 0) return null;
+  return JSON.stringify(ids.map(Number).filter((id) => Number.isInteger(id) && id > 0));
+}
+
 // Deserialize a stored submission value for the API. Collections (checkbox /
 // google_doc / any array-valued field type) are persisted via JSON.stringify on
 // write, so parse the JSON string back into an array on read; otherwise return the
@@ -1476,6 +1531,7 @@ export async function createForm(
     docFolderId,
     googleFormUrl,
     visibility,
+    linkFieldIds,
   }: {
     title: string;
     description: string | null;
@@ -1488,6 +1544,10 @@ export async function createForm(
     // there is no account that "currently sees it", because it did not exist a
     // moment ago (docs/plans/public-private-forms.md §6.4).
     visibility?: FormVisibility;
+    // Answers that make up the submission-grid link text, in display order.
+    // Omitted -> NULL, which is the "not configured" state and keeps the legacy
+    // first-non-staff-answer behaviour.
+    linkFieldIds?: number[] | null;
   },
   fields: {
     label: string;
@@ -1519,6 +1579,7 @@ export async function createForm(
         "doc_folder_id",
         "google_form_url",
         "visibility",
+        "link_field_ids",
       ],
       returning: [
         "id",
@@ -1533,13 +1594,14 @@ export async function createForm(
         "doc_folder_id",
         "google_form_url",
         "visibility",
+        "link_field_ids",
         "created_at",
         "updated_at",
       ],
       values:
-        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl, @visibility",
+        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl, @visibility, @linkFieldIds",
     }),
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null, visibility: visibility ?? "public" }
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null, visibility: visibility ?? "public", linkFieldIds: serializeLinkFieldIds(linkFieldIds) }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -1573,6 +1635,7 @@ export async function updateForm(
     code?: string;
     doc_folder_id?: string | null;
     google_form_url?: string | null;
+    link_field_ids?: number[] | null;
     fields?: {
       id?: number;
       label: string;
@@ -1620,11 +1683,18 @@ export async function updateForm(
   const googleFormUrl = Object.prototype.hasOwnProperty.call(data, "google_form_url")
     ? data.google_form_url
     : existing.google_form_url;
+  // Same null-vs-absent handling: an explicit `null` (or an empty array) clears
+  // the configuration and returns the form to the legacy label; an absent key
+  // leaves whatever the admin chose before.
+  const linkFieldIds = Object.prototype.hasOwnProperty.call(data, "link_field_ids")
+    ? data.link_field_ids
+    : existing.link_field_ids;
 
   await execute(
     `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
             pre_archive_status=@preArchiveStatus, code=@code,
             doc_folder_id=@docFolderId, google_form_url=@googleFormUrl,
+            link_field_ids=@linkFieldIds,
             updated_at=SYSUTCDATETIME() WHERE id=@id`,
     {
       id: formId,
@@ -1635,6 +1705,7 @@ export async function updateForm(
       code,
       docFolderId: docFolderId ?? null,
       googleFormUrl: googleFormUrl ?? null,
+      linkFieldIds: serializeLinkFieldIds(linkFieldIds),
     }
   );
 
@@ -1755,6 +1826,16 @@ export interface SubmissionRow extends Submission {
   // The first non-staff-only field value (conventionally the Student Name), used
   // to render a clickable name in the staff queue. Falls back to a placeholder.
   student_name: string | null;
+  // The TEXT of the grid's link to this submission
+  // (docs/plans/submission-link-label.md): the form's configured answers joined
+  // with a space, or — when the form has no `link_field_ids` — the same first
+  // non-staff-only answer as `student_name`. NULL means "every configured answer
+  // is blank", which the grid renders as "None".
+  //
+  // ★ Only the grid reads this. The detail page, Documents list and Slack alert
+  // deliberately keep using `student_name`, which is a "who is this" label for a
+  // page header rather than a row identifier.
+  link_label: string | null;
   // The school name the submission's own answers declared — the parent's
   // spelling, recorded at intake (docs/plans/school-name-reconciliation.md). NULL
   // when the form has no school question, or on a row written before the column
@@ -1974,7 +2055,8 @@ export async function listSubmissions(
             au.display_name AS archived_by_name,
             f.title AS form_name,
             COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
-            ${dialect().submissionValueSubquery()} AS student_name
+            ${dialect().submissionValueSubquery()} AS student_name,
+            ${dialect().submissionLinkLabelSubquery()} AS link_label
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id
@@ -2066,7 +2148,8 @@ export async function getSubmissionByPublicId(publicId: string, organizationId?:
             au.display_name AS archived_by_name,
             f.title AS form_name, f.organization_id AS form_organization_id,
             COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
-            ${dialect().submissionValueSubquery()} AS student_name
+            ${dialect().submissionValueSubquery()} AS student_name,
+            ${dialect().submissionLinkLabelSubquery()} AS link_label
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id

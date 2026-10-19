@@ -1,5 +1,10 @@
 import { SQLSERVER_DDL_STATEMENTS } from "../schema.js";
-import { submissionValuePredicate, schoolFieldPredicate } from "./shared.js";
+import {
+  submissionValuePredicate,
+  schoolFieldPredicate,
+  submissionLinkFieldPredicate,
+  linkFieldIdsUnset,
+} from "./shared.js";
 import type { Dialect } from "./types.js";
 
 // -----------------------------------------------------------------------------
@@ -147,6 +152,35 @@ export const sqlserverDialect: Dialect = {
       `        AND ${submissionValuePredicate(label)}\n` +
       `        AND sv.value IS NOT NULL\n` +
       `      ORDER BY ff.sort_order)`
+    );
+  },
+
+  submissionLinkLabelSubquery() {
+    // The SQL Server half of the grid's link text
+    // (docs/plans/submission-link-label.md).
+    //
+    // `OPENJSON` is what makes "the order in the JSON array" the order that is
+    // read: `je.[key]` is the element's index, so the admin's selection order
+    // survives into `WITHIN GROUP`. A plain `IN (…)` would compare ids without
+    // their positions and the label would come back in `sort_order`.
+    //
+    // `STRING_AGG` returns NULL when no row matches, which is exactly the
+    // "every chosen answer is blank" case — the client renders "None" for it.
+    // That is also why the fallback lives in the CASE rather than in a COALESCE
+    // outside it: a configured form must not silently fall back to the first
+    // field just because the chosen ones are empty.
+    return (
+      `(CASE WHEN ${linkFieldIdsUnset()}\n` +
+      `        THEN ${this.submissionValueSubquery()}\n` +
+      `        ELSE (SELECT STRING_AGG(sv.value, ' ') WITHIN GROUP (ORDER BY je.[key])\n` +
+      `                FROM dbo.submission_values sv\n` +
+      `                JOIN dbo.form_fields ff ON ff.id = sv.field_id\n` +
+      `                CROSS APPLY OPENJSON(f.link_field_ids) je\n` +
+      `               WHERE sv.submission_id = s.id\n` +
+      `                 AND ${submissionLinkFieldPredicate("je.value")}\n` +
+      `                 AND sv.value IS NOT NULL\n` +
+      `                 AND LTRIM(RTRIM(sv.value)) <> '')\n` +
+      `       END)`
     );
   },
 

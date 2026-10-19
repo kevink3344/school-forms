@@ -1,4 +1,9 @@
-import { submissionValuePredicate, schoolFieldPredicate } from "./shared.js";
+import {
+  submissionValuePredicate,
+  schoolFieldPredicate,
+  submissionLinkFieldPredicate,
+  linkFieldIdsUnset,
+} from "./shared.js";
 import type { Dialect } from "./types.js";
 
 // -----------------------------------------------------------------------------
@@ -140,6 +145,9 @@ const TURSO_DDL: string[] = [
      -- until an administrator marks a form private.
      visibility      TEXT NOT NULL DEFAULT 'public'
                      CHECK (visibility IN ('public','private')),
+     -- docs/plans/submission-link-label.md. JSON array of form_fields.id, in
+     -- display order; NULL means "not configured" (first non-staff answer).
+     link_field_ids  TEXT,
      created_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
      updated_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
@@ -572,6 +580,16 @@ export const tursoDialect: Dialect = {
       column: "source_item_id",
       definition: "TEXT",
     },
+    {
+      // Submission Detail Link (docs/plans/submission-link-label.md). In
+      // `TURSO_DDL` as well, so a fresh database gets it from CREATE TABLE; this
+      // entry is for a database created before the column existed. It holds a
+      // JSON array of field ids — NOT a boolean and NOT a timestamp — so it must
+      // not appear in BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
+      table: "forms",
+      column: "link_field_ids",
+      definition: "TEXT",
+    },
   ],
 
   insertReturning({ table, columns, returning, values }) {
@@ -687,6 +705,34 @@ export const tursoDialect: Dialect = {
       `        AND sv.value IS NOT NULL\n` +
       `      ORDER BY ff.sort_order\n` +
       `      LIMIT 1)`
+    );
+  },
+
+  submissionLinkLabelSubquery() {
+    // The libSQL half of the grid's link text (docs/plans/submission-link-label.md).
+    //
+    // `GROUP_CONCAT` has no `ORDER BY` of its own on SQLite, so the order the
+    // admin chose is imposed by the INNER subquery and preserved by
+    // GROUP_CONCAT's documented left-to-right scan. `json_each` is what makes
+    // "the order in the JSON array" the order that is read — a plain `IN (…)`
+    // would compare ids without their positions.
+    //
+    // The blank test is `LTRIM(RTRIM(sv.value)) <> ''` so an answer of spaces
+    // cannot produce a double space in the label.
+    return (
+      `(CASE WHEN ${linkFieldIdsUnset()}\n` +
+      `        THEN ${this.submissionValueSubquery()}\n` +
+      `        ELSE (SELECT GROUP_CONCAT(t.v, ' ')\n` +
+      `                FROM (SELECT sv.value AS v\n` +
+      `                        FROM submission_values sv\n` +
+      `                        JOIN form_fields ff ON ff.id = sv.field_id\n` +
+      `                        JOIN json_each(f.link_field_ids) je ON je.value = ff.id\n` +
+      `                       WHERE sv.submission_id = s.id\n` +
+      `                         AND ${submissionLinkFieldPredicate("je.value")}\n` +
+      `                         AND sv.value IS NOT NULL\n` +
+      `                         AND LTRIM(RTRIM(sv.value)) <> ''\n` +
+      `                       ORDER BY je.key) t)\n` +
+      `       END)`
     );
   },
 

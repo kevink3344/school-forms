@@ -22,6 +22,12 @@ import { renderEditor, renderValue, toStr, displayValue, type AnswerValue } from
 // end" needs no ordering logic here, and the picker, the grid and the export file
 // all stay in one order.
 //
+// The pinned column's link TEXT is `link_label`, which the server builds from the
+// form's configured answers (docs/plans/submission-link-label.md) and falls back
+// to the first non-staff answer when the form has configured none. A blank label
+// renders "None" rather than a placeholder: the admin chose those fields, so an
+// empty result is an answer about the submission, not a missing name.
+//
 // Every column except the first can be turned off from the Columns drawer, which
 // is what `hiddenBase` carries. Student / School stays because it names the row
 // and links to the submission, and because it is the frozen column — a grid with
@@ -256,7 +262,7 @@ export default function SubmissionsGrid({
                         onOpen(s.public_id);
                       }}
                     >
-                      {s.student_name || "Unnamed submission"}
+                      {s.link_label || "None"}
                     </a>
                     {/* Both inline declarations that used to sit here are gone.
                         `marginLeft: 8` was already dead: `.grid-cell-pinned

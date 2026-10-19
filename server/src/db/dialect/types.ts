@@ -134,6 +134,26 @@ export interface Dialect {
   submissionValueSubquery(label?: string): string;
 
   /**
+   * Parenthesised scalar subquery yielding the TEXT of a submission's grid link
+   * — the configured answers joined with a single space, or the legacy
+   * first-non-staff-answer when the form has no `link_field_ids`.
+   *
+   * Correlated on the outer alias `s` (a `submissions` row) and on `f` (that
+   * row's `forms` row, which the caller must already have joined). The caller
+   * appends its own `AS <alias>`.
+   *
+   * ★ The fallback is INSIDE the CASE, not COALESCEd outside it. A configured
+   * form whose chosen answers are all blank must yield NULL — the client renders
+   * "None" for that — and an outer COALESCE would quietly substitute the first
+   * field instead, which is precisely the behaviour the admin configured away.
+   *
+   * The two dialects differ in both halves: SQL Server uses `STRING_AGG … WITHIN
+   * GROUP` and `OPENJSON`, libSQL uses `GROUP_CONCAT` over an ordered subquery
+   * and `json_each`. That is why this is a dialect method rather than shared text.
+   */
+  submissionLinkLabelSubquery(): string;
+
+  /**
    * Parenthesised scalar subquery yielding the SCHOOL a submission declares —
    * the value of its "School"-labelled answer, resolved against `schools` so
    * the canonical spelling wins over whatever the parent typed, and falling

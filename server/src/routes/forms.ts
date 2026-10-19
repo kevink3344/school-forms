@@ -24,6 +24,34 @@ import { getPrivateSince, listAvailableFormsFor, setFormVisibility } from "../db
 
 export const formsRouter = Router();
 
+/**
+ * Validate the admin's Submission Detail Link selection
+ * (docs/plans/submission-link-label.md).
+ *
+ * Returns the ids in the admin's chosen order, de-duplicated in place, or null
+ * when nothing is selected (the "not configured" state). Returns an `error`
+ * string for an id that is not one of this form's fields: silently dropping it
+ * would leave the admin looking at a saved selection that does not do what the
+ * UI says it does.
+ */
+function validateLinkFieldIds(
+  ids: number[] | null,
+  formFieldIds: number[]
+): { ids: number[] | null } | { error: string } {
+  if (!ids || ids.length === 0) return { ids: null };
+  const owned = new Set(formFieldIds);
+  const out: number[] = [];
+  for (const id of ids) {
+    if (!owned.has(id)) {
+      return {
+        error: `Field ${id} is not part of this form. Reload the form and choose the fields again.`,
+      };
+    }
+    if (!out.includes(id)) out.push(id);
+  }
+  return { ids: out.length > 0 ? out : null };
+}
+
 // PUBLIC: List published forms (for the anonymous parent submission page).
 // Returns only published forms, with staff-only fields stripped. When an `org`
 // slug is supplied, only forms owned by that org are returned (org-scoped URLs).
@@ -205,6 +233,26 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
         return;
       }
     }
+    // Submission Detail Link. Every id must belong to THIS form: a stale id
+    // (a field deleted in another tab) would otherwise be stored and silently
+    // contribute nothing, leaving the admin looking at a selection that does
+    // not do what it says. Duplicates are collapsed in place so the display
+    // order is preserved without repeating an answer.
+    //
+    // Resolved BEFORE `updateForm` so a bad selection changes nothing at all —
+    // validating inside the call would have already written the title/fields.
+    let linkFieldIds: number[] | null | undefined;
+    if (Object.prototype.hasOwnProperty.call(parsed.data, "link_field_ids")) {
+      const checked = validateLinkFieldIds(
+        parsed.data.link_field_ids ?? null,
+        existing.fields.map((f) => Number(f.id))
+      );
+      if ("error" in checked) {
+        res.status(400).json({ error: checked.error });
+        return;
+      }
+      linkFieldIds = checked.ids;
+    }
     const updated = await updateForm(id, {
       title: parsed.data.title,
       description: parsed.data.description,
@@ -224,6 +272,7 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
       ...(Object.prototype.hasOwnProperty.call(parsed.data, "google_form_url")
         ? { google_form_url: parsed.data.google_form_url?.trim() || null }
         : {}),
+      ...(linkFieldIds !== undefined ? { link_field_ids: linkFieldIds } : {}),
     });
     if (!updated) {
       res.status(404).json({ error: "Form not found" });

@@ -324,6 +324,11 @@ export const updateFormSchema = z.object({
   code: formCodeSchema.optional(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
+  // Which answers make up the submission-grid link text, in display order
+  // (docs/plans/submission-link-label.md). `null` / `[]` clears the choice and
+  // restores the legacy first-non-staff-answer label. The route additionally
+  // verifies every id belongs to this form.
+  link_field_ids: z.array(z.coerce.number().int().positive()).max(10).optional().nullable(),
   fields: z.array(fieldSchema).optional(),
 });
 

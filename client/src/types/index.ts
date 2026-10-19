@@ -291,6 +291,11 @@ export interface Form {
   // `private` hides it from the organization's School Contacts unless they hold
   // an approved grant; administrators and staff are unaffected either way.
   visibility: FormVisibility;
+  // Which answers make up the submission-grid link TEXT, in display order
+  // (docs/plans/submission-link-label.md). `null` means "not configured" — the
+  // grid then shows the first non-staff-only answer, exactly as it always did.
+  // Only the text changes; the link still opens the submission.
+  link_field_ids: number[] | null;
   // Number of submissions attached to this form. Present on list responses so
   // the admin Forms list can gate the Delete action (used forms can't be deleted).
   submission_count?: number;
@@ -455,6 +460,11 @@ export interface SubmissionRow extends Submission {
   form_name: string;
   school_name: string | null;
   student_name: string | null;
+  // The grid link's text (docs/plans/submission-link-label.md): the form's
+  // configured answers joined with a space, or the first non-staff answer when
+  // the form has not configured any. NULL means every configured answer is
+  // blank, which the grid renders as "None".
+  link_label: string | null;
 }
 
 export interface SubmissionAnswer {

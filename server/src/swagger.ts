@@ -163,6 +163,13 @@ export function buildSwaggerSpec(req?: Request) {
             },
             created_at: { type: "string", format: "date-time" },
             updated_at: { type: "string", format: "date-time" },
+            link_field_ids: {
+              type: "array",
+              items: { type: "integer" },
+              nullable: true,
+              description:
+                "Which answers make up the Submissions grid link's TEXT, as `form_fields.id` values in display order. `null` means not configured, which keeps the first non-staff-only answer. Only the link text changes — the link still opens the submission.",
+            },
             fields: { type: "array", items: { $ref: "#/components/schemas/FormField" } },
           },
         },
@@ -193,6 +200,12 @@ export function buildSwaggerSpec(req?: Request) {
             },
             archived_by: { type: "integer", nullable: true, description: "id of the admin who archived it. Cleared by restore." },
             archived_by_name: { type: "string", nullable: true, description: "Display name for `archived_by`, resolved from `users`. Present on list and detail responses; only meaningful when `archived_at` is set." },
+            link_label: {
+              type: "string",
+              nullable: true,
+              description:
+                "The Submissions grid link's text: the form's configured answers (`forms.link_field_ids`) joined with a space, or the first non-staff-only answer when the form has configured none. `null` means every configured answer is blank — the grid renders \"None\".",
+            },
             values: { type: "array", items: { $ref: "#/components/schemas/SubmissionValue" } },
             adhocFields: { type: "array", items: { $ref: "#/components/schemas/AdhocField" }, description: "Staff-only fields added ad-hoc to this submission." },
             staffOnlyFields: { type: "array", items: { $ref: "#/components/schemas/FormField" }, description: "The form's own staff-only field definitions." },
