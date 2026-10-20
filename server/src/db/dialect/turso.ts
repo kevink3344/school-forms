@@ -162,7 +162,7 @@ const TURSO_DDL: string[] = [
      form_id     INTEGER NOT NULL REFERENCES forms(id) ON DELETE CASCADE,
      label       TEXT NOT NULL,
      type        TEXT NOT NULL
-                 CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email')),
+                 CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc')),
      options     TEXT,
      required    BOOLEAN NOT NULL DEFAULT 0,
      staff_only  BOOLEAN NOT NULL DEFAULT 0,
@@ -214,7 +214,7 @@ const TURSO_DDL: string[] = [
      submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
      label         TEXT NOT NULL,
      type          TEXT NOT NULL
-                   CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email')),
+                   CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc')),
      options       TEXT,
      value         TEXT,
      sort_order    INTEGER NOT NULL DEFAULT 0,

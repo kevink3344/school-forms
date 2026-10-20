@@ -118,19 +118,20 @@ export { cellKey, fieldIdFromKey };
 
 // Multi-option fields get a portalled option menu instead of an inline control:
 // the labels are long, and the cell is one column wide. Everything else edits in
-// place. A single-option checkbox is a boolean toggle (see renderEditor), so it
-// commits immediately like a select does.
+// place. A single-option checkbox is a boolean toggle (see renderEditor), and a
+// `toggle` field is a switch, so both commit immediately like a select does.
 function editorMode(type: string, options: string[] | null): "immediate" | "menu" {
   if (type === "radio") return "menu";
   if (type === "checkbox" && (options ?? []).length > 1) return "menu";
   return "immediate";
 }
 
-// Selects and single-option checkbox toggles are one-gesture controls: the change
-// *is* the decision, so there is nothing to confirm. Text-like types hold a draft
-// until Enter / blur.
+// Selects, single-option checkbox toggles and `toggle` switches are one-gesture
+// controls: the change *is* the decision, so there is nothing to confirm.
+// Text-like types hold a draft until Enter / blur.
 function commitsOnChange(type: string, options: string[] | null): boolean {
   if (type === "select") return true;
+  if (type === "toggle") return true;
   if (type === "checkbox" && (options ?? []).length <= 1) return true;
   return false;
 }

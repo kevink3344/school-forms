@@ -16,6 +16,7 @@
 //   G4  isAbsoluteHttpUrl allows https? only           (the XSS guard)
 //   G5  the two `type` CHECK constraints accept the new value
 //   G6  COLLECTION_FIELD_TYPES covers every collection-shaped type
+//   G7  the `toggle` type is a two-value scalar, offered under Checkbox
 //
 // ★ Every scanner below asserts it FOUND something before comparing. A regex that
 // matches nothing would otherwise "pass" by having nothing to check — the same
@@ -25,7 +26,7 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it, expect } from "vitest";
-import { FIELD_TYPES, COLLECTION_FIELD_TYPES } from "./schema.js";
+import { FIELD_TYPES, COLLECTION_FIELD_TYPES, TOGGLE_VALUES } from "./schema.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const SERVER_SRC = join(HERE, "..");
@@ -197,6 +198,15 @@ describe("G5: the type CHECK constraints accept the new field type", () => {
     const guards = [...src.matchAll(/definition NOT LIKE '%google_doc%'/g)];
     expect(guards.length).toBeGreaterThanOrEqual(2);
   });
+
+  it("a LATER widening batch exists for a type added after google_doc", () => {
+    // ★ The defect this guards: the google_doc batch's guard is false on every
+    // deployment that already ran it, so adding a type to ITS list changes
+    // nothing there — the type is refused with a 547 at the INSERT. Each later
+    // type needs its own batch, guarded on its own value.
+    const toggleGuards = [...src.matchAll(/definition NOT LIKE '%\[\^a-z_\]toggle\[\^a-z_\]%'/g)];
+    expect(toggleGuards.length, "no toggle widening batch").toBeGreaterThanOrEqual(2);
+  });
 });
 
 // -----------------------------------------------------------------------------
@@ -233,5 +243,44 @@ describe("G6: COLLECTION_FIELD_TYPES covers the collection-shaped types", () => 
     expect(fn, "an inline checkbox/multiselect literal is back").not.toContain(
       'fieldType === "checkbox"'
     );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// G7 — the `toggle` type: two answers, "No" by default, and NOT a collection
+// -----------------------------------------------------------------------------
+describe("G7: the toggle field type is a two-value scalar", () => {
+  it("is a known field type", () => {
+    expect(FIELD_TYPES as readonly string[]).toContain("toggle");
+  });
+
+  it("has exactly the two answers the feature specifies, in No/Yes order", () => {
+    expect([...TOGGLE_VALUES]).toEqual(["No", "Yes"]);
+  });
+
+  it("is NOT a collection type", () => {
+    // ★ A toggle stores ONE string ("Yes"/"No"). Listing it as a collection
+    // would make `parseSubmissionValue` try to JSON-decode it — harmless for
+    // "Yes"/"No", but it would also invite a writer to store an array, and then
+    // the value would render as "[…]" everywhere a plain text answer is shown.
+    expect(COLLECTION_FIELD_TYPES.has("toggle")).toBe(false);
+  });
+
+  it("is offered by the designer, directly under Checkbox", () => {
+    // The position is part of the request: the type list must read
+    // Checkbox, then Toggle.
+    const src = clientSource("pages/admin/AdminFormDesigner.tsx");
+    const order = [...src.matchAll(/\{\s*value:\s*"([a-z_]+)"\s*,\s*label:/g)].map((m) => m[1]);
+    expect(order.indexOf("checkbox")).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf("toggle")).toBe(order.indexOf("checkbox") + 1);
+  });
+
+  it("has no option list in the designer", () => {
+    // The options editor is an allowlist (select/radio/checkbox). A toggle that
+    // appeared in it would let an admin type options that the type cannot use.
+    const src = clientSource("pages/admin/AdminFormDesigner.tsx");
+    const allowlist = src.match(/const isOptionsField = ([^;]+);/)?.[1] ?? "";
+    expect(allowlist).toContain('"checkbox"');
+    expect(allowlist).not.toContain('"toggle"');
   });
 });

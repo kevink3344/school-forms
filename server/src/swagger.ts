@@ -124,7 +124,7 @@ export function buildSwaggerSpec(req?: Request) {
             id: { type: "integer" },
             form_id: { type: "integer" },
             label: { type: "string" },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"] },
             options: { type: "array", items: { type: "string" }, nullable: true },
             required: { type: "boolean" },
             staff_only: { type: "boolean" },
@@ -255,7 +255,7 @@ export function buildSwaggerSpec(req?: Request) {
             label: { type: "string" },
             staff_only: { type: "boolean" },
             roles: { type: "array", items: { type: "string" }, nullable: true, description: "Roles that may access a staff-only column; null for public columns." },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"], description: "The field's control type. Present on export-preview columns so a client can pick an editor without a second request." },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"], description: "The field's control type. Present on export-preview columns so a client can pick an editor without a second request." },
             options: { type: "array", items: { type: "string" }, nullable: true, description: "Allowed values for select/checkbox/radio fields; null otherwise." },
           },
         },
@@ -346,7 +346,7 @@ export function buildSwaggerSpec(req?: Request) {
             id: { type: "integer" },
             submission_id: { type: "integer" },
             label: { type: "string" },
-            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
+            type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"] },
             options: { type: "array", items: { type: "string" }, nullable: true },
             value: { type: "object", nullable: true },
             sort_order: { type: "integer" },
@@ -2241,7 +2241,7 @@ export function buildSwaggerSpec(req?: Request) {
                   required: ["label", "type"],
                   properties: {
                     label: { type: "string" },
-                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"] },
                     options: { type: "array", items: { type: "string" }, nullable: true },
                     value: { type: "object", nullable: true },
                   },
@@ -2277,7 +2277,7 @@ export function buildSwaggerSpec(req?: Request) {
                   required: ["label", "type"],
                   properties: {
                     label: { type: "string" },
-                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"] },
+                    type: { type: "string", enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"] },
                     options: { type: "array", items: { type: "string" }, nullable: true },
                     value: { type: "object", nullable: true },
                   },
@@ -2338,7 +2338,7 @@ export function buildSwaggerSpec(req?: Request) {
                   properties: {
                     type: {
                       type: "string",
-                      enum: ["text", "textarea", "number", "date", "select", "checkbox", "radio", "email", "google_doc"],
+                      enum: ["text", "textarea", "number", "date", "select", "checkbox", "toggle", "radio", "email", "google_doc"],
                       description: "Defaults to the captured field's own type, which is always `text`.",
                     },
                     options: { type: "array", items: { type: "string" }, nullable: true },

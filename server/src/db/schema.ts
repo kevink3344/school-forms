@@ -75,10 +75,21 @@ export const FIELD_TYPES = [
   "date",
   "select",
   "checkbox",
+  // A two-state switch: "No" (off, the default) or "Yes" (on). It is a type of
+  // its own rather than a one-option checkbox, so the answer is the string
+  // "Yes"/"No" — which is what every reader (grid, detail page, export, webhook)
+  // shows without having to know the type. See `TOGGLE_VALUES` below.
+  "toggle",
   "radio",
   "email",
   "google_doc",
 ] as const;
+
+// The only two answers a `toggle` field accepts. `No` is the default: a toggle
+// with no stored value reads as off, and switching it off writes "No" rather
+// than clearing the value, so the stored answer is always one of these two.
+export const TOGGLE_VALUES = ["No", "Yes"] as const;
+export type ToggleValue = (typeof TOGGLE_VALUES)[number];
 
 // Field types whose stored value is a JSON-encoded ARRAY.
 //
@@ -1239,7 +1250,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      id          INT IDENTITY(1,1) PRIMARY KEY,
      form_id     INT NOT NULL,
      label       NVARCHAR(200) NOT NULL,
-     type        NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc')),
+     type        NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc')),
      options     NVARCHAR(MAX) NULL,
      required    BIT NOT NULL CONSTRAINT DF_form_fields_required DEFAULT 0,
      staff_only  BIT NOT NULL CONSTRAINT DF_form_fields_staff_only DEFAULT 0,
@@ -1399,7 +1410,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      id            INT IDENTITY(1,1) PRIMARY KEY,
      submission_id INT NOT NULL,
      label         NVARCHAR(200) NOT NULL,
-     type          NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc')),
+     type          NVARCHAR(20) NOT NULL CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc')),
      options       NVARCHAR(MAX) NULL,
      value         NVARCHAR(MAX) NULL,
      sort_order    INT NOT NULL CONSTRAINT DF_adhoc_fields_sort_order DEFAULT 0,
@@ -1439,6 +1450,11 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   //
   // The re-added constraint is given an EXPLICIT name so a future widening has a
   // stable thing to look for — and so this batch's own guard keeps working.
+  //
+  // ★★ SUPERSEDED by the `toggle` widening below, which names the FULL type list.
+  // Kept rather than deleted because it is the record of how google_doc reached
+  // existing deployments, and because a database that has never run it still gets
+  // the right constraint from the later batch. Do not add new types here.
   `IF EXISTS (SELECT 1 FROM sys.check_constraints
                WHERE parent_object_id = OBJECT_ID('dbo.form_fields')
                  AND definition LIKE '%textarea%'
@@ -1451,7 +1467,7 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      IF @ck_ff IS NOT NULL
        EXEC(N'ALTER TABLE dbo.form_fields DROP CONSTRAINT ' + @ck_ff);
      ALTER TABLE dbo.form_fields ADD CONSTRAINT CK_form_fields_type
-       CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc'));
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc'));
    END;`,
 
   `IF EXISTS (SELECT 1 FROM sys.check_constraints
@@ -1466,7 +1482,63 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
      IF @ck_ah IS NOT NULL
        EXEC(N'ALTER TABLE dbo.submission_adhoc_fields DROP CONSTRAINT ' + @ck_ah);
      ALTER TABLE dbo.submission_adhoc_fields ADD CONSTRAINT CK_submission_adhoc_fields_type
-       CHECK (type IN ('text','textarea','number','date','select','checkbox','radio','email','google_doc'));
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc'));
+   END;`,
+
+  // Widen the `type` CHECK on BOTH field tables to accept 'toggle'.
+  //
+  // ★ A SEPARATE batch, and it has to be. The google_doc batch above is guarded on
+  // `NOT LIKE '%google_doc%'` — on a deployment that already ran it, the guard is
+  // false, so editing that batch's replacement list would change nothing at all:
+  // the new type would be silently refused with a 547 and the only symptom would
+  // be a 500 on save. This batch is guarded on its OWN new value instead, so it
+  // runs exactly once per database, however old that database is.
+  //
+  // ★ The guard compares the constraint's DEFINITION, not its name. A constraint
+  // named CK_form_fields_type that predates this type still fails the guard, so a
+  // name is never taken as proof of content.
+  //
+  // ★ `[^a-z_]toggle[^a-z_]` (not a bare LIKE) on purpose: the constraint is
+  // stored as an OR-chain of `[type]='…'` comparisons, not `type IN (…)`, so a
+  // LIKE on the bare word would also match a hypothetical future `toggle_list`
+  // and skip a constraint that does not actually allow `toggle`. The bracketed
+  // class is the same "whole word" test the CK_users_role migration above uses.
+  `IF EXISTS (SELECT 1 FROM sys.check_constraints
+               WHERE parent_object_id = OBJECT_ID('dbo.form_fields')
+                 AND definition LIKE '%textarea%'
+                 AND definition NOT LIKE '%[^a-z_]toggle[^a-z_]%')
+   BEGIN
+     DECLARE @ck_ff_toggle nvarchar(128) = (SELECT TOP 1 name FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.form_fields')
+         AND definition LIKE '%textarea%'
+         AND definition NOT LIKE '%[^a-z_]toggle[^a-z_]%');
+     IF @ck_ff_toggle IS NOT NULL
+     BEGIN
+       DECLARE @sql_ff_toggle nvarchar(400) =
+         'ALTER TABLE dbo.form_fields DROP CONSTRAINT ' + QUOTENAME(@ck_ff_toggle) + ';';
+       EXEC(@sql_ff_toggle);
+     END;
+     ALTER TABLE dbo.form_fields ADD CONSTRAINT CK_form_fields_type
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc'));
+   END;`,
+
+  `IF EXISTS (SELECT 1 FROM sys.check_constraints
+               WHERE parent_object_id = OBJECT_ID('dbo.submission_adhoc_fields')
+                 AND definition LIKE '%textarea%'
+                 AND definition NOT LIKE '%[^a-z_]toggle[^a-z_]%')
+   BEGIN
+     DECLARE @ck_ah_toggle nvarchar(128) = (SELECT TOP 1 name FROM sys.check_constraints
+       WHERE parent_object_id = OBJECT_ID('dbo.submission_adhoc_fields')
+         AND definition LIKE '%textarea%'
+         AND definition NOT LIKE '%[^a-z_]toggle[^a-z_]%');
+     IF @ck_ah_toggle IS NOT NULL
+     BEGIN
+       DECLARE @sql_ah_toggle nvarchar(400) =
+         'ALTER TABLE dbo.submission_adhoc_fields DROP CONSTRAINT ' + QUOTENAME(@ck_ah_toggle) + ';';
+       EXEC(@sql_ah_toggle);
+     END;
+     ALTER TABLE dbo.submission_adhoc_fields ADD CONSTRAINT CK_submission_adhoc_fields_type
+       CHECK (type IN ('text','textarea','number','date','select','checkbox','toggle','radio','email','google_doc'));
    END;`,
 
   // Generic app-wide key/value settings (login_mode, maintenance_message, ...).

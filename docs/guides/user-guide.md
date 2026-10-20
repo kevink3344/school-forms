@@ -200,8 +200,8 @@ The **Fields** card has two tabs: **Form Fields** and **Staff Only Fields**.
 Click **Add Form Field** or **Add Staff Only Field** to add one. Each field has:
 
 - **Label** — the question text
-- **Type** — Text, Text Area, Number, Date, Email, Google Document, Select, Radio, or Checkbox
-- **Options (comma separated)** — for Select, Radio, and Checkbox types only
+- **Type** — Text, Text Area, Number, Date, Email, Google Document, Select, Radio, Checkbox, or Toggle
+- **Options (comma separated)** — for Select, Radio, and Checkbox types only (a Toggle has no options)
 - **Required** — whether the parent must answer
 
 Use the **↑** and **↓** buttons to reorder fields, and **✕** to remove one.
@@ -637,6 +637,19 @@ is your only reference for the submission.
 | **Select** | A dropdown list of options |
 | **Radio** | A single choice from a short list |
 | **Checkbox** | One or more choices from a list |
+| **Toggle** | An on/off switch with exactly two answers: **No** (off, the default) or **Yes** (on) |
+
+### Toggle fields
+
+A **Toggle** field is a switch, not a checkbox. It has exactly two answers — **No** and **Yes** —
+and no option list, so there is nothing to configure beyond its label. It starts **off**, which
+reads as **No**; switching it on stores **Yes** and switching it back stores **No**. The answer is
+saved as the word itself, so it reads as "Yes" or "No" everywhere: the Submissions grid, the
+submission detail page, and every export.
+
+Toggles are most often used for **Staff Only** fields, such as a "Generate document" style switch
+that staff flip while reviewing a submission. In the Submissions grid a toggle saves as soon as it
+is flipped — there is no separate confirm step.
 
 ### Google Document fields
 

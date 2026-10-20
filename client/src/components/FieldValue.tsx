@@ -1,6 +1,8 @@
 import { useState, type ReactNode } from "react";
 import { Maximize2, X } from "lucide-react";
 import { googleDocIds, googleDocHref } from "../lib/googleDoc";
+import { Toggle } from "./Toggle";
+import { isToggleOn, toggleAnswer } from "../lib/toggle";
 
 // ---------------------------------------------------------------------------
 // Shared answer-field rendering.
@@ -192,6 +194,17 @@ export function renderEditor(
           ))}
         </div>
       );
+    case "toggle": {
+      // A two-state switch: off is "No" (the default), on is "Yes". The words sit
+      // next to the switch so the answer is readable without interpreting the
+      // position, and the <label> makes them the control's accessible name.
+      const on = isToggleOn(value);
+      return (
+        <Toggle checked={on} onChange={(next) => onChange(toggleAnswer(next))}>
+          {on ? "Yes" : "No"}
+        </Toggle>
+      );
+    }
     case "checkbox": {
       const opts = options ?? [];
       // A single-option checkbox (e.g. the staff-only "Generate document" field)
@@ -409,6 +422,10 @@ export function toStr(v: AnswerValue): string {
 }
 
 export function formatValue(v: unknown, type?: string): string {
+  // A toggle's default is "No", so an unsaved toggle reads as No rather than as
+  // a blank cell — the switch is never in a third, unset state. Every other type
+  // keeps the blank-when-unanswered rule below.
+  if (type === "toggle" && (v === null || v === undefined || v === "")) return toggleAnswer(false);
   // Unanswered optional fields (e.g. "Course choice #3 (optional)") should render
   // as blank rather than a placeholder, per the product requirement.
   if (v === null || v === undefined || v === "") return "";

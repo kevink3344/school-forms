@@ -28,6 +28,9 @@ export type FieldType =
   | "date"
   | "select"
   | "checkbox"
+  // A two-state switch whose answer is "Yes" or "No" (default "No"). Not a
+  // checkbox: see `TOGGLE_VALUES` in client/src/lib/toggle.ts.
+  | "toggle"
   | "radio"
   | "email"
   | "google_doc";

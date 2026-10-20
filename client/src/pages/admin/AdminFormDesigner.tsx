@@ -21,6 +21,13 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "select", label: "Select" },
   { value: "radio", label: "Radio" },
   { value: "checkbox", label: "Checkbox" },
+  // A two-state switch: "No" (off, the default) or "Yes" (on). Listed directly
+  // under Checkbox because it is the same "on/off" idea with a fixed pair of
+  // answers, and it has NO option list — the options editor below is an
+  // ALLOWLIST (select/radio/checkbox), so this type correctly shows none. The
+  // type is offered on both tabs; it is most often used for the staff-only
+  // "Generate document" style field.
+  { value: "toggle", label: "Toggle" },
 ];
 
 // The roles a staff-only field can be granted to.
@@ -1027,6 +1034,19 @@ function FieldRow({
     }
   }, [field.options, field.type]);
 
+  // Switching to Toggle drops any option list the field carried as a checkbox:
+  // a toggle has exactly two answers ("No"/"Yes") and no options at all, so
+  // leaving stale options behind would be invisible in the designer and still
+  // travel to the server on the next save.
+  const changeType = (type: FieldType) => {
+    if (type === "toggle") {
+      setOptionsText("");
+      onChange({ type, options: null });
+      return;
+    }
+    onChange({ type });
+  };
+
   // Subscribing here (rather than passing the list down) is what makes the
   // Access row pick up a role created in another tab without a reload. A hook
   // cannot be called inside the `field.staff_only &&` block below, which is
@@ -1096,7 +1116,7 @@ function FieldRow({
         </div>
         <div className="filter-group" style={{ minWidth: 0 }}>
           <label>Type</label>
-          <select value={field.type} onChange={(e) => onChange({ type: e.target.value as FieldType })}>
+          <select value={field.type} onChange={(e) => changeType(e.target.value as FieldType)}>
             {FIELD_TYPES.map((t) => (
               <option key={t.value} value={t.value}>
                 {t.label}
