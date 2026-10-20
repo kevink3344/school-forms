@@ -1172,6 +1172,51 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   font-size: 0.6875rem;
 }
 
+/* The Forms checkbox list in the Add/Edit User drawer. A bordered, scrollable
+   box rather than a bare list: the organization can hold dozens of private
+   forms, and an unbounded list would push the Save button off the drawer. */
+.form-grant-list {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 210px;
+  overflow-y: auto;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--card-bg);
+}
+/* Resets the uppercase/letterspaced treatment `.form-grid label.cf` applies to
+   its children, so each row reads as a checkbox with a form name. */
+.form-grant-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 2px;
+  font-size: 0.8125rem;
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--text);
+  cursor: pointer;
+}
+.form-grant-item:hover { background: var(--tint); border-radius: var(--radius); }
+.form-grant-title { min-width: 0; overflow-wrap: anywhere; }
+/* ★ The checkbox is sized explicitly, not left to the browser's default.
+   `.form-grid label.cf input` (above) sets `width: 100%`, which is right for a
+   text box and wrong for a checkbox: it made each box 464px wide and pushed its
+   label off the right edge of the scroll box. That rule DOES match these inputs,
+   because the checkbox list sits inside the drawer's `.form-grid`. This selector
+   adds the `.form-grid` ancestor so it outranks it (0,3,1 vs 0,2,1) rather than
+   relying on source order. */
+.form-grid .form-grant-item input[type="checkbox"] {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  flex: none;
+  accent-color: var(--accent);
+}
+
 /* The status pill in the submission-detail header — the one .edit-select that is a
    filled accent control rather than a plain field box.
    It draws its own chevron instead of the native one, because Chrome pins the

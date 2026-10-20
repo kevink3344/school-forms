@@ -2037,6 +2037,45 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/form-access/user/{userId}/grant": {
+        post: {
+          tags: ["Form Access"],
+          summary: "Set the complete set of forms one account may read — admin",
+          description:
+            "`{ form_ids: [N, ...] }` — the COMPLETE set the account should hold after the call, not a delta. Every named form is approved (writing an `approved` event, so a grant made here is indistinguishable in the log from one made by approving a request), and every OTHER approved row for the account is removed through the same path as `POST /user/{userId}/remove`.\n\n" +
+            "**This is a reconcile, not a loop of grants.** Without the removal half, unticking a checkbox in the Add/Edit User drawer and saving would look like it worked while the grant stayed.\n\n" +
+            "**Refuses a PUBLIC form with 409 and writes NOTHING.** A grant on a public form is inert — everyone can read it regardless — so a partial write would leave the drawer's checkboxes disagreeing with the server with no way to tell which ticks took effect. A form in another organization answers 404.\n\n" +
+            "An already-approved row is a no-op, so re-saving an unchanged selection is not an error. An empty array is valid and clears every grant.\n\n" +
+            "The USER comes from the path and the FORMS from the body, so the write cannot be redirected to a different account than the one the admin has open. Returns the account's refreshed rows, the same shape as `GET /user/{userId}`.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "userId", in: "path", required: true, schema: { type: "integer" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["form_ids"],
+                  properties: {
+                    form_ids: {
+                      type: "array",
+                      items: { type: "integer" },
+                      maxItems: 500,
+                      description: "The complete set of form ids. Empty clears every grant.",
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "OK — `{ ok: true, access: [UserAccessRow, ...] }`" },
+            "400": { description: "Validation failed" },
+            "404": { description: "No such user in your organization, or no such form" },
+            "409": { description: "A named form is public — nothing was written" },
+          },
+        },
+      },
       "/api/submissions/{publicId}": {
         get: {
           tags: ["Submissions"],

@@ -269,8 +269,20 @@ In the **Edit User** panel you can change the **Display name**, **Email**, **Rol
 **Organization**, and **School**, and switch the account **Active** or **Inactive**. Click
 **Save** to apply your changes.
 
+Below **School** is the **Forms** list — one checkbox per **private** form in your
+organization. Tick a form to give this account access to it; untick it to take that access
+away. The selection is saved with **Save**, along with the rest of the panel.
+
+- Only private forms are listed. A public form is readable by everyone in the organization,
+  so it needs no grant and cannot be ticked.
+- Administrators and staff read every form regardless of these ticks; the list matters for
+  School Contacts and other restricted roles.
+- An unticked private form appears to that person under **Available to request**, where they
+  can ask for access.
+
 Click **+ Add User** to create a new account. New accounts require a password of at least
-8 characters.
+8 characters. The Forms list works the same way: tick the forms the new account may read
+before you save.
 
 > **Note:** You cannot deactivate your own account.
 

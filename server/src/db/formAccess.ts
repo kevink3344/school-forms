@@ -799,6 +799,77 @@ export async function removeFormAccess(args: {
 }
 
 /**
+ * GRANT one account access to one form, from the admin's Add/Edit User drawer.
+ *
+ * The counterpart of `removeFormAccess`, and the same shape: it writes `approved`
+ * + an `approved` event, so a grant made here is indistinguishable in the audit
+ * log from one made by approving a request.
+ *
+ * ★ REFUSES a PUBLIC form, for the same reason the removal does. A public form is
+ * readable by everyone regardless of any row, so a grant on it would appear to
+ * work while changing nothing — and the checkbox would then be re-read as
+ * "checked" from a row that has no effect.
+ *
+ * ★ A `pending` row is UPGRADED rather than duplicated. The PK is (user_id,
+ * form_id), so a second INSERT would be a key violation; more importantly, an
+ * admin granting access IS the answer to a pending request, and the `approved`
+ * event records who answered it.
+ *
+ * ★ An already-approved row is idempotent: it writes nothing and reports success,
+ * so re-saving a user whose checkboxes did not change is not an error.
+ *
+ * Returns the refusal reason rather than throwing, so the route can name it.
+ */
+export type GrantAccessRefusal = "not_found" | "form_public" | "wrong_organization";
+
+export async function grantFormAccess(args: {
+  userId: number;
+  formId: number;
+  organizationId: number;
+  actorId: number | null;
+}): Promise<{ ok: true; already: boolean } | { ok: false; reason: GrantAccessRefusal }> {
+  const { userId, formId, organizationId, actorId } = args;
+
+  // ★ The form must be in the caller's organization. Without this an admin could
+  // grant — and thereby leak the existence of — another tenant's form by id.
+  const forms = await execute<{ visibility: FormVisibility; organization_id: number }>(
+    `SELECT visibility, organization_id FROM dbo.forms WHERE id = @formId`,
+    { formId }
+  );
+  if (forms.length === 0) return { ok: false, reason: "not_found" };
+  if (Number(forms[0].organization_id) !== Number(organizationId)) {
+    return { ok: false, reason: "wrong_organization" };
+  }
+  if (forms[0].visibility !== "private") return { ok: false, reason: "form_public" };
+
+  const existing = await getFormAccessRow(userId, formId);
+  if (existing?.status === "approved") return { ok: true, already: true };
+
+  await getClient().transaction(async (tx) => {
+    // UPDATE-then-INSERT-if-absent, the same shape `requestFormAccess` uses: it
+    // parses on both dialects and covers the `pending`/`denied`/no-row cases
+    // without a dialect-specific upsert.
+    await tx.query(
+      `UPDATE dbo.form_access
+          SET status = 'approved', source = 'direct',
+              requested_at = SYSUTCDATETIME(), decided_at = SYSUTCDATETIME(),
+              decided_by = @actorId, note = NULL
+        WHERE user_id = @userId AND form_id = @formId`,
+      { userId, formId, actorId }
+    );
+    await tx.query(
+      `INSERT INTO dbo.form_access (user_id, form_id, status, source, requested_at, decided_at, decided_by)
+       SELECT @userId, @formId, 'approved', 'direct', SYSUTCDATETIME(), SYSUTCDATETIME(), @actorId
+        WHERE NOT EXISTS (SELECT 1 FROM dbo.form_access
+                           WHERE user_id = @userId AND form_id = @formId)`,
+      { userId, formId, actorId }
+    );
+    await recordAccessEvent(tx, { userId, formId, event: "approved", actorId });
+  });
+  return { ok: true, already: false };
+}
+
+/**
  * Set a form's visibility, and GRANDFATHER the accounts that could read it.
  *
  * ★ The backfill runs on `public -> private` ONLY, and it covers exactly the

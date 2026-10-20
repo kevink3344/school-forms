@@ -415,6 +415,73 @@ describe("per-account access (the Edit User drawer)", () => {
 });
 
 // -----------------------------------------------------------------------------
+// 8b. The Add/Edit User drawer's Forms checkbox list — a RECONCILE
+// -----------------------------------------------------------------------------
+describe("per-account grants (the Forms checkbox list)", () => {
+  it("★ grants only PRIVATE forms", () => {
+    // A public form is readable by everyone regardless of any row, so a grant on
+    // it would appear to work while changing nothing.
+    expect(DATA).toMatch(/grantFormAccess[\s\S]{0,1200}reason: "form_public"/);
+  });
+
+  it("★ grants only forms in the caller's organization", () => {
+    // Without this an admin could grant — and thereby leak the existence of —
+    // another tenant's form by id.
+    expect(DATA).toMatch(/grantFormAccess[\s\S]{0,900}reason: "wrong_organization"/);
+  });
+
+  it("writes `approved` + an `approved` event, so the log cannot tell it apart", () => {
+    expect(DATA).toMatch(/grantFormAccess[\s\S]{0,2400}event: "approved"/);
+    expect(DATA).toMatch(/grantFormAccess[\s\S]{0,2400}'approved', 'direct'/);
+  });
+
+  it("★ the route REMOVES every approved row the set no longer names", () => {
+    // The half that makes unticking a box a real removal. Without it the
+    // checkbox would look like it worked while the grant stayed.
+    const idx = ROUTER.indexOf('formAccessRouter.post("/user/:userId/grant"');
+    expect(idx, "the grant route is missing").toBeGreaterThan(-1);
+    const handler = ROUTER.slice(idx, ROUTER.indexOf("\n});", idx));
+    expect(handler).toContain("removeFormAccess(");
+    expect(handler, "the reconcile does not skip forms that are still wanted").toContain(
+      "wanted.includes("
+    );
+  });
+
+  it("★ the route writes NOTHING when any named form is refused", () => {
+    // A partial grant would leave the drawer's checkboxes disagreeing with the
+    // server, with no way for the admin to tell which ticks took effect. The
+    // grants therefore run to completion BEFORE the removals begin.
+    const idx = ROUTER.indexOf('formAccessRouter.post("/user/:userId/grant"');
+    const handler = ROUTER.slice(idx, ROUTER.indexOf("\n});", idx));
+    const grantLoop = handler.indexOf("await grantFormAccess(");
+    const removeLoop = handler.indexOf("await removeFormAccess(");
+    expect(grantLoop).toBeGreaterThan(-1);
+    expect(removeLoop).toBeGreaterThan(grantLoop);
+    // The refusal returns before the removal loop is reached. Matched with a
+    // whitespace-tolerant pattern: the file is CRLF on Windows, so a literal
+    // "\n" would fail on a correct file.
+    const refusal = handler.search(/res\.status\(m\.status\)\.json\(\{ error: m\.error \}\);\s*return;/);
+    expect(refusal, "the grant loop has no early return on refusal").toBeGreaterThan(grantLoop);
+    expect(refusal).toBeLessThan(removeLoop);
+  });
+
+  it("is admin-only and scoped to the caller's organization", () => {
+    const idx = ROUTER.indexOf('formAccessRouter.post("/user/:userId/grant"');
+    const line = ROUTER.slice(idx, idx + 160);
+    expect(line).toContain('requireRoles("admin")');
+    const handler = ROUTER.slice(idx, ROUTER.indexOf("\n});", idx));
+    expect(handler).toContain("target.organization_id) !== orgId(req.user!)");
+  });
+
+  it("the grant takes the user from the PATH, not the body", () => {
+    const schema = source("schemas.ts").slice(source("schemas.ts").indexOf("grantAccessSchema"));
+    const body = schema.slice(0, schema.indexOf("});"));
+    expect(body).toContain("form_ids");
+    expect(body).not.toContain("user_id");
+  });
+});
+
+// -----------------------------------------------------------------------------
 // 8. The bell — a projection of the queue, never a copy of it
 // (docs/plans/access-requests.md §5, §7, §11.)
 // -----------------------------------------------------------------------------

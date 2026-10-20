@@ -4,12 +4,13 @@ import { api, ApiError } from "../../lib/api";
 import { ChevronDown, Check, Copy, KeyRound, Plus, Webhook, X } from "lucide-react";
 import { parseDocumentRoles, parseMenuItems, defaultMenuItems, MENU_ITEMS, MENU_ITEM_LABELS, audienceLabel, type MenuItemKey } from "../../lib/settings";
 import { BADGE_CHOICES, badgeClass, roleBadgeFor, roleLabelFor, useRoleCatalog } from "../../lib/roles";
-import type { AdminUser, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, RoleRow, RoleUsageReport, School, SystemMessage, UserAccessRow, WebhookEventSummary } from "../../types";
+import type { AdminUser, Form, LoginMode, OrganizationWithMembers, ResetPasswordResult, Role, RoleRow, RoleUsageReport, School, SystemMessage, UserAccessRow, WebhookEventSummary } from "../../types";
 import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import { refreshSystemMessages } from "../../components/SystemMessageBar";
 import { Toast } from "../../components/Toast";
 import { useAuth } from "../../context/AuthContext";
+import { useBodyScrollLock } from "../../lib/useBodyScrollLock";
 import SchoolsPanel from "./SchoolsPanel";
 import SchoolNameMatchingPanel from "./SchoolNameMatchingPanel";
 
@@ -661,17 +662,59 @@ export default function AdminSettings() {
   const [userAccessBusy, setUserAccessBusy] = useState<number | null>(null);
   const [userAccessError, setUserAccessError] = useState("");
 
+  // The Forms checkbox list in the Add/Edit User drawer. Only PRIVATE forms are
+  // listed: a public form is readable by everyone in the organization, so a
+  // checkbox for it could never be unticked into anything — the server refuses a
+  // grant on one for exactly that reason.
+  const [privateForms, setPrivateForms] = useState<Form[]>([]);
+  const [privateFormsError, setPrivateFormsError] = useState("");
+  // The ids ticked in the drawer. Seeded from the account's APPROVED rows when an
+  // edit opens, and sent as the COMPLETE set on save (see `api.setUserAccess`).
+  const [formGrants, setFormGrants] = useState<number[]>([]);
+
+  // With the Add/Edit User drawer open, the page behind it is not scrollable:
+  // the drawer is the only thing the admin is working on, and leaving the page
+  // live puts a second, unrelated scrollbar down the far right of the screen.
+  useBodyScrollLock(modalOpen);
+
   const loadUserAccess = useCallback(async (userId: number) => {
     setUserAccessError("");
     try {
-      setUserAccess(await api.listUserAccess(userId));
+      const rows = await api.listUserAccess(userId);
+      setUserAccess(rows);
+      // Seed the checkbox list from the APPROVED rows — the same rows the table
+      // below renders, so the two controls can never show a different answer.
+      setFormGrants(rows.filter((r) => r.status === "approved").map((r) => Number(r.form_id)));
     } catch (err) {
       setUserAccessError(
         err instanceof ApiError ? err.message : "Could not load this account's form access."
       );
       setUserAccess([]);
+      setFormGrants([]);
     }
   }, []);
+
+  // The forms the checkbox list offers. Loaded once with the rest of the page:
+  // the list is the organization's private forms and does not depend on which
+  // account is open, so re-fetching it per drawer open would only add a flicker.
+  const loadPrivateForms = useCallback(async () => {
+    setPrivateFormsError("");
+    try {
+      const all = await api.listForms();
+      setPrivateForms(all.filter((f) => f.visibility === "private"));
+    } catch (err) {
+      setPrivateFormsError(
+        err instanceof ApiError ? err.message : "Could not load the list of forms."
+      );
+      setPrivateForms([]);
+    }
+  }, []);
+
+  // Loaded alongside `load`: a failure here is reported in the drawer rather than
+  // failing the page, because the Users panel is still usable without it.
+  useEffect(() => {
+    void loadPrivateForms();
+  }, [loadPrivateForms]);
 
   /**
    * Remove one account's access to one form.
@@ -696,6 +739,10 @@ export default function AdminSettings() {
 
   const openCreate = () => {
     setForm(EMPTY);
+    // A create has no account yet, so no grant rows exist and every checkbox
+    // starts unticked. The list itself is cleared so a previous account's ticks
+    // are never briefly shown against a name that does not have them.
+    setFormGrants([]);
     // Always enter the drawer in its normal state, so a half-finished reset in a
     // previous session can never reappear over another account.
     setResetStep("idle");
@@ -728,8 +775,10 @@ export default function AdminSettings() {
     setSaveError("");
     // Load this account's form access. A create has no account yet, so only an
     // edit does this — and the list is cleared first so the previous user's rows
-    // are never briefly visible under a different name.
+    // are never briefly visible under a different name. `formGrants` is seeded
+    // inside `loadUserAccess` from the approved rows.
     setUserAccess([]);
+    setFormGrants([]);
     setUserAccessError("");
     void loadUserAccess(u.id);
   };
@@ -750,6 +799,7 @@ export default function AdminSettings() {
     setModalOpen(false);
     setSaveError("");
     setForm(EMPTY);
+    setFormGrants([]);
     setResetStep("idle");
     setResetResult(null);
     setResetError("");
@@ -796,7 +846,7 @@ export default function AdminSettings() {
     setSaveError("");
     try {
       if (form.id === null) {
-        await api.createUser({
+        const created = await api.createUser({
           email: form.email,
           password: form.password,
           display_name: form.display_name,
@@ -805,6 +855,13 @@ export default function AdminSettings() {
           organization_id: form.organization_id ? Number(form.organization_id) : null,
           show_on_test_screen: form.show_on_test_screen,
         });
+        // ★ The grants need the new account's id, so they are written AFTER the
+        // create. Only when something is ticked: an empty set is already the
+        // truth for a brand-new account, and a call that writes nothing would
+        // only add a way for the save to fail after the user exists.
+        if (formGrants.length > 0) {
+          await api.setUserAccess(created.id, formGrants);
+        }
         setMessage("User created.");
       } else {
         await api.updateUser(form.id, {
@@ -816,6 +873,11 @@ export default function AdminSettings() {
           active: form.active,
           show_on_test_screen: form.show_on_test_screen,
         });
+        // The COMPLETE set, so an unticked box is a real removal. Sent on every
+        // edit save rather than only when it changed: the server treats an
+        // already-approved row as a no-op, and comparing here would mean keeping
+        // a second copy of the seeded selection to diff against.
+        await api.setUserAccess(form.id, formGrants);
         // A toast rather than the banner, for the reason in Toast.tsx. The
         // banner is CLEARED rather than left alone: an earlier action's message
         // would otherwise be sitting there contradicting what was just saved.
@@ -2576,6 +2638,59 @@ export default function AdminSettings() {
                   </div>
                 </Field>
               )}
+
+              {/* Forms this account may read.
+
+                  A checkbox per PRIVATE form, because a public form is readable
+                  by everyone in the organization and the server refuses a grant
+                  on one — a tick that could never be unticked into anything.
+
+                  ★ The selection is saved as the COMPLETE set on Save, not on
+                  each tick: the drawer already has one Save button, and a
+                  per-tick write would leave a half-finished selection applied
+                  when the admin cancels. */}
+              <Field label="Forms" full>
+                {privateFormsError ? (
+                  <div className="alert-error" role="alert">
+                    {privateFormsError}
+                  </div>
+                ) : privateForms.length === 0 ? (
+                  <p className="empty-note" style={{ padding: 0 }}>
+                    No private forms in this organization. Public forms are readable by
+                    everyone, so they need no grant.
+                  </p>
+                ) : (
+                  <div className="form-grant-list">
+                    {privateForms.map((f) => {
+                      const checked = formGrants.includes(f.id);
+                      return (
+                        <label key={f.id} className="form-grant-item">
+                          <input
+                            type="checkbox"
+                            checked={checked}
+                            onChange={(e) =>
+                              setFormGrants((cur) =>
+                                e.target.checked
+                                  ? [...cur, f.id]
+                                  : cur.filter((id) => id !== f.id)
+                              )
+                            }
+                          />
+                          <span className="form-grant-title">
+                            {f.title}
+                            {f.code ? <span className="cell-mono"> · {f.code}</span> : null}
+                          </span>
+                        </label>
+                      );
+                    })}
+                  </div>
+                )}
+                <span className="field-note">
+                  {form.role === "admin" || form.role === "staff"
+                    ? "Administrators and staff read every form regardless of these ticks."
+                    : "Ticked forms are readable by this account. Unticked private forms appear under “Available to request”."}
+                </span>
+              </Field>
 
               {/* Curates the Select User (Test) login dropdown. Off unless an
                   admin deliberately opts the account in. */}

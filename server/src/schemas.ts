@@ -382,6 +382,20 @@ export const removeAccessSchema = z.object({
   form_id: z.number().int().positive(),
 });
 
+/**
+ * The body of the admin's per-account GRANT (the Add/Edit User drawer's Forms
+ * checkbox list). `form_ids` is the COMPLETE set the account should hold after
+ * the save, not a delta: the drawer renders a checkbox per private form, and a
+ * set is what makes "untick and save" expressible. An empty array is valid — it
+ * means "no individual grants", which is how every checkbox is cleared.
+ *
+ * The user comes from the path, so the body cannot redirect the write to another
+ * account. The cap is a sanity bound, not a product limit.
+ */
+export const grantAccessSchema = z.object({
+  form_ids: z.array(z.number().int().positive()).max(500),
+});
+
 // -----------------------------------------------------------------------------
 // Submissions (Parent answers — fully anonymous)
 // -----------------------------------------------------------------------------

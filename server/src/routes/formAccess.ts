@@ -5,6 +5,7 @@ import {
   countPendingAccessRequests,
   decideFormAccess,
   dismissFormAccessNotice,
+  grantFormAccess,
   listFormAccessNotices,
   listAccessForUser,
   listAccessGrantsFor,
@@ -16,7 +17,13 @@ import {
   withdrawAccessRequest,
 } from "../db/formAccess.js";
 import { getUserById } from "../db/queries.js";
-import { decideAccessSchema, removeAccessSchema, requestAccessSchema, withdrawAccessSchema } from "../schemas.js";
+import {
+  decideAccessSchema,
+  grantAccessSchema,
+  removeAccessSchema,
+  requestAccessSchema,
+  withdrawAccessSchema,
+} from "../schemas.js";
 
 export const formAccessRouter = Router();
 
@@ -31,7 +38,8 @@ export const formAccessRouter = Router();
 //     any signed-in role, because the whole point is that a restricted person can
 //     ask for what they cannot read;
 //   * the ADMIN routes (`GET /requests`, `POST /requests/decide`, `GET /grants`,
-//     `GET /notifications`, `GET /user/:id`, `POST /user/:id/remove`) — admin only.
+//     `GET /notifications`, `GET /user/:id`, `POST /user/:id/remove`,
+//     `POST /user/:id/grant`) — admin only.
 //
 // ★ `POST /requests/decide` is ONE endpoint carrying a `decision` field, not
 // three routes, so the state change and its audit row cannot be written
@@ -325,6 +333,85 @@ formAccessRouter.post("/user/:userId/remove", requireAuth, requireRoles("admin")
     };
     const m = map[result.reason];
     res.status(m.status).json({ error: m.error });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Admin: GRANT one account access to the forms its checkboxes name, from the
+// Add/Edit User drawer.
+//
+// ★ The body is the COMPLETE set, so this is a reconcile rather than a loop of
+// grants: every form in `form_ids` is approved, and every OTHER approved row for
+// this account is removed. Without the second half, unticking a checkbox and
+// saving would look like it worked while the grant stayed — the same failure the
+// Remove button exists to avoid, reached by a different control.
+//
+// ★ A form that is PUBLIC (or in another organization) is refused with 409/404
+// naming it, and NOTHING is written. A partial grant would leave the drawer's
+// checkboxes disagreeing with the server, and the admin would have no way to tell
+// which of their ticks took effect.
+//
+// ★ Scoped to the organization exactly as the remove route is: the target must be
+// a user in the caller's org. The 404 rather than 403 is deliberate — a user in
+// another organization should not be distinguishable from one that does not exist.
+formAccessRouter.post("/user/:userId/grant", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const userId = parseId(req.params.userId);
+    if (userId === null) {
+      res.status(400).json({ error: "Invalid user id" });
+      return;
+    }
+    const parsed = grantAccessSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const target = await getUserById(userId);
+    if (!target || Number(target.organization_id) !== orgId(req.user!)) {
+      res.status(404).json({ error: "User not found" });
+      return;
+    }
+
+    const org = orgId(req.user!);
+    const wanted = [...new Set(parsed.data.form_ids)];
+
+    // Grant first. Doing it before the removals means a refusal on any form
+    // leaves the account's existing access untouched.
+    for (const formId of wanted) {
+      const result = await grantFormAccess({
+        userId,
+        formId,
+        organizationId: org,
+        actorId: req.user!.id,
+      });
+      if (result.ok) continue;
+      const map: Record<string, { status: number; error: string }> = {
+        form_public: {
+          status: 409,
+          error: `Form #${formId} is public, so everyone in the organization can read it. Make it private first.`,
+        },
+        wrong_organization: { status: 404, error: `Form #${formId} not found` },
+        not_found: { status: 404, error: `Form #${formId} not found` },
+      };
+      const m = map[result.reason];
+      res.status(m.status).json({ error: m.error });
+      return;
+    }
+
+    // Then remove every approved row the set no longer names. Only PRIVATE forms
+    // can hold a grant, so `removeFormAccess`'s public-form refusal cannot fire
+    // here — but it is still called rather than duplicating its write, so a
+    // removal made from this drawer and one made from the Remove button produce
+    // the same row and the same audit event.
+    const current = await listAccessForUser(userId);
+    for (const row of current) {
+      if (row.status !== "approved") continue;
+      if (wanted.includes(Number(row.form_id))) continue;
+      await removeFormAccess({ userId, formId: Number(row.form_id), actorId: req.user!.id });
+    }
+
+    res.json({ ok: true, access: await listAccessForUser(userId) });
   } catch (err) {
     next(err);
   }

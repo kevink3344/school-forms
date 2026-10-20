@@ -701,6 +701,22 @@ export const api = {
     });
   },
 
+  /**
+   * Admin: set the COMPLETE set of forms this account may read, from the
+   * Add/Edit User drawer's Forms checkbox list.
+   *
+   * `formIds` is the whole selection, not a delta: the server grants every id it
+   * names and removes every other approved grant, so unticking a box is a real
+   * removal. Returns the account's refreshed rows.
+   */
+  async setUserAccess(userId: number, formIds: number[]): Promise<UserAccessRow[]> {
+    const res = await request<{ ok: boolean; access: UserAccessRow[] }>(
+      `/api/form-access/user/${userId}/grant`,
+      { method: "POST", auth: true, body: { form_ids: formIds } }
+    );
+    return res.access;
+  },
+
   async getForm(id: number): Promise<FormWithFields> {
     return request<FormWithFields>(`/api/forms/${id}`, { auth: true });
   },

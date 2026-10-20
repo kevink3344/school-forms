@@ -79,6 +79,7 @@ export const ROUTES: RouteEntry[] = [
   // Per-account access, for the admin's Edit User drawer.
   { method: "get", path: "/api/form-access/user/{userId}", auth: "admin", tags: "Form Access" },
   { method: "post", path: "/api/form-access/user/{userId}/remove", auth: "admin", tags: "Form Access" },
+  { method: "post", path: "/api/form-access/user/{userId}/grant", auth: "admin", tags: "Form Access" },
   { method: "post", path: "/api/submissions", auth: "none", tags: "Submissions" },
   { method: "get", path: "/api/submissions", auth: "staff", tags: "Submissions" },
   // Archive line. `counts` is two-segment on purpose so it cannot be captured by
