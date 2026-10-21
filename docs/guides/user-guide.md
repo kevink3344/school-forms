@@ -280,6 +280,11 @@ away. The selection is saved with **Save**, along with the rest of the panel.
 - An unticked private form appears to that person under **Available to request**, where they
   can ask for access.
 
+Below the list, **Form access** shows a read-only record of this account's access rows — the
+status of each form and why it is there (grandfathered when the form went private, declined,
+or access removed). It has no buttons: the **Forms** checkboxes are the only control, so
+unticking a form and clicking **Save** is how access is taken away.
+
 Click **+ Add User** to create a new account. New accounts require a password of at least
 8 characters. The Forms list works the same way: tick the forms the new account may read
 before you save.
