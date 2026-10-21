@@ -43,6 +43,14 @@ export interface SubmissionGridOptions {
   status?: string;
   /** Optional school filter. Ignored by the server for school-scoped roles. */
   schoolId?: number;
+  /**
+   * The page's search term, so the preview carries the same rows the list does.
+   * Without it a searched grid would render values for rows it is no longer
+   * showing, and the row count and the grid would disagree.
+   */
+  q?: string;
+  /** The form field the search is narrowed to, or undefined for any field. */
+  qFieldId?: number;
 }
 
 export interface SubmissionGridState {
@@ -74,6 +82,8 @@ export function useSubmissionGrid({
   formId,
   status,
   schoolId,
+  q,
+  qFieldId,
 }: SubmissionGridOptions): SubmissionGridState {
   const [preview, setPreview] = useState<ExportPreview | null>(null);
   const [fieldMeta, setFieldMeta] = useState<Map<number, FormField>>(new Map());
@@ -116,7 +126,7 @@ export function useSubmissionGrid({
     let cancelled = false;
     Promise.all([
       api.getFormViewColumns(formId),
-      api.exportPreview({ form_id: formId, status, school_id: schoolId }),
+      api.exportPreview({ form_id: formId, status, school_id: schoolId, q, q_field_id: qFieldId }),
     ])
       .then(([cfg, prev]) => {
         if (cancelled) return;
@@ -196,7 +206,7 @@ export function useSubmissionGrid({
     return () => {
       cancelled = true;
     };
-  }, [formId, status, schoolId]);
+  }, [formId, status, schoolId, q, qFieldId]);
 
   const availableColumns = useMemo<ExportColumn[]>(() => preview?.columns ?? [], [preview]);
   const visibleColumns = useMemo(

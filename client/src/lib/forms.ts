@@ -1,4 +1,4 @@
-import type { Form } from "../types";
+import type { ExportColumn, Form, FormField } from "../types";
 
 /**
  * The forms that may appear in an in-app form selector (the dashboard, the staff
@@ -40,4 +40,31 @@ export function selectableForms(forms: Form[]): Form[] {
  */
 export function formLabel(form: Pick<Form, "id" | "title">): string {
   return `#${form.id} ${form.title}`;
+}
+
+/** The numeric field id inside a `field_N` column key, or 0 when malformed. */
+export function fieldIdFromColumnKey(key: string): number {
+  const m = /^field_(\d+)$/.exec(key);
+  return m ? Number(m[1]) : 0;
+}
+
+/**
+ * The form fields a free-text search may be narrowed to, in the order the grid
+ * shows them.
+ *
+ * Every form field is offered. A search is a textual LIKE over the stored answer,
+ * so an option list or a checkbox matches the words a parent picked — which is
+ * exactly what "search NC Math in Course choice #1" needs. The one non-field
+ * option ("Any field") is the caller's to add, because its label depends on the
+ * page.
+ *
+ * Accepts either the column list a preview returns or a form's own field list,
+ * so the Submissions grid and the Reports page offer the identical set.
+ */
+export function searchableColumns(
+  columns: (Pick<ExportColumn, "key" | "label"> | Pick<FormField, "id" | "label">)[]
+): { key: string; label: string }[] {
+  return columns
+    .map((c) => ("key" in c ? c : { key: `field_${c.id}`, label: c.label }))
+    .filter((c) => fieldIdFromColumnKey(c.key) > 0);
 }

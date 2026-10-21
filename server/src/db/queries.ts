@@ -1902,10 +1902,15 @@ export interface SubmissionListFilters {
   status?: string | null;
   from?: string | null;
   to?: string | null;
-  // Free-text row filter (Reports). Matches the submission's public id, the
-  // school name, or ANY answer value. Applied in SQL so the preview grid and
-  // every export format see exactly the same rows (WYSIWYG export).
+  // Free-text row filter (Reports and the Submissions grid). Matches the
+  // submission's public id, the school name, or an answer value. Applied in SQL
+  // so the preview grid and every export format see exactly the same rows
+  // (WYSIWYG export).
   q?: string | null;
+  // The form field the search is narrowed to, or null for "any field". Only
+  // meaningful with `q`; it is what lets staff search "NC Math" against Course
+  // choice #1 alone instead of every answer on the row.
+  qFieldId?: number | null;
   // The viewer, so the private-form rule narrows the rows (docs/plans/public-
   // private-forms.md §7.2). ★ It lives HERE, in the shared filter object, rather
   // than in the list handler alone: `submissionArchiveCounts` reads the same
@@ -1980,6 +1985,25 @@ function buildSubmissionFilters(params: SubmissionListFilters): {
     const docId = driveDocumentIdFromQuery(params.q);
     if (docId) {
       p.qDocId = `%${docId.replace(/[\\%_\[]/g, (m) => `\\${m}`)}%`;
+    }
+    // ★ A column-scoped search (Reports / Submissions "search in this column")
+    // deliberately matches ONLY that column's answer. The public id and the school
+    // name are not part of it: a staff member who picked "Course choice #1" and
+    // typed "Broughton" means the course, not the school, and folding the school
+    // in would return rows whose chosen column does not contain the term at all.
+    //
+    // The server has already authorized the column before this runs (the routes
+    // drop a `field_N` the caller may not see), so a field id here is one the
+    // caller is allowed to read.
+    if (params.qFieldId !== undefined && params.qFieldId !== null) {
+      clauses.push(
+        `EXISTS (SELECT 1 FROM dbo.submission_values svf` +
+          ` WHERE svf.submission_id = s.id` +
+          ` AND svf.field_id = @qFieldId` +
+          ` AND CAST(svf.value AS NVARCHAR(MAX)) LIKE @q ESCAPE '\\')`
+      );
+      p.qFieldId = params.qFieldId;
+      return { clauses, p };
     }
     clauses.push(
       `(s.public_id LIKE @q ESCAPE '\\'` +

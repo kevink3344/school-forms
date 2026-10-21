@@ -615,6 +615,8 @@ export interface ReportFilters {
   from?: string | null;
   to?: string | null;
   q?: string | null;
+  // The form field `q` is narrowed to; null / omitted means "any field".
+  q_field_id?: number | null;
   include_staff_only?: boolean;
 }
 

@@ -115,6 +115,13 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
   }
 
   const columns = withFieldId(selected);
+  // The column the search is narrowed to. Checked against `visible` — the role-
+  // filtered list — so a `field_N` the caller may not see can never be used to
+  // probe a hidden answer; it is dropped and the search falls back to any field.
+  const qFieldId =
+    q.q_field_id && visible.some((c) => c.key === `field_${q.q_field_id}`)
+      ? q.q_field_id
+      : null;
   const submissions = await listSubmissions({
     organizationId: user.organization_id,
     schoolId,
@@ -123,6 +130,7 @@ async function resolveReport(query: unknown, user: JwtUser): Promise<Resolution>
     from: q.from,
     to: q.to,
     q: q.q,
+    qFieldId,
     // The viewer travels with the filter, so the rows and every count computed
     // from them narrow together (see SubmissionListFilters).
     viewer: user,
@@ -143,7 +151,10 @@ function buildSubtitle(query: ReportQueryInput, report: ResolvedReport): string 
   if (query.from || query.to) {
     parts.push(`Dates: ${query.from || "…"} – ${query.to || "…"}`);
   }
-  if (query.q && query.q.trim()) parts.push(`Search: "${query.q.trim()}"`);
+  if (query.q && query.q.trim()) {
+    const column = report.columns.find((c) => c.field_id === query.q_field_id);
+    parts.push(`Search${column ? ` (${column.label})` : ""}: "${query.q.trim()}"`);
+  }
   parts.push(`Generated ${formatSubmittedAt(new Date())}`);
   return parts.join("  ·  ");
 }

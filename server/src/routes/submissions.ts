@@ -16,8 +16,10 @@ import {
   listAdhocFields,
   promoteAdhocFieldToFormField,
   getForm,
+  getExportColumns,
   getOrganizationBySlug,
 } from "../db/queries.js";
+import { filterColumnsForRole } from "../export/table.js";
 import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId } from "../auth.js";
 import { canAccessForm } from "../access/formAccess.js";
 import { maybeGenerateDocument } from "../google/docs.js";
@@ -143,7 +145,7 @@ async function submissionAccessError(
 // hand-written parameter list here is precisely how the badge starts describing a
 // different query than the rows underneath it.
 // -----------------------------------------------------------------------------
-function submissionFiltersFrom(req: Request) {
+async function submissionFiltersFrom(req: Request) {
   // Every caller is org-scoped. A School Contact is narrowed further to their
   // own school; admin and staff may narrow with an optional ?school_id filter.
   return {
@@ -155,10 +157,39 @@ function submissionFiltersFrom(req: Request) {
     status: req.query.status ? String(req.query.status) : undefined,
     from: req.query.from ? String(req.query.from) : undefined,
     to: req.query.to ? String(req.query.to) : undefined,
+    // Free-text search, and the one column it may be narrowed to. `q_field_id`
+    // is only honored together with `q`; a field id on its own would silently
+    // filter nothing and look like a search that matched everything.
+    //
+    // ★ The column is authorized HERE, against the same role-filtered column
+    // list the grid and the export preview are built from. A `field_N` the caller
+    // may not see is dropped rather than refused: the search then falls back to
+    // "any field", which can only return rows the caller could already read — so
+    // a hand-crafted request cannot use the search to probe a hidden answer.
+    q: req.query.q ? String(req.query.q).slice(0, 200) : undefined,
+    qFieldId: await authorizedSearchFieldId(req),
     // ★ The viewer travels WITH the filter, so the list and the archive counts
     // narrow together — see the note on SubmissionListFilters.
     viewer: req.user!,
   };
+}
+
+// The form field a search is narrowed to, or null for "any field".
+//
+// Null in every case that is not a deliberate, permitted column choice: no
+// `q_field_id`, no `form_id` to check it against, a malformed id, or an id the
+// caller's role cannot see on that form.
+async function authorizedSearchFieldId(req: Request): Promise<number | null> {
+  const raw = req.query.q_field_id ? Number(req.query.q_field_id) : NaN;
+  if (!Number.isInteger(raw) || raw <= 0) return null;
+  const formId = req.query.form_id ? Number(req.query.form_id) : NaN;
+  if (!Number.isInteger(formId) || formId <= 0) return null;
+  const visible = filterColumnsForRole(
+    await getExportColumns(formId),
+    req.user!.role,
+    req.user!.role === "admin"
+  );
+  return visible.some((c) => c.key === `field_${raw}`) ? raw : null;
 }
 
 // -----------------------------------------------------------------------------
@@ -179,7 +210,7 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "ad
     // silently returns the unarchived list would be a lie the type system cannot
     // see through.
     const archived = req.query.archived === "1" || req.query.archived === "true";
-    const submissions = await listSubmissions({ ...submissionFiltersFrom(req), archived });
+    const submissions = await listSubmissions({ ...(await submissionFiltersFrom(req)), archived });
     res.json(submissions);
   } catch (err) {
     next(err);
@@ -200,7 +231,7 @@ submissionsRouter.get("/", requireAuth, requireRoles("staff", "cdm_contact", "ad
 // -----------------------------------------------------------------------------
 submissionsRouter.get("/archive/counts", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
-    res.json(await submissionArchiveCounts(submissionFiltersFrom(req)));
+    res.json(await submissionArchiveCounts(await submissionFiltersFrom(req)));
   } catch (err) {
     next(err);
   }

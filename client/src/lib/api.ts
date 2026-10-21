@@ -220,6 +220,10 @@ function reportQueryString(query: ReportQuery): string {
   if (query.from) qs.set("from", query.from);
   if (query.to) qs.set("to", query.to);
   if (query.q && query.q.trim()) qs.set("q", query.q.trim());
+  // Only travels with a term — a column with no search would filter nothing.
+  if (query.q && query.q.trim() && query.q_field_id) {
+    qs.set("q_field_id", String(query.q_field_id));
+  }
   if (query.include_staff_only) qs.set("include_staff_only", "1");
   if (query.columns && query.columns.length) qs.set("columns", query.columns.join(","));
   return qs.toString();
@@ -852,12 +856,19 @@ export const api = {
   // view holding only them. There is no merged list on purpose — a merged one
   // cannot answer "which of these is put away?", so nothing downstream could
   // trust it.
+  //
+  // `q` is the free-text search and `q_field_id` narrows it to one form field
+  // (the "search in this column" choice); omitting the latter searches every
+  // field. Both are applied server-side, so the rows and the grid's values are
+  // built from the same filter.
   async listSubmissions(params: {
     school_id?: number;
     form_id?: number;
     status?: string;
     from?: string;
     to?: string;
+    q?: string;
+    q_field_id?: number;
     archived?: boolean;
   } = {}): Promise<SubmissionRow[]> {
     const qs = new URLSearchParams();
@@ -866,6 +877,10 @@ export const api = {
     if (params.status) qs.set("status", params.status);
     if (params.from) qs.set("from", params.from);
     if (params.to) qs.set("to", params.to);
+    if (params.q && params.q.trim()) qs.set("q", params.q.trim());
+    if (params.q && params.q.trim() && params.q_field_id) {
+      qs.set("q_field_id", String(params.q_field_id));
+    }
     if (params.archived) qs.set("archived", "1");
     const q = qs.toString();
     return request<SubmissionRow[]>(`/api/submissions${q ? `?${q}` : ""}`, { auth: true });
@@ -881,6 +896,8 @@ export const api = {
     status?: string;
     from?: string;
     to?: string;
+    q?: string;
+    q_field_id?: number;
   } = {}): Promise<{ active: number; archived: number }> {
     const qs = new URLSearchParams();
     if (params.school_id !== undefined) qs.set("school_id", String(params.school_id));
@@ -888,6 +905,10 @@ export const api = {
     if (params.status) qs.set("status", params.status);
     if (params.from) qs.set("from", params.from);
     if (params.to) qs.set("to", params.to);
+    if (params.q && params.q.trim()) qs.set("q", params.q.trim());
+    if (params.q && params.q.trim() && params.q_field_id) {
+      qs.set("q_field_id", String(params.q_field_id));
+    }
     const q = qs.toString();
     return request<{ active: number; archived: number }>(
       `/api/submissions/archive/counts${q ? `?${q}` : ""}`,
@@ -1073,10 +1094,16 @@ export const api = {
     form_id: number;
     school_id?: number;
     status?: string;
+    q?: string;
+    q_field_id?: number;
   }): Promise<ExportPreview> {
     const qs = new URLSearchParams({ form_id: String(params.form_id) });
     if (params.school_id !== undefined) qs.set("school_id", String(params.school_id));
     if (params.status) qs.set("status", params.status);
+    if (params.q && params.q.trim()) qs.set("q", params.q.trim());
+    if (params.q && params.q.trim() && params.q_field_id) {
+      qs.set("q_field_id", String(params.q_field_id));
+    }
     return request<ExportPreview>(`/api/export/preview?${qs.toString()}`, { auth: true });
   },
 

@@ -7,7 +7,7 @@ import { renderValue } from "../../components/FieldValue";
 import { fieldIdFromKey, StaffCell } from "../../components/SubmissionsGrid";
 import { useCellEdit } from "../../lib/useCellEdit";
 import { useAuth } from "../../context/AuthContext";
-import { formLabel, selectableForms } from "../../lib/forms";
+import { fieldIdFromColumnKey, formLabel, searchableColumns, selectableForms } from "../../lib/forms";
 import type {
   ExportColumn,
   Form,
@@ -27,16 +27,16 @@ interface ReportState {
   formId: number | null;
   schoolId: number | null;
   status: SubmissionStatus | "";
-  from: string;
-  to: string;
+  // The form field the search is narrowed to; null means "any field". The term
+  // itself lives in `qInput`/`qDebounced` because it is debounced separately.
+  qFieldId: number | null;
 }
 
 const EMPTY_STATE: ReportState = {
   formId: null,
   schoolId: null,
   status: "",
-  from: "",
-  to: "",
+  qFieldId: null,
 };
 
 const STATUSES: { value: SubmissionStatus | ""; label: string }[] = [
@@ -89,9 +89,10 @@ function buildReportQuery(
     form_id: state.formId as number,
     school_id: state.schoolId,
     status: state.status || null,
-    from: state.from || null,
-    to: state.to || null,
     q: q || null,
+    // Only meaningful alongside a term; an empty search with a column chosen is
+    // "no filter", not "every row of that column".
+    q_field_id: q ? state.qFieldId : null,
     // Always on. The server still needs the flag to authorize the staff-only
     // columns; it is simply no longer something the user chooses.
     include_staff_only: true,
@@ -242,6 +243,10 @@ export default function ReportsPage() {
 
   const availableColumns: ExportColumn[] = preview?.columns ?? [];
 
+  // The columns a search can be narrowed to. A field id belongs to one form, so
+  // a form switch drops the choice rather than carrying a stale id across.
+  const searchColumns = useMemo(() => searchableColumns(availableColumns), [availableColumns]);
+
   // Default the selection to every visible column, and preserve an existing
   // selection across refetches when its keys still exist.
   useEffect(() => {
@@ -384,9 +389,8 @@ export default function ReportsPage() {
   const currentFilters = () => ({
     school_id: state.schoolId,
     status: state.status || null,
-    from: state.from || null,
-    to: state.to || null,
     q: qDebounced || null,
+    q_field_id: qDebounced ? state.qFieldId : null,
     include_staff_only: true,
   });
 
@@ -399,8 +403,7 @@ export default function ReportsPage() {
       formId: view.form_id,
       schoolId: view.filters.school_id ?? null,
       status: (view.filters.status ?? "") as SubmissionStatus | "",
-      from: view.filters.from ?? "",
-      to: view.filters.to ?? "",
+      qFieldId: view.filters.q_field_id ?? null,
     });
     setFormat(view.format);
     setChecked(new Set(view.columns ?? []));
@@ -587,7 +590,7 @@ export default function ReportsPage() {
             value={state.formId ?? ""}
             onChange={(e) => {
               const id = e.target.value ? Number(e.target.value) : null;
-              patch({ formId: id });
+              patch({ formId: id, qFieldId: null });
               setActiveViewId(null);
               // Column keys belong to the form, so a grouping chosen for the old
               // form would silently collapse every row into "(No value)".
@@ -720,26 +723,41 @@ export default function ReportsPage() {
           </select>
         </div>
 
-        <div className="filter-group">
-          <label htmlFor="rp-from">From</label>
-          <input id="rp-from" type="date" value={state.from} onChange={(e) => patch({ from: e.target.value })} />
-        </div>
-
-        <div className="filter-group">
-          <label htmlFor="rp-to">To</label>
-          <input id="rp-to" type="date" value={state.to} onChange={(e) => patch({ to: e.target.value })} />
-        </div>
-
+        {/* Search replaces the old From/To date range. The box matches any answer
+            on the row; the selector narrows the same term to one column, so
+            "NC Math" can mean Course choice #1 specifically. Both are part of
+            the report query, so the preview and the export stay identical. */}
         <div className="filter-group" style={{ flex: 1, minWidth: 200 }}>
-          <label htmlFor="rp-q">Filter rows</label>
+          <label htmlFor="rp-q">
+            {state.qFieldId
+              ? `Search in ${searchColumns.find((c) => fieldIdFromColumnKey(c.key) === state.qFieldId)?.label ?? "column"}`
+              : "Search"}
+          </label>
           <input
             id="rp-q"
             type="search"
-            placeholder="Search any field…"
+            placeholder={state.qFieldId ? "Matches this column only…" : "Search any field…"}
             value={qInput}
             onChange={(e) => setQInput(e.target.value)}
             maxLength={200}
           />
+        </div>
+
+        <div className="filter-group">
+          <label htmlFor="rp-q-column">Search in</label>
+          <select
+            id="rp-q-column"
+            value={state.qFieldId ?? ""}
+            onChange={(e) => patch({ qFieldId: e.target.value ? Number(e.target.value) : null })}
+            disabled={!searchColumns.length}
+          >
+            <option value="">Any field</option>
+            {searchColumns.map((c) => (
+              <option key={c.key} value={fieldIdFromColumnKey(c.key)}>
+                {c.label}
+              </option>
+            ))}
+          </select>
         </div>
 
         {/* Staff-only fields are no longer opt-in, so there is no toggle here —
@@ -749,6 +767,7 @@ export default function ReportsPage() {
           className="clear"
           onClick={() => {
             setQInput("");
+            setQDebounced("");
             setState((s) => ({ ...EMPTY_STATE, formId: s.formId }));
             setActiveViewId(null);
           }}

@@ -59,7 +59,23 @@ exportRouter.get("/preview", requireAuth, requireRoles("staff", "cdm_contact", "
     // see. This keeps the preview in step with /csv, which includes them too.
     const columns = withFieldId(filterColumnsForRole(rawColumns, req.user!.role, true));
 
-    const submissions = await listSubmissions({ organizationId: req.user!.organization_id, schoolId, formId, status, viewer: req.user! });
+    // The grid's search, so the values it renders are the values of the rows it
+    // was handed. `q_field_id` is checked against the columns this caller may
+    // see; anything else narrows to "any field" rather than leaking a hidden one.
+    const q = req.query.q ? String(req.query.q).slice(0, 200) : undefined;
+    const rawQFieldId = req.query.q_field_id ? Number(req.query.q_field_id) : NaN;
+    const qFieldId =
+      q && columns.some((c) => c.field_id === rawQFieldId) ? rawQFieldId : null;
+
+    const submissions = await listSubmissions({
+      organizationId: req.user!.organization_id,
+      schoolId,
+      formId,
+      status,
+      q,
+      qFieldId,
+      viewer: req.user!,
+    });
     const rows = await buildExportRows(columns, submissions);
 
     res.json({

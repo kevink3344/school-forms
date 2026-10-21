@@ -9,7 +9,7 @@ import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
 import SubmissionsGrid from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
-import { formLabel, selectableForms } from "../../lib/forms";
+import { fieldIdFromColumnKey, formLabel, searchableColumns, selectableForms } from "../../lib/forms";
 import { useAuth } from "../../context/AuthContext";
 import { ARCHIVE_TOGGLE_LABEL, archivedMatches, submissionNoun } from "../../lib/archive";
 
@@ -17,8 +17,10 @@ interface Filters {
   school_id: string;
   form_id: string;
   status: string;
-  from: string;
-  to: string;
+  // Free-text search across the answers. `q_field_id` narrows it to one form
+  // field (the column chosen beside the box); empty means "any field".
+  q: string;
+  q_field_id: string;
   // The one non-string member, and deliberately not a `status` value: an
   // archived row KEEPS its workflow status, so this selects WHICH of the two
   // lists you are looking at rather than which rows match. There is no merged
@@ -30,7 +32,7 @@ interface Filters {
 // The five filters a text value can go into. Named so `setFilter` cannot be
 // handed the boolean archive flag it would type as a string — see the toggle
 // below, which has its own setter.
-type TextFilterKey = "school_id" | "form_id" | "status" | "from" | "to";
+type TextFilterKey = "school_id" | "form_id" | "status" | "q" | "q_field_id";
 
 // Inline styles for the delete confirmation, matching the form-delete dialog on
 // the Forms page so the two destructive prompts read as the same kind of thing.
@@ -79,10 +81,21 @@ export default function AdminDashboard() {
     school_id: "",
     form_id: "",
     status: "",
-    from: "",
-    to: "",
+    q: "",
+    q_field_id: "",
     archived: false,
   });
+
+  const setFilter = (key: TextFilterKey, value: string) =>
+    setFilters((prev) => ({ ...prev, [key]: value }));
+
+  // The search term is held in its own input and debounced into `filters`, so
+  // typing does not refetch the list (and the preview) on every keystroke.
+  const [searchInput, setSearchInput] = useState("");
+  useEffect(() => {
+    const t = window.setTimeout(() => setFilter("q", searchInput.trim()), 300);
+    return () => window.clearTimeout(t);
+  }, [searchInput]);
 
   // ---------------------------------------------------------------------------
   // Extra-column state. Everything below only has meaning once a single form is
@@ -96,6 +109,7 @@ export default function AdminDashboard() {
   // identical grid rather than a copy of it. `extrasLoading` covers the frame
   // where the form changed but its columns have not arrived yet.
   const {
+    availableColumns,
     visibleColumns,
     pickerColumns,
     hiddenBase,
@@ -113,7 +127,14 @@ export default function AdminDashboard() {
     formId,
     status: filters.status || undefined,
     schoolId: filters.school_id ? Number(filters.school_id) : undefined,
+    q: filters.q || undefined,
+    qFieldId: filters.q_field_id ? Number(filters.q_field_id) : undefined,
   });
+
+  // The columns the search can be narrowed to. The grid hook has already loaded
+  // them for the selected form; with "All forms" there is no single form to
+  // search a column of, so the selector is not offered at all.
+  const searchColumns = searchableColumns(availableColumns);
 
   // Load forms + schools once
   useEffect(() => {
@@ -162,8 +183,8 @@ export default function AdminDashboard() {
         school_id: filters.school_id ? Number(filters.school_id) : undefined,
         form_id: filters.form_id ? Number(filters.form_id) : undefined,
         status: filters.status || undefined,
-        from: filters.from || undefined,
-        to: filters.to || undefined,
+        q: filters.q || undefined,
+        q_field_id: filters.q_field_id ? Number(filters.q_field_id) : undefined,
         archived: filters.archived,
       })
       .then((s) => {
@@ -175,7 +196,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [filters.school_id, filters.form_id, filters.status, filters.from, filters.to, filters.archived, reloadKey]);
+  }, [filters.school_id, filters.form_id, filters.status, filters.q, filters.q_field_id, filters.archived, reloadKey]);
 
   // What the list above cannot tell us. A filtered list is the wrong instrument
   // for reporting its own omissions: with archived rows hidden they are absent by
@@ -193,8 +214,8 @@ export default function AdminDashboard() {
         school_id: filters.school_id ? Number(filters.school_id) : undefined,
         form_id: filters.form_id ? Number(filters.form_id) : undefined,
         status: filters.status || undefined,
-        from: filters.from || undefined,
-        to: filters.to || undefined,
+        q: filters.q || undefined,
+        q_field_id: filters.q_field_id ? Number(filters.q_field_id) : undefined,
       })
       .then((c) => {
         if (!cancelled) setArchiveCounts(c);
@@ -207,7 +228,7 @@ export default function AdminDashboard() {
     return () => {
       cancelled = true;
     };
-  }, [filters.school_id, filters.form_id, filters.status, filters.from, filters.to, reloadKey]);
+  }, [filters.school_id, filters.form_id, filters.status, filters.q, filters.q_field_id, reloadKey]);
 
   // The counters are org-scoped server-side and deliberately ignore the grid's
   // form/school filters: a Google Forms response is rejected before any of the
@@ -229,9 +250,6 @@ export default function AdminDashboard() {
     };
   }, [webhookDays]);
 
-  const setFilter = (key: TextFilterKey, value: string) =>
-    setFilters((prev) => ({ ...prev, [key]: value }));
-
   const setArchived = (archived: boolean) => setFilters((prev) => ({ ...prev, archived }));
 
   // Clear resets every filter including the form. Leaving the form selected used
@@ -240,8 +258,14 @@ export default function AdminDashboard() {
   // It also returns you to the ACTIVE list. A Clear button that left you looking
   // at archived rows would be the one control on the page that did not clear what
   // it implies it clears.
-  const clearFilters = () =>
-    setFilters({ school_id: "", form_id: "", status: "", from: "", to: "", archived: false });
+  //
+  // The search box has its own state, so it is cleared here too — a Clear that
+  // left the typed term on screen while the list reopened unfiltered would
+  // describe two different queries at once.
+  const clearFilters = () => {
+    setSearchInput("");
+    setFilters({ school_id: "", form_id: "", status: "", q: "", q_field_id: "", archived: false });
+  };
 
   const busy = loading || extrasLoading;
 
@@ -424,14 +448,44 @@ export default function AdminDashboard() {
             <option value="completed">Completed</option>
           </select>
         </div>
-        <div className="filter-group">
-          <label>Date from</label>
-          <input type="date" value={filters.from} onChange={(e) => setFilter("from", e.target.value)} />
+        {/* Search replaces the old From/To date range. The box matches any answer
+            on the row; the selector beside it narrows the same term to one
+            column, so "NC Math" can mean Course choice #1 specifically. The
+            column list is the form's own, so the selector only exists once a
+            single form is chosen — with "All forms" there is no one column set
+            to search. */}
+        <div className="filter-group" style={{ flex: 1, minWidth: 220 }}>
+          <label htmlFor="sub-q">
+            {filters.q_field_id
+              ? `Search in ${searchColumns.find((c) => fieldIdFromColumnKey(c.key) === Number(filters.q_field_id))?.label ?? "column"}`
+              : "Search"}
+          </label>
+          <input
+            id="sub-q"
+            type="search"
+            placeholder={filters.q_field_id ? "Matches this column only…" : "Search any field…"}
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            maxLength={200}
+          />
         </div>
-        <div className="filter-group">
-          <label>Date to</label>
-          <input type="date" value={filters.to} onChange={(e) => setFilter("to", e.target.value)} />
-        </div>
+        {formId > 0 && searchColumns.length > 0 && (
+          <div className="filter-group">
+            <label htmlFor="sub-q-column">Search in</label>
+            <select
+              id="sub-q-column"
+              value={filters.q_field_id}
+              onChange={(e) => setFilter("q_field_id", e.target.value)}
+            >
+              <option value="">Any field</option>
+              {searchColumns.map((c) => (
+                <option key={c.key} value={fieldIdFromColumnKey(c.key)}>
+                  {c.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         <div className="filter-spacer" />
         {/* A switch, not a sixth dropdown. The other five all narrow WHICH rows
             match; this one chooses WHICH list you are looking at — an archived

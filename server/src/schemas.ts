@@ -550,6 +550,10 @@ export const reportQuerySchema = z.object({
   to: z.string().max(40).optional(),
   // Free-text row filter. Capped so a pathological term can't blow up the LIKE.
   q: z.string().max(200).optional(),
+  // The form field to narrow `q` to, or omitted for "any field". Authorized at
+  // the route against the caller's visible columns, so an unauthorized id is
+  // dropped rather than rejected.
+  q_field_id: z.coerce.number().int().positive().optional(),
   // Comma-separated `field_N` keys. Unknown/unauthorized keys are dropped at the
   // route, so an admin can't hand-craft a request to leak a staff-only column.
   columns: z.string().max(4000).optional(),
@@ -568,6 +572,8 @@ export const reportFiltersSchema = z.object({
   from: z.string().max(40).nullable().optional(),
   to: z.string().max(40).nullable().optional(),
   q: z.string().max(200).nullable().optional(),
+  // Persisted with the search so a saved View reopens on the same column.
+  q_field_id: z.number().int().positive().nullable().optional(),
   include_staff_only: z.boolean().optional(),
 });
 
