@@ -1,7 +1,7 @@
-/**
- * Public / Private forms — the visibility rule, the grandfather, and the log.
+﻿/**
+ * Public / Private forms â€” the visibility rule, the grandfather, and the log.
  *
- * Docs: docs/plans/public-private-forms.md (§12).
+ * Docs: docs/plans/public-private-forms.md (Â§12).
  *
  * A DURABLE VERSION OF WHAT WAS VERIFIED BY HAND. The live behaviour (a locked
  * form that refuses, a backfill that grants the right accounts, a decision that
@@ -15,15 +15,15 @@
  *
  *   1. The visibility rule is written in ONE place (`access/formAccess.ts`) and
  *      names the exempt roles there and nowhere else.
- *   2. The backfill's grant set is the COMPLEMENT of that exemption — the two are
+ *   2. The backfill's grant set is the COMPLEMENT of that exemption â€” the two are
  *      one rule written twice and must move together (trap 12).
  *   3. `listAvailableFormsFor` filters `status = 'published'`, so drafts never
- *      appear on a page every internal role can open (trap 2 of §16.8).
- *   4. Every row-level site that accepts a form id applies the check (§7.2).
+ *      appear on a page every internal role can open (trap 2 of Â§16.8).
+ *   4. Every row-level site that accepts a form id applies the check (Â§7.2).
  *   5. Both dialects declare the access, event and dismissal tables and the column, and timestamps
  *      columns are registered (or the two engines disagree about the shape).
  *   6. All twelve routes are registered in the inventory AND documented in
- *      Swagger — the existing coverage test proves the second half.
+ *      Swagger â€” the existing coverage test proves the second half.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -39,6 +39,13 @@ const SERVER_SRC = join(HERE, "..");
 
 function source(relative: string): string {
   return readFileSync(join(SERVER_SRC, relative), "utf8");
+}
+
+// The client is a sibling workspace, so its files need their own root. The
+// google-doc gate does the same thing for the designer's type list.
+const CLIENT_SRC = join(SERVER_SRC, "..", "..", "client", "src");
+function clientSource(relative: string): string {
+  return readFileSync(join(CLIENT_SRC, relative), "utf8");
 }
 
 const PREDICATE = source("access/formAccess.ts");
@@ -57,8 +64,8 @@ describe("the visibility rule is written once", () => {
     expect(PREDICATE).toMatch(/"admin",\s*"staff"/);
   });
 
-  it("★ does NOT re-state the role test in any route", () => {
-    // ★ The defect this guards: a second copy of "admin or staff" outside the
+  it("â˜… does NOT re-state the role test in any route", () => {
+    // â˜… The defect this guards: a second copy of "admin or staff" outside the
     // predicate is the "two overlapping gates" failure this repo has produced
     // twice. The rule must be consulted, never re-implemented.
     for (const [name, src] of [
@@ -75,7 +82,7 @@ describe("the visibility rule is written once", () => {
   });
 
   it("the predicate narrows with an OR of public-or-granted", () => {
-    // The shape matters: `visibility = 'public' OR EXISTS (…approved)`.
+    // The shape matters: `visibility = 'public' OR EXISTS (â€¦approved)`.
     expect(PREDICATE).toContain("visibility = 'public'");
     expect(PREDICATE).toContain("fa.status = 'approved'");
   });
@@ -92,16 +99,16 @@ describe("the visibility rule is written once", () => {
 // -----------------------------------------------------------------------------
 describe("the grandfather backfill", () => {
   it("grants exactly the non-exempt role", () => {
-    // ★ `role = 'cdm_contact'`, NOT `role <> 'admin'`. The two are one rule
+    // â˜… `role = 'cdm_contact'`, NOT `role <> 'admin'`. The two are one rule
     // written twice (the predicate exempts admin+staff), so they must change
-    // together — see the plan's trap 12.
+    // together â€” see the plan's trap 12.
     expect(DATA).toContain("u.role = 'cdm_contact'");
     expect(DATA).not.toMatch(/u\.role\s*<>\s*'admin'/);
   });
 
   it("is idempotent AND protects a decision via NOT EXISTS", () => {
     // The NOT EXISTS is what stops a later flip re-granting a declined or
-    // revoked account — an administrator's answer must not be silently reversed.
+    // revoked account â€” an administrator's answer must not be silently reversed.
     expect(DATA).toMatch(/NOT EXISTS \(SELECT 1 FROM dbo\.form_access/);
   });
 
@@ -118,8 +125,8 @@ describe("the grandfather backfill", () => {
 // 3. The Available Forms query cannot leak drafts
 // -----------------------------------------------------------------------------
 describe("Available Forms", () => {
-  it("★ filters to published forms", () => {
-    // ★ The trap: the naive `WHERE organization_id = @org` puts DRAFTS and
+  it("â˜… filters to published forms", () => {
+    // â˜… The trap: the naive `WHERE organization_id = @org` puts DRAFTS and
     // ARCHIVED forms on a page every internal role can open. Those are
     // unpublished and are not served by the anonymous public endpoints either.
     expect(DATA).toMatch(/status = 'published'/);
@@ -151,33 +158,33 @@ describe("Available Forms", () => {
 // 4. Every row-level site applies the check
 // -----------------------------------------------------------------------------
 describe("enforcement sites", () => {
-  it("★ the shared submission guard applies BOTH rules", () => {
+  it("â˜… the shared submission guard applies BOTH rules", () => {
     // One helper, so a new route cannot apply the school rule and forget the
-    // form rule — a missing guard looks exactly like a route nobody called.
+    // form rule â€” a missing guard looks exactly like a route nobody called.
     expect(SUBMISSIONS_ROUTE).toContain("async function submissionAccessError(");
     expect(SUBMISSIONS_ROUTE).toContain("canAccessForm(req.user!, submission.form_id)");
     expect(SUBMISSIONS_ROUTE).toContain("canAccessSchool(req.user!, submission.school_id)");
   });
 
-  it("★ no bare canAccessSchool guard remains in submissions.ts", () => {
+  it("â˜… no bare canAccessSchool guard remains in submissions.ts", () => {
     // Every guard must go through the helper. A leftover inline guard is a route
     // that checks the school and NOT the form.
     //
-    // ★ The helper's OWN guard is the one legitimate occurrence, so the scan
+    // â˜… The helper's OWN guard is the one legitimate occurrence, so the scan
     // starts after the helper's closing brace. Counting the whole file would
     // fail on correct code.
     const helperEnd = SUBMISSIONS_ROUTE.indexOf("function submissionFiltersFrom");
-    expect(helperEnd, "the helper was renamed — this scan would check nothing").toBeGreaterThan(-1);
+    expect(helperEnd, "the helper was renamed â€” this scan would check nothing").toBeGreaterThan(-1);
     const afterHelper = SUBMISSIONS_ROUTE.slice(helperEnd);
     const bare = afterHelper.match(/if \(!canAccessSchool\(/g) ?? [];
     expect(
       bare.length,
-      "an inline canAccessSchool guard bypasses the form check — use submissionAccessError"
+      "an inline canAccessSchool guard bypasses the form check â€” use submissionAccessError"
     ).toBe(0);
   });
 
   it("the submission FILTER carries the viewer, so counts narrow with the list", () => {
-    // ★ `submissionArchiveCounts` reads the same filter object. Adding the
+    // â˜… `submissionArchiveCounts` reads the same filter object. Adding the
     // predicate in the list handler alone leaves the "N archived hidden" badge
     // describing a query the grid no longer runs.
     expect(SUBMISSIONS_ROUTE).toContain("viewer: req.user!");
@@ -225,8 +232,8 @@ describe("schema parity", () => {
     expect(addCol?.table).toBe("forms");
   });
 
-  it("★ every timestamp column of the new tables is registered", () => {
-    // Omit one and it is a Date on SQL Server and a string on Turso — the
+  it("â˜… every timestamp column of the new tables is registered", () => {
+    // Omit one and it is a Date on SQL Server and a string on Turso â€” the
     // libsql.test.ts honesty guard enforces the pairing, and this is the same
     // check stated for this feature's columns.
     for (const col of ["requested_at", "decided_at", "dismissed_at"]) {
@@ -271,8 +278,8 @@ describe("route registration", () => {
     "/api/form-access/user/{userId}/remove",
   ];
 
-  it("★ registers every route in the inventory", () => {
-    // ★ The count is asserted first: a scanner that matched nothing would
+  it("â˜… registers every route in the inventory", () => {
+    // â˜… The count is asserted first: a scanner that matched nothing would
     // otherwise pass by having nothing to check.
     const found = PATHS.filter((p) => INVENTORY.includes(`"${p}"`));
     expect(found.length, `missing from inventory: ${PATHS.filter((p) => !found.includes(p)).join(", ")}`).toBe(
@@ -295,10 +302,10 @@ describe("route registration", () => {
 
   it("the admin-only routes carry the admin guard", () => {
     // There is no router-level guard (two audiences in one file), so each admin
-    // route must assert its own — a missing one hands every user the queue.
+    // route must assert its own â€” a missing one hands every user the queue.
     //
-    // ★ Match the ROUTE REGISTRATION (`formAccessRouter.get("/requests"`), not a
-    // bare `"/requests"` — the latter also matches the POST on the same path, so
+    // â˜… Match the ROUTE REGISTRATION (`formAccessRouter.get("/requests"`), not a
+    // bare `"/requests"` â€” the latter also matches the POST on the same path, so
     // an indexOf would check the wrong handler and pass on a correct file for the
     // wrong reason.
     for (const [method, path] of [
@@ -320,16 +327,16 @@ describe("route registration", () => {
 // 7. The audit log's single writer
 // -----------------------------------------------------------------------------
 describe("the audit log", () => {
-  it("★ has exactly ONE writer", () => {
+  it("â˜… has exactly ONE writer", () => {
     // Two code paths that must write the same audit line will eventually write
-    // it differently — and because `denied` covers both declined and revoked,
+    // it differently â€” and because `denied` covers both declined and revoked,
     // the log is the ONLY thing that can tell them apart afterwards.
     const inserts = DATA.match(/INSERT INTO dbo\.form_access_events/g) ?? [];
     expect(inserts.length).toBe(1);
   });
 
   it("writes the event inside the caller's transaction", () => {
-    // ★ Match the signature loosely across line endings: the file is CRLF on
+    // â˜… Match the signature loosely across line endings: the file is CRLF on
     // Windows, so a literal `\n` in the pattern would fail on a correct file.
     expect(DATA).toMatch(/async function recordAccessEvent\(\s*tx: DbClient,/);
     // Every state change passes the transaction handle, never the global client.
@@ -342,12 +349,12 @@ describe("the audit log", () => {
     expect(PREDICATE).not.toContain("form_access_events");
   });
 
-  it("★ a denied row IS re-requestable", () => {
-    // ★ This REVERSES the plan's original §15 Q5 answer, at the user's request:
+  it("â˜… a denied row IS re-requestable", () => {
+    // â˜… This REVERSES the plan's original Â§15 Q5 answer, at the user's request:
     // removing access in the Edit User drawer must leave the person able to ask
     // for it back from the Available Forms page.
     //
-    // The two facts stay distinguishable even though both are re-requestable —
+    // The two facts stay distinguishable even though both are re-requestable â€”
     // `form_access_events` records `declined` and `revoked` separately, so an
     // administrator can still see which happened.
     expect(DATA).not.toContain('throw new AccessRequestError("denied")');
@@ -365,10 +372,10 @@ describe("the audit log", () => {
 // 8. The Edit User drawer's per-account access list
 // -----------------------------------------------------------------------------
 describe("per-account access (the Edit User drawer)", () => {
-  it("★ refuses to remove access on a PUBLIC form", () => {
-    // ★ The reason this is a separate function from `decideFormAccess(… "revoke")`.
+  it("â˜… refuses to remove access on a PUBLIC form", () => {
+    // â˜… The reason this is a separate function from `decideFormAccess(â€¦ "revoke")`.
     // On a public form every internal member can read it regardless of any row,
-    // so the removal would appear to succeed while changing nothing — the admin
+    // so the removal would appear to succeed while changing nothing â€” the admin
     // would watch the row vanish and the person would still open the form.
     expect(DATA).toContain('if (forms[0].visibility !== "private") return { ok: false, reason: "form_public" }');
   });
@@ -379,20 +386,20 @@ describe("per-account access (the Edit User drawer)", () => {
     expect(DATA).toMatch(/removeFormAccess[\s\S]{0,1400}status = 'denied'/);
   });
 
-  it("★ lists rows that EXIST, not forms the person can read", () => {
+  it("â˜… lists rows that EXIST, not forms the person can read", () => {
     // The two differ for a staff or admin account, which is exempt by rule and
-    // holds no row — so its list is legitimately empty. Deriving "forms they can
+    // holds no row â€” so its list is legitimately empty. Deriving "forms they can
     // read" would offer a Remove button for rows that do not exist.
     expect(DATA).toMatch(/FROM dbo\.form_access a[\s\S]{0,200}WHERE a\.user_id = @userId/);
-    // …and it must NOT consult the visibility predicate.
+    // â€¦and it must NOT consult the visibility predicate.
     const fn = DATA.slice(DATA.indexOf("export async function listAccessForUser"));
     const body = fn.slice(0, fn.indexOf("\n}"));
-    expect(body, "listAccessForUser consults the predicate — it should list rows only").not.toContain(
+    expect(body, "listAccessForUser consults the predicate â€” it should list rows only").not.toContain(
       "formVisibilityClause"
     );
   });
 
-  it("★ the per-user routes are scoped to the caller's organization", () => {
+  it("â˜… the per-user routes are scoped to the caller's organization", () => {
     // Otherwise an admin could enumerate another tenant's grants by guessing an
     // id. A 404 (not 403) keeps the two indistinguishable.
     for (const path of ['"/user/:userId"', '"/user/:userId/remove"']) {
@@ -415,17 +422,17 @@ describe("per-account access (the Edit User drawer)", () => {
 });
 
 // -----------------------------------------------------------------------------
-// 8b. The Add/Edit User drawer's Forms checkbox list — a RECONCILE
+// 8b. The Add/Edit User drawer's Forms checkbox list â€” a RECONCILE
 // -----------------------------------------------------------------------------
 describe("per-account grants (the Forms checkbox list)", () => {
-  it("★ grants only PRIVATE forms", () => {
+  it("â˜… grants only PRIVATE forms", () => {
     // A public form is readable by everyone regardless of any row, so a grant on
     // it would appear to work while changing nothing.
     expect(DATA).toMatch(/grantFormAccess[\s\S]{0,1200}reason: "form_public"/);
   });
 
-  it("★ grants only forms in the caller's organization", () => {
-    // Without this an admin could grant — and thereby leak the existence of —
+  it("â˜… grants only forms in the caller's organization", () => {
+    // Without this an admin could grant â€” and thereby leak the existence of â€”
     // another tenant's form by id.
     expect(DATA).toMatch(/grantFormAccess[\s\S]{0,900}reason: "wrong_organization"/);
   });
@@ -435,7 +442,7 @@ describe("per-account grants (the Forms checkbox list)", () => {
     expect(DATA).toMatch(/grantFormAccess[\s\S]{0,2400}'approved', 'direct'/);
   });
 
-  it("★ the route REMOVES every approved row the set no longer names", () => {
+  it("â˜… the route REMOVES every approved row the set no longer names", () => {
     // The half that makes unticking a box a real removal. Without it the
     // checkbox would look like it worked while the grant stayed.
     const idx = ROUTER.indexOf('formAccessRouter.post("/user/:userId/grant"');
@@ -447,7 +454,7 @@ describe("per-account grants (the Forms checkbox list)", () => {
     );
   });
 
-  it("★ the route writes NOTHING when any named form is refused", () => {
+  it("â˜… the route writes NOTHING when any named form is refused", () => {
     // A partial grant would leave the drawer's checkboxes disagreeing with the
     // server, with no way for the admin to tell which ticks took effect. The
     // grants therefore run to completion BEFORE the removals begin.
@@ -479,11 +486,39 @@ describe("per-account grants (the Forms checkbox list)", () => {
     expect(body).toContain("form_ids");
     expect(body).not.toContain("user_id");
   });
+
+  it("â˜… the drawer seeds its checkboxes from PRIVATE approved rows only", () => {
+    // â˜… The defect this guards, measured on staging: an account holding an old
+    // `backfill` grant on a form that later became PUBLIC seeded that form id
+    // into the submitted set. The list offers no checkbox for a public form, so
+    // the admin could not see or clear it â€” and the server refuses a grant on a
+    // public form with 409, so every Save on that account failed with "Form #1
+    // is publicâ€¦" and NOTHING was written. Five School Contacts were affected.
+    const drawer = clientSource("pages/admin/AdminSettings.tsx");
+    // Whitespace-tolerant: the file is CRLF on Windows, so a literal "\n" in the
+    // needle would match nothing and the assertion would pass vacuously.
+    const seed = drawer.slice(drawer.search(/setFormGrants\(\s*rows/));
+    const expr = seed.slice(0, seed.indexOf(");"));
+    expect(expr, "the checkbox seed no longer filters out public forms").toContain(
+      'r.form_visibility !== "public"'
+    );
+  });
+
+  it("â˜… a write through the table re-seeds the checkboxes", () => {
+    // They are two views of one set of rows. Refreshing only the table left the
+    // checkbox ticked for a form just removed â€” and because Save submits the
+    // complete ticked set, the next Save would have granted it straight back.
+    const drawer = clientSource("pages/admin/AdminSettings.tsx");
+    const remove = drawer.slice(drawer.indexOf("const removeAccess = async"));
+    const body = remove.slice(0, remove.indexOf("\n  };"));
+    expect(body, "removeAccess refreshes only the table").toContain("refreshUserAccess(");
+    expect(body).not.toContain("await loadUserAccess(");
+  });
 });
 
 // -----------------------------------------------------------------------------
-// 8. The bell — a projection of the queue, never a copy of it
-// (docs/plans/access-requests.md §5, §7, §11.)
+// 8. The bell â€” a projection of the queue, never a copy of it
+// (docs/plans/access-requests.md Â§5, Â§7, Â§11.)
 // -----------------------------------------------------------------------------
 describe("the administrator's bell", () => {
   const SWAGGER = source("swagger.ts");
@@ -506,8 +541,8 @@ describe("the administrator's bell", () => {
     return DATA.slice(idx, DATA.indexOf("\n}", idx));
   })();
 
-  it("★ replaces /summary rather than sitting beside it", () => {
-    // ★ One caller, one question. Keeping both would leave two reads that answer
+  it("â˜… replaces /summary rather than sitting beside it", () => {
+    // â˜… One caller, one question. Keeping both would leave two reads that answer
     // "how many are waiting" and can therefore return two different numbers.
     expect(ROUTER).not.toContain('"/summary"');
     expect(INVENTORY).not.toContain('"/api/form-access/summary"');
@@ -521,8 +556,8 @@ describe("the administrator's bell", () => {
     expect(SWAGGER).toContain('"/api/form-access/notifications"');
   });
 
-  it("★ writes nothing — there is no notification row to create", () => {
-    // ★ The defect this guards: a stored notification is a second source of truth
+  it("â˜… writes nothing â€” there is no notification row to create", () => {
+    // â˜… The defect this guards: a stored notification is a second source of truth
     // that can drift from `form_access`, and the drift surfaces as an alert whose
     // Approve button acts on a request that was already decided. It also needs a
     // "seen" cursor to distinguish "unread" from "pending", which is a third
@@ -531,7 +566,7 @@ describe("the administrator's bell", () => {
     expect(NOTIFICATIONS).not.toMatch(/\bseen\b|unread|markAsRead/i);
   });
 
-  it("★ reads the SAME pending set the count counts", () => {
+  it("â˜… reads the SAME pending set the count counts", () => {
     // The badge and the list must be two projections of one predicate. If the
     // list ever filtered on anything extra (a `source`, a school, a date), the
     // badge would say 4 above a list of 2 with no way to tell why.
@@ -541,14 +576,14 @@ describe("the administrator's bell", () => {
     expect(COUNT).toContain("a.status = 'pending'");
   });
 
-  it("★ caps in SQL, never in the presentation", () => {
-    // ★ A client-side `rows.slice(0, 5)` is the slice-then-filter pattern this
+  it("â˜… caps in SQL, never in the presentation", () => {
+    // â˜… A client-side `rows.slice(0, 5)` is the slice-then-filter pattern this
     // repo bans: it fetches the whole queue to render five rows, and any count
     // derived from the sliced array is a count of the window, not of the queue.
     expect(RECENT).toContain("dialect().selectPage(");
     expect(RECENT).toMatch(/pageSize:\s*limit/);
     expect(RECENT).not.toMatch(/\.slice\(/);
-    // `TOP n` is banned in shared query files — `driver/libsql.test.ts` asserts
+    // `TOP n` is banned in shared query files â€” `driver/libsql.test.ts` asserts
     // it repo-wide, and `selectPage` is what keeps the two dialects' paging
     // syntax out of this file.
     expect(DATA).not.toMatch(/SELECT\s+TOP\b/i);
@@ -563,20 +598,20 @@ describe("the administrator's bell", () => {
     expect(NOTIFICATIONS).toContain("bellLimit(req.query.limit)");
   });
 
-  it("★ orders NEWEST first with a TOTAL order", () => {
-    // ★ The queue is oldest-first because triage wants the longest waiter; the
+  it("â˜… orders NEWEST first with a TOTAL order", () => {
+    // â˜… The queue is oldest-first because triage wants the longest waiter; the
     // bell wants the arrival that just happened. Two questions, two orders.
     //
-    // ★ The tie-breaker is the load-bearing half. A backfill or a batch grant
+    // â˜… The tie-breaker is the load-bearing half. A backfill or a batch grant
     // writes several rows inside the same millisecond, and with a non-total
     // order the database may return them in a different sequence for two
-    // identical calls — so the bell would show five rows, then five others.
+    // identical calls â€” so the bell would show five rows, then five others.
     const orderBy = /orderBy:\s*"([^"]+)"/.exec(RECENT);
     expect(orderBy, "listRecentAccessRequests has no orderBy").not.toBeNull();
     expect(orderBy![1].startsWith("a.requested_at DESC")).toBe(true);
     expect(
       orderBy![1].split(",").length,
-      "the bell's order is not total — a second call can return different rows"
+      "the bell's order is not total â€” a second call can return different rows"
     ).toBeGreaterThan(1);
   });
 

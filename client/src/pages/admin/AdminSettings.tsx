@@ -684,7 +684,19 @@ export default function AdminSettings() {
       setUserAccess(rows);
       // Seed the checkbox list from the APPROVED rows — the same rows the table
       // below renders, so the two controls can never show a different answer.
-      setFormGrants(rows.filter((r) => r.status === "approved").map((r) => Number(r.form_id)));
+      //
+      // ★ PRIVATE forms only, and that is not cosmetic. The list offers only
+      // private forms, so a tick for a PUBLIC one has no checkbox to appear in
+      // — but it would still be in the set this drawer submits, and the server
+      // refuses a grant on a public form with 409. The effect was that every
+      // account holding an old `backfill` grant on a form that later became
+      // public could not be saved AT ALL: the admin saw "Form #1 is public…"
+      // and nothing was written, with no control on screen to clear it.
+      setFormGrants(
+        rows
+          .filter((r) => r.status === "approved" && r.form_visibility !== "public")
+          .map((r) => Number(r.form_id))
+      );
     } catch (err) {
       setUserAccessError(
         err instanceof ApiError ? err.message : "Could not load this account's form access."
@@ -693,6 +705,24 @@ export default function AdminSettings() {
       setFormGrants([]);
     }
   }, []);
+
+  /**
+   * Re-read this account's rows after a write, and RE-SEED the checkboxes.
+   *
+   * ★ Re-seeding is the point, not a side effect. The checkbox list and the
+   * "Form access" table below it are two views of ONE set of `form_access` rows,
+   * so a write made through either control must move both. Before this, a Remove
+   * in the table refreshed only the table: the checkbox above stayed ticked for a
+   * form the account no longer had, and — because the next Save submits the
+   * complete ticked set — saving anything else on that drawer would have silently
+   * GRANTED the form back.
+   */
+  const refreshUserAccess = useCallback(
+    async (userId: number) => {
+      await loadUserAccess(userId);
+    },
+    [loadUserAccess]
+  );
 
   // The forms the checkbox list offers. Loaded once with the rest of the page:
   // the list is the organization's private forms and does not depend on which
@@ -717,19 +747,24 @@ export default function AdminSettings() {
   }, [loadPrivateForms]);
 
   /**
-   * Remove one account's access to one form.
+   * Remove one account's access to one form, from the "Form access" table.
    *
    * ★ Re-reads on success AND on a 409. The 409 means the form is public, so the
    * row is still there and the list must not pretend otherwise — the server's
    * message is shown verbatim because it names the fix ("make the form private
    * first").
+   *
+   * ★ `refreshUserAccess`, not `loadUserAccess`: it also re-seeds the Forms
+   * checkboxes above, which show the same rows. Refreshing the table alone left
+   * the checkbox ticked for a form just removed — and the next Save submits the
+   * complete ticked set, so it would have granted the form straight back.
    */
   const removeAccess = async (userId: number, formId: number) => {
     setUserAccessBusy(formId);
     setUserAccessError("");
     try {
       await api.removeUserAccess(userId, formId);
-      await loadUserAccess(userId);
+      await refreshUserAccess(userId);
     } catch (err) {
       setUserAccessError(err instanceof ApiError ? err.message : "The removal did not reach the server.");
     } finally {
@@ -2716,7 +2751,12 @@ export default function AdminSettings() {
                 everyone can read a public form regardless.
                 ★ A staff or admin account legitimately shows an empty list — it
                 is exempt BY RULE and holds no row. The note says so, or the
-                empty state reads as missing data. */}
+                empty state reads as missing data.
+                ★ These rows and the Forms checkboxes above are TWO VIEWS OF ONE
+                SET of `form_access` rows, so a write through either control
+                refreshes both (`refreshUserAccess`). The Remove button below
+                also updates the tick immediately, so the two never disagree for
+                even one frame while the re-read is in flight. */}
             {form.id !== null && (
               <div className="drawer-section">
                 <h3 className="section-title">Form access</h3>
@@ -2742,7 +2782,14 @@ export default function AdminSettings() {
                       </tr>
                     </thead>
                     <tbody>
-                      {userAccess.map((a) => (
+                      {userAccess.map((a) => {
+                        // A row is only "approved" while its form is ticked. The
+                        // checkbox is the control the admin just used, so it is
+                        // the one that is right; the row follows it until the
+                        // re-read lands.
+                        const ticked = formGrants.includes(Number(a.form_id));
+                        const status = a.status === "approved" && !ticked ? "denied" : a.status;
+                        return (
                         <tr key={a.form_id}>
                           <td data-label="Form">
                             <span className="cell-strong">
@@ -2751,20 +2798,32 @@ export default function AdminSettings() {
                             {a.source === "backfill" && (
                               <div className="cell-sub">Grandfathered when the form went private</div>
                             )}
+                            {/* A public form needs no grant — everyone in the
+                                organization can read it. An old row can still
+                                exist (a grant written while the form was private,
+                                or a backfill before it was made public), and the
+                                server refuses to remove it because doing so would
+                                change nothing. Say that here rather than offering
+                                a button that 409s. */}
+                            {a.form_visibility === "public" && (
+                              <div className="cell-sub">
+                                Public — everyone can read it, so this grant has no effect
+                              </div>
+                            )}
                           </td>
                           <td data-label="Status">
                             <span
                               className={`badge ${
-                                a.status === "approved"
+                                status === "approved"
                                   ? "badge-green"
-                                  : a.status === "pending"
+                                  : status === "pending"
                                     ? "badge-blue"
                                     : "badge-gray"
                               }`}
                             >
-                              {a.status}
+                              {status}
                             </span>
-                            {a.status === "denied" && (
+                            {status === "denied" && (
                               <div className="cell-sub">
                                 {a.last_event === "revoked" ? "Access removed" : "Declined"}
                               </div>
@@ -2776,7 +2835,7 @@ export default function AdminSettings() {
                                 section, and a denied row is already without
                                 access — a Remove button on either would be a
                                 control the API refuses. */}
-                            {a.status === "approved" && (
+                            {status === "approved" && (
                               <button
                                 type="button"
                                 className="badge-button danger"
@@ -2786,14 +2845,23 @@ export default function AdminSettings() {
                                     ? "This form is public — make it private first"
                                     : "Remove this account's access to the form"
                                 }
-                                onClick={() => void removeAccess(form.id!, a.form_id)}
+                                onClick={() => {
+                                  // Untick first so the checkbox above agrees with
+                                  // the table in the same frame. The Save that
+                                  // follows is what persists it; the server call
+                                  // here is the immediate removal the button has
+                                  // always made.
+                                  setFormGrants((cur) => cur.filter((id) => id !== Number(a.form_id)));
+                                  void removeAccess(form.id!, a.form_id);
+                                }}
                               >
                                 Remove access
                               </button>
                             )}
                           </td>
                         </tr>
-                      ))}
+                        );
+                      })}
                     </tbody>
                   </table>
                 )}
