@@ -47,14 +47,7 @@ date: "September 2026"
 - 2.18 Webhook Log
 
 **3. For Staff and School Contacts**
-- 3.1 Your submissions queue
-- 3.2 Reviewing a submission
-- 3.3 Changing a submission's status
-- 3.4 Editing parent answers
-- 3.5 Filling in staff-only fields
-- 3.6 Adding a staff comment
-- 3.7 Viewing generated documents
-- 3.8 Reports
+- 3.0 See the separate [Staff Guide](staff/staff-guide.pdf)
 
 **4. For Parents**
 - 4.1 Filling in a form
@@ -504,84 +497,23 @@ a response.
 
 # 3. For Staff and School Contacts
 
-## 3.1 Your submissions queue
+Staff and School Contact workflows are documented in a **separate, screenshot-driven guide**:
+[School Forms — Staff Guide](staff/staff-guide.pdf) (`docs/guides/staff/staff-guide.pdf`).
 
-The **Submissions** page lists every submission for your school.
+That guide covers, task by task and with an annotated screenshot for each:
 
-![Submissions queue](images/14-staff-queue.png)
+- Signing in, the menu, and reading system messages
+- **Available Forms** — which forms you can open, and how to request, track, or withdraw access
+  to a private one
+- The submissions queue — status chips, the form filter, choosing columns, archived submissions
+- **Filling in staff-only fields** — both inline in the queue and on the submission page
+- Reviewing a submission — status, editing a parent's answer, archiving and restoring
+- Generated documents, reports and export
+- **Changing your password** and signing out
+- A reference section: status meanings, field types, and "I can't see it" troubleshooting
 
-Use the **Table** and **Cards** buttons to switch between layouts:
-
-![Card view](images/15-staff-queue-cards.png)
-
-Use the status tabs — **All**, **Submitted**, **In Review**, **Flagged**, **Completed** — to
-filter the list. Click **Review** on any row to open the submission.
-
-## 3.2 Reviewing a submission
-
-The submission detail page shows the student's answers, the staff-only fields, and the comment
-thread.
-
-![Submission detail](images/16-submission-detail.png)
-
-The **Submission Answers** card lists the parent's responses, including the **Submission ID**,
-**Submission Time**, and **School Year**.
-
-## 3.3 Changing a submission's status
-
-Use the **Select Status** dropdown in the page header to change the status.
-
-![Select Status](images/16-submission-detail.png)
-
-Choose **Submitted**, **In Review**, **Flagged**, or **Completed**. The change saves
-immediately.
-
-## 3.4 Editing parent answers
-
-Click **Edit** in the page header to make the answers editable.
-
-![Editing a submission](images/17-submission-edit.png)
-
-Change any value, then click **Save changes**. Click **Cancel** to discard your edits.
-
-## 3.5 Filling in staff-only fields
-
-The **Staff-only fields** card holds the internal fields your administrator defined. These are
-never shown to parents.
-
-![Staff-only fields](images/16-submission-detail.png)
-
-Fill in the values and click **Save staff fields**. A note below the fields records who last
-saved them and when.
-
-## 3.6 Adding a staff comment
-
-The **Staff comments** card is an internal discussion thread for the submission.
-
-![Staff comments](images/16-submission-detail.png)
-
-Type your comment in the box and click **Post comment**. Only staff can see these comments.
-
-## 3.7 Viewing generated documents
-
-The **Documents** page lists the Google Docs generated from submissions.
-
-![Generated documents](images/18-documents.png)
-
-Each row shows the **Date**, **Student Name**, **School Name**, **Course Title**, **Phase I
-Result**, and **Status**. Use the **Open** link to open the document in Google Docs, or
-**View PDF** to preview it in the app.
-
-Click **Refresh** to reload the list.
-
-## 3.8 Reports
-
-**Reports** works the same way for staff and School Contacts as it does for administrators
-(see [2.17 Reports](#217-reports)), with one difference: you are locked to **your own
-school**, so there is no School selector and the exported rows only ever contain your
-school's submissions.
-
-Saved views are private to you, so you can keep your own set of frequently used reports.
+It is kept separate because staff need different screenshots and a different level of detail from
+the administrator material in [Part 2](#2-for-administrators).
 
 <div class="page-break"></div>
 

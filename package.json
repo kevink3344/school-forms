@@ -18,7 +18,9 @@
     "typecheck:client": "npm --workspace client run typecheck",
     "start": "node server/dist/index.js",
     "seed": "npm --workspace server run seed",
-    "guide:pdf": "md-to-pdf docs/guides/user-guide.md --config-file docs/guides/md-to-pdf.config.js"
+    "guide:pdf": "md-to-pdf docs/guides/user-guide.md --config-file docs/guides/md-to-pdf.config.js",
+    "guide:staff:shots": "node scripts/capture-staff-guide.mjs",
+    "guide:staff:pdf": "md-to-pdf docs/guides/staff/staff-guide.html --config-file docs/guides/staff/md-to-pdf.config.js"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",
