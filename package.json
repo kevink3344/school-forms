@@ -20,7 +20,10 @@
     "seed": "npm --workspace server run seed",
     "guide:pdf": "md-to-pdf docs/guides/user-guide.md --config-file docs/guides/md-to-pdf.config.js",
     "guide:staff:shots": "node scripts/capture-staff-guide.mjs",
-    "guide:staff:pdf": "md-to-pdf docs/guides/staff/staff-guide.html --config-file docs/guides/staff/md-to-pdf.config.js"
+    "guide:staff:pdf": "md-to-pdf docs/guides/staff/staff-guide.html --config-file docs/guides/staff/md-to-pdf.config.js",
+    "guide:admin:shots": "node scripts/capture-admin-guide.mjs",
+    "guide:admin:pdf": "md-to-pdf docs/guides/admin/admin-guide.html --config-file docs/guides/admin/md-to-pdf.config.js",
+    "guide:admin:settings:pdf": "md-to-pdf docs/guides/admin/settings-reference.html --config-file docs/guides/admin/md-to-pdf.settings.config.js"
   },
   "devDependencies": {
     "@types/cookie-parser": "^1.4.10",

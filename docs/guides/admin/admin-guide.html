@@ -1,0 +1,718 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>School Forms — Admin Guide</title>
+<link rel="stylesheet" href="admin-guide.css">
+</head>
+<body>
+
+<!-- ======================================================================
+     COVER
+     ====================================================================== -->
+<div class="cover">
+  <img class="logo" src="images/wcpss-logo.svg" alt="Wake County Public School System">
+  <h1>School Forms</h1>
+  <h2>Admin Guide</h2>
+  <div class="rule"></div>
+  <p class="meta">Wake County Public School System</p>
+  <p class="meta">October 2026</p>
+  <div class="audience">For Administrator accounts</div>
+</div>
+
+<!-- ======================================================================
+     CONTENTS
+     ====================================================================== -->
+<div class="contents">
+  <h1>Contents</h1>
+  <ol>
+    <li>Getting started
+      <ol>
+        <li>What an administrator can do</li>
+        <li>Signing in <span class="fig-ref">— Figure 1</span></li>
+        <li>Finding your way around <span class="fig-ref">— Figure 2</span></li>
+      </ol>
+    </li>
+    <li>Submissions
+      <ol>
+        <li>The dashboard <span class="fig-ref">— Figure 3</span></li>
+        <li>Filtering and searching</li>
+        <li>Exporting <span class="fig-ref">— Figure 4</span></li>
+        <li>Reviewing and archiving a submission</li>
+      </ol>
+    </li>
+    <li>Forms
+      <ol>
+        <li>The Forms list <span class="fig-ref">— Figure 5</span></li>
+        <li>Creating a form <span class="fig-ref">— Figure 6</span></li>
+        <li>Form Details <span class="fig-ref">— Figure 7</span></li>
+        <li>Adding fields <span class="fig-ref">— Figure 8</span></li>
+        <li>Staff-only fields and access <span class="fig-ref">— Figure 9</span></li>
+        <li>Visibility: public and private <span class="fig-ref">— Figure 10</span></li>
+        <li>Publishing and the public link <span class="fig-ref">— Figure 11</span></li>
+      </ol>
+    </li>
+    <li>Access requests <span class="fig-ref">— Figure 12</span></li>
+    <li>Reports and export
+      <ol>
+        <li>Building a report <span class="fig-ref">— Figure 13</span></li>
+        <li>Selecting columns <span class="fig-ref">— Figure 14</span></li>
+      </ol>
+    </li>
+    <li>Webhook Log <span class="fig-ref">— Figure 15</span></li>
+    <li>Generated Documents <span class="fig-ref">— Figure 16</span></li>
+    <li>Your account <span class="fig-ref">— Figure 17</span></li>
+    <li>Reference
+      <ol>
+        <li>Status meanings</li>
+        <li>Field types</li>
+        <li>Where to go next</li>
+      </ol>
+    </li>
+  </ol>
+</div>
+
+<!-- ======================================================================
+     PART 1
+     ====================================================================== -->
+<h1 class="nobreak">1. Getting started</h1>
+
+<h2>1.1 What an administrator can do</h2>
+
+<p>An administrator account can do everything a staff member can, plus the work that shapes what
+everyone else sees. In practice that means:</p>
+
+<ul>
+  <li><strong>Design and publish forms</strong> — the questions parents answer, and the
+      staff-only fields your staff fill in.</li>
+  <li><strong>Decide who can see what</strong> — public or private forms, which roles see which
+      staff-only field, and which menu items each role gets.</li>
+  <li><strong>Manage accounts and roles</strong> — create users, reset passwords, and define what
+      a role may do.</li>
+  <li><strong>Watch the plumbing</strong> — the Webhook Log shows every response Google Forms
+      sent, including the ones the app rejected.</li>
+</ul>
+
+<div class="callout">
+  <span class="callout-title">This guide and the Settings Reference</span>
+  <p>Day-to-day work — forms, submissions, reports, access — is in this guide. The
+     <strong>twelve Settings sections</strong> are in the companion
+     <a href="settings-reference.pdf">Settings Reference</a>, one chapter per section. Both are
+     printable and use the same conventions.</p>
+</div>
+
+<h2>1.2 Signing in</h2>
+
+<p>Open the School Forms address and sign in with the email address and password for your
+administrator account.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A1-sign-in.png" alt="The Sign In screen with Email and Password text boxes and a Sign In button">
+    <span class="pin" style="--x:69.6%;--y:47.9%">1</span>
+    <span class="pin" style="--x:69.6%;--y:55.7%">2</span>
+    <span class="pin" style="--x:69.6%;--y:61.2%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 1 — Signing in.</span>
+    <ol>
+      <li><strong>Email</strong> — your administrator address.</li>
+      <li><strong>Password</strong> — your password.</li>
+      <li><strong>Sign In</strong>.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">If the screen looks different</span>
+  <p>An administrator controls the sign-in mode in
+     <strong>Settings → Login Mode</strong>. If you see <strong>Organization</strong> and
+     <strong>Test User</strong> lists instead of the two boxes, the installation is in test mode;
+     if you see an amber maintenance message, sign-in is switched off. See the
+     <a href="settings-reference.pdf">Settings Reference</a>, chapter 3.</p>
+</div>
+
+<h2>1.3 Finding your way around</h2>
+
+<p>You land on <strong>Submissions</strong>. The menu is closed so your work has the full width of
+the screen — click the menu button in the top-left corner.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A2-menu-open.png" alt="The admin menu showing Dashboard, Documents, Forms, Available Forms, Access Requests, Reports and Settings">
+    <span class="pin" style="--x:6%;--y:5%">1</span>
+    <span class="pin" style="--x:8.3%;--y:14.8%">2</span>
+    <span class="pin" style="--x:5.2%;--y:24.4%">3</span>
+    <span class="pin" style="--x:5.6%;--y:43.5%">4</span>
+    <span class="pin" style="--x:88.8%;--y:5%">5</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 2 — The administrator menu.</span>
+    <ol>
+      <li>Menu button.</li>
+      <li><strong>Dashboard</strong> — every submission in your organization.</li>
+      <li><strong>Forms</strong> — the form list and the designer.</li>
+      <li><strong>Settings</strong> — the twelve sections in the companion Settings Reference.</li>
+      <li>Your account chip — opens <strong>Change password</strong>.</li>
+    </ol>
+    <p class="fig-note">Between <strong>Forms</strong> and <strong>Settings</strong> sit
+       <strong>Documents</strong>, <strong>Available Forms</strong>, <strong>Access Requests</strong>
+       and <strong>Reports</strong>; <strong>Documents</strong> appears only when enabled for your
+       role.</p>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">Menu items can be hidden</span>
+  <p><strong>Forms</strong>, <strong>Available Forms</strong>, <strong>Access Requests</strong> and
+     <strong>Reports</strong> are each switchable per role in
+     <strong>Settings → Menu Settings</strong>. If a colleague cannot see one, that is a setting,
+     not a fault. <strong>Settings</strong> itself is always available to administrators.</p>
+</div>
+
+<!-- ======================================================================
+     PART 2
+     ====================================================================== -->
+<h1 id="part2">2. Submissions</h1>
+
+<h2>2.1 The dashboard</h2>
+
+<p>The <strong>Dashboard</strong> lists every submission across every school in your
+organization.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A3-dashboard.png" alt="The admin Submissions dashboard with filters, the grid and Columns and Export buttons">
+    <span class="pin" style="--x:19.5%;--y:28.2%">1</span>
+    <span class="pin" style="--x:44.3%;--y:28.2%">2</span>
+    <span class="pin" style="--x:57.8%;--y:28.2%">3</span>
+    <span class="pin" style="--x:86.2%;--y:11.3%">4</span>
+    <span class="pin" style="--x:94.7%;--y:11.3%">5</span>
+    <span class="pin" style="--x:93.2%;--y:50.7%">6</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 3 — The submissions dashboard.</span>
+    <ol>
+      <li><strong>School</strong> — all schools or one.</li>
+      <li><strong>Form</strong> — all forms or one; picking one adds its fields as columns.</li>
+      <li><strong>Status</strong> — Submitted, In Review, Flagged, Completed.</li>
+      <li><strong>Columns</strong> — choose which fields appear.</li>
+      <li><strong>Export</strong> — download what you see.</li>
+      <li><strong>Review</strong> — opens the submission. The student's name does the same.</li>
+    </ol>
+    <p class="fig-note">A <strong>Search</strong> box and a <strong>Search in</strong> column
+       selector sit beside the three dropdowns.</p>
+  </figcaption>
+</figure>
+
+<h2>2.2 Filtering and searching</h2>
+
+<p>Narrow the grid with the four filters in the bar. <strong>Clear</strong> resets every filter,
+including the form.</p>
+
+<ul>
+  <li><strong>Search</strong> matches any answer on the row. Use <strong>Search in</strong> to
+      restrict it to one column — for example, a course name in <em>Course choice #1</em> only.</li>
+  <li>Picking a <strong>Form</strong> is what makes that form's fields available as columns and as
+      search targets.</li>
+  <li>Staff-only columns sort to the right-hand end and are tinted. You can edit them in place,
+      exactly as staff do.</li>
+</ul>
+
+<div class="callout warning">
+  <span class="callout-title">Archived submissions are hidden by default</span>
+  <p>An archived submission disappears from this grid, from exports, from reports and from the
+     documents list. It is not deleted — see <a href="#s24">2.4</a> for restoring it.</p>
+</div>
+
+<h2>2.3 Exporting</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A4-export-drawer.png" alt="The Export Submissions drawer with row and column counts, column picker and preview">
+    <span class="pin" style="--x:78%;--y:22%">1</span>
+    <span class="pin" style="--x:78%;--y:40%">2</span>
+    <span class="pin" style="--x:78%;--y:62%">3</span>
+    <span class="pin" style="--x:78%;--y:90%">4</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 4 — Exporting from the dashboard.</span>
+    <ol>
+      <li>How many rows and columns the file will hold.</li>
+      <li>Tick the columns to include.</li>
+      <li>A preview of the first rows.</li>
+      <li><strong>Export CSV</strong>.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<p>The file downloads as <code>submissions-export.csv</code>. For Excel or PDF, or to save the
+setup for next time, use <a href="#part5">Reports</a> instead.</p>
+
+<h2 id="s24">2.4 Reviewing and archiving a submission</h2>
+
+<p>Click a student's name or <strong>Review</strong> to open the submission. The page is the same
+one staff use, with two additions only an administrator sees:</p>
+
+<ul>
+  <li><strong>Delete permanently</strong> — appears on an <em>archived</em> submission only, and
+      cannot be undone. The dialog names the student and states that the generated Google Doc
+      itself is <em>not</em> deleted, only the app's link to it.</li>
+  <li><strong>Promote to form field</strong> — on the <strong>Additional fields</strong> card, when
+      a Google Form asked a question that was never defined in the designer. Promoting it adds a
+      real field to the form and migrates every matching answer.</li>
+</ul>
+
+<p>Everything else — <strong>Select Status</strong>, <strong>Edit</strong> for a parent's answers,
+<strong>Save staff fields</strong>, <strong>Archive</strong> and <strong>Restore</strong> — works
+exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</p>
+
+<!-- ======================================================================
+     PART 3
+     ====================================================================== -->
+<h1 id="part3">3. Forms</h1>
+
+<h2>3.1 The Forms list</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A5-forms-list.png" alt="The Forms list with status badges, submission counts and per-row actions">
+    <span class="pin" style="--x:93.9%;--y:11.3%">1</span>
+    <span class="pin" style="--x:81.6%;--y:31.5%">2</span>
+    <span class="pin" style="--x:22%;--y:31.5%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 5 — The Forms list.</span>
+    <ol>
+      <li><strong>New Form</strong> — opens the create card (Figure 6).</li>
+      <li>The per-row action buttons: <strong>Design</strong>,
+          <strong>Publish</strong>/<strong>Unpublish</strong>,
+          <strong>Archive</strong>/<strong>Restore</strong>, and <strong>Delete</strong>.</li>
+      <li>The form's number and title. The number is what an Apps Script is configured with.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout warning">
+  <span class="callout-title">Delete is disabled once a form has submissions</span>
+  <p>That is deliberate: submission data is never lost to a mis-click. To retire a form that has
+     been used, <strong>Archive</strong> it instead — it stops accepting submissions and every
+     submission is kept.</p>
+</div>
+
+<h2>3.2 Creating a form</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A6-new-form.png" alt="The Create a new form card with a title field and Create and Design button">
+    <span class="pin" style="--x:50%;--y:30.1%">1</span>
+    <span class="pin" style="--x:8.5%;--y:43.4%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 6 — Creating a form.</span>
+    <ol>
+      <li>The <strong>title</strong> — for example <em>Course Designation Form (CDM)</em>.</li>
+      <li><strong>Create &amp; Design</strong> saves it as a Draft and opens the designer.</li>
+    </ol>
+    <p class="fig-note">The card is opened by <strong>New Form</strong> on the Forms list.</p>
+  </figcaption>
+</figure>
+
+<h2>3.3 Form Details</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A7-designer-details.png" alt="The Form Designer header with Publish and the Form Details card">
+    <span class="pin" style="--x:6.4%;--y:19.9%">1</span>
+    <span class="pin" style="--x:50%;--y:36.4%">2</span>
+    <span class="pin" style="--x:50%;--y:43.9%">3</span>
+    <span class="pin" style="--x:50%;--y:53.2%">4</span>
+    <span class="pin" style="--x:50%;--y:63.7%">5</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 7 — The Form Details card.</span>
+    <ol>
+      <li>The <strong>Form Details</strong> card.</li>
+      <li><strong>Title</strong> — shown to parents and staff.</li>
+      <li><strong>Description</strong> — an optional note shown to parents.</li>
+      <li><strong>Drive Folder ID</strong> — where generated documents are saved. A green
+          <strong>Valid</strong> check means the folder is reachable.</li>
+      <li><strong>Google Form URL</strong> — an optional link shown to staff. Nothing is fetched
+          from it; it is information only.</li>
+    </ol>
+    <p class="fig-note"><strong>Publish</strong> / <strong>Unpublish</strong> sits in the page
+       header, above this card.</p>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">There is no "generate fields from Google Form"</span>
+  <p>The Google Form URL is a link for staff to follow. Fields are always built by hand in the
+     designer. A question a Google Form asks that the designer does not define is still captured
+     on the submission and can be promoted later — see <a href="#s24">2.4</a>.</p>
+</div>
+
+<h2>3.4 Adding fields</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A8-designer-fields.png" alt="The Fields card with the Form Fields tab and editable field rows">
+    <span class="pin" style="--x:8%;--y:19.3%">1</span>
+    <span class="pin" style="--x:18.1%;--y:19.3%">2</span>
+    <span class="pin" style="--x:26.9%;--y:36.5%">3</span>
+    <span class="pin" style="--x:73.1%;--y:36.5%">4</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 8 — Building the parent-facing fields.</span>
+    <ol>
+      <li><strong>Form Fields</strong> — the questions parents answer.</li>
+      <li><strong>Staff Only Fields</strong> — the tab for fields parents never see
+          (Figure 9).</li>
+      <li><strong>Label</strong> — the question text.</li>
+      <li><strong>Type</strong> — Text, Text Area, Number, Date, Email, Google Document, Select,
+          Radio, Checkbox or Toggle.</li>
+    </ol>
+    <p class="fig-note">Each row also carries <strong>Options</strong> (comma-separated, for Select,
+       Radio and Checkbox only), a <strong>Required</strong> switch, arrows to reorder, and
+       <strong>✕</strong> to remove. <strong>Add Form Field</strong> sits below the last row.</p>
+  </figcaption>
+</figure>
+
+<h2>3.5 Staff-only fields and access</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A9-designer-staff-fields.png" alt="The Staff Only Fields tab with a per-field Access row of role buttons">
+    <span class="pin" style="--x:18.1%;--y:19.3%">1</span>
+    <span class="pin" style="--x:5.7%;--y:45.2%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 9 — Staff-only fields and their Access row.</span>
+    <ol>
+      <li>The <strong>Staff Only Fields</strong> tab, with a count of how many exist.</li>
+      <li>The <strong>Access</strong> row under each field: one button per role. A filled button
+          (<strong>✓ Staff</strong>) means that role can see and fill the field; an outlined one
+          (<strong>+ Staff</strong>) means it cannot. Click to toggle.</li>
+    </ol>
+    <p class="fig-note">A staff-only field has the same <strong>Label</strong>,
+       <strong>Type</strong> and <strong>Options</strong> as a form field. Its
+       <strong>Required</strong> switch is off by default, because a staff-only field is normally
+       filled in later rather than by the parent.</p>
+  </figcaption>
+</figure>
+
+<div class="callout tip">
+  <span class="callout-title">Why the Access row matters</span>
+  <p>This is how you keep a field visible to Administrators only, or to Administrators and School
+     Contacts but not Staff. A role created later starts with no access to existing staff-only
+     fields until you grant it here.</p>
+</div>
+
+<h2>3.6 Visibility: public and private</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A10-designer-visibility.png" alt="The Visibility card with public and private options">
+    <span class="pin" style="--x:5.4%;--y:14.4%">1</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 10 — Choosing who can open the form.</span>
+    <ol>
+      <li>The <strong>Visibility</strong> card. It offers <strong>Public</strong> — every account
+          in the organization can read the form — and <strong>Private</strong>, where an account
+          sees it only after you grant access in <strong>Settings → Users</strong> or by approving
+          a request.</li>
+    </ol>
+    <p class="fig-note">Changing a published form to private asks you to confirm first, because it
+       takes the form away from everyone who was relying on it.</p>
+  </figcaption>
+</figure>
+
+<h2>3.7 Publishing and the public link</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A11-public-link.png" alt="The Public link card with the parent-facing URL and a copy button">
+    <span class="pin" style="--x:5.8%;--y:87.8%">1</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 11 — The public link.</span>
+    <ol>
+      <li>The <strong>Public link</strong> card, which appears at the bottom of the designer once
+          the form is published. It holds the address to share with parents —
+          <code>/org/{organization}/forms/{form-id}</code> — and a button to copy it. No sign-in is
+          required to use the link.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout warning">
+  <span class="callout-title">Unpublishing keeps existing submissions</span>
+  <p><strong>Unpublish</strong> stops the form accepting new responses; everything already
+     submitted is untouched. Responses that arrive while a form is unpublished are rejected and
+     recorded in the <a href="#part6">Webhook Log</a> — publishing the form again makes them
+     deliverable.</p>
+</div>
+
+<!-- ======================================================================
+     PART 4
+     ====================================================================== -->
+<h1 id="part4">4. Access requests</h1>
+
+<p>When a form is private, an account that cannot read it can ask for access. Those requests
+arrive here, and in the bell in the banner.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A12-access-requests.png" alt="The Access Requests page listing pending requests with approve and decline actions">
+    <span class="pin" style="--x:24.4%;--y:11%">1</span>
+    <span class="pin" style="--x:10.7%;--y:18.9%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 12 — Access requests.</span>
+    <ol>
+      <li>The page heading, with the count of pending requests.</li>
+      <li>The decision controls on a request: approve it, or decline it with an optional reason
+          that the requester will see.</li>
+    </ol>
+    <p class="fig-note">Each row names who asked, for which form, and when.</p>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">Approving is the same as ticking the box</span>
+  <p>An approval creates the same grant you would create by ticking the form in
+     <strong>Settings → Users → Edit User</strong>. Either route works; this one is just faster
+     when several people are waiting. A declined request stays re-requestable — the person can ask
+     again.</p>
+</div>
+
+<!-- ======================================================================
+     PART 5
+     ====================================================================== -->
+<h1 id="part5">5. Reports and export</h1>
+
+<h2>5.1 Building a report</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A13-reports.png" alt="The Reports page with form, saved view, columns, group by and format controls">
+    <span class="pin" style="--x:86%;--y:11.3%">1</span>
+    <span class="pin" style="--x:94.7%;--y:11.3%">2</span>
+    <span class="pin" style="--x:10.1%;--y:19.2%">3</span>
+    <span class="pin" style="--x:36.2%;--y:22.6%">4</span>
+    <span class="pin" style="--x:51.4%;--y:19.2%">5</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 13 — The Reports page.</span>
+    <ol>
+      <li><strong>Save View</strong> — keep the filters and columns under a name.</li>
+      <li><strong>Export</strong> — download in the chosen format.</li>
+      <li><strong>Form</strong> — required; the columns belong to the form you pick.</li>
+      <li><strong>Select Columns</strong> — see <a href="#s52">5.2</a>.</li>
+      <li><strong>Group by</strong>; <strong>Format</strong> (CSV, Excel, PDF) sits to its right.</li>
+    </ol>
+    <p class="fig-note">Below these sit <strong>Saved View</strong>, <strong>School</strong>,
+       <strong>Status</strong>, <strong>Search</strong> and <strong>Search in</strong>. You have a
+       School filter; a School Contact does not.</p>
+  </figcaption>
+</figure>
+
+<ol class="steps">
+  <li>Pick a <strong>Form</strong>.</li>
+  <li>Narrow the rows with <strong>School</strong>, <strong>Status</strong> and
+      <strong>Search</strong>.</li>
+  <li>Choose columns and, optionally, a <strong>Group by</strong>.</li>
+  <li>Pick a <strong>Format</strong> and click <strong>Export</strong>.</li>
+</ol>
+
+<div class="callout">
+  <span class="callout-title">What you see is what you get</span>
+  <p>The preview and the exported file come from the same query, so the file always matches the
+     screen. Saved views are private to the account that made them.</p>
+</div>
+
+<h2 id="s52">5.2 Selecting columns</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A14-report-columns.png" alt="The Select Columns drawer in Reports">
+    <span class="pin" style="--x:78%;--y:30%">1</span>
+    <span class="pin" style="--x:78%;--y:62%">2</span>
+    <span class="pin" style="--x:78%;--y:88%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 14 — Choosing report columns.</span>
+    <ol>
+      <li>Tick the fields to show and export.</li>
+      <li>Staff-only fields are in the same list.</li>
+      <li>The footer counts your selection; <strong>Done</strong> closes the drawer.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<!-- ======================================================================
+     PART 6
+     ====================================================================== -->
+<h1 id="part6">6. Webhook Log</h1>
+
+<p>The Webhook Log is the answer to "a form looks empty — did anything actually arrive?" It lists
+every response Google Forms posted to the app, <em>including the ones it rejected</em>.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A15-webhook-log.png" alt="The Webhook Log with status filters, attempt rows and a Replay column">
+    <span class="pin" style="--x:8.1%;--y:25.8%">1</span>
+    <span class="pin" style="--x:95%;--y:43.5%">2</span>
+    <span class="pin" style="--x:5.6%;--y:37.8%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 15 — The Webhook Log.</span>
+    <ol>
+      <li>The <strong>Status</strong> filter — set it to <strong>Failed</strong> to see what was
+          rejected.</li>
+      <li><strong>Replay</strong> re-sends a stored response through today's rules. It is greyed
+          out when the attempt cannot be replayed.</li>
+      <li>The <strong>Attempts</strong> table — one row per attempt, with its reason. Click a row
+          for the full payload.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<table>
+  <thead>
+    <tr><th>Reason</th><th>Meaning</th><th>Replayable?</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Succeeded</strong></td><td>Accepted; a submission was created.</td><td>—</td></tr>
+    <tr><td><code>form_not_published</code></td><td>The form was not published when the response arrived.</td><td>Yes, once published</td></tr>
+    <tr><td><code>invalid_body</code></td><td>The payload was missing required keys.</td><td>No</td></tr>
+    <tr><td><code>form_not_found</code></td><td>The form id does not exist.</td><td>No</td></tr>
+    <tr><td><code>unauthorized</code></td><td>Wrong or missing secret. Logged without the payload.</td><td>No</td></tr>
+    <tr><td><code>internal_error</code></td><td>The server failed.</td><td>Yes</td></tr>
+  </tbody>
+</table>
+
+<div class="callout tip">
+  <span class="callout-title">The common case</span>
+  <p>If responses stopped arriving because a form was unpublished, publish the form and click
+     <strong>Replay</strong> on the affected rows — or <strong>Replay all failed</strong> once a
+     form is selected. The stored responses are re-sent and the submissions appear.</p>
+</div>
+
+<!-- ======================================================================
+     PART 7
+     ====================================================================== -->
+<h1 id="part7">7. Generated Documents</h1>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A16-documents.png" alt="The Generated Documents table with document links and status badges">
+    <span class="pin" style="--x:94.5%;--y:11.3%">1</span>
+    <span class="pin" style="--x:74.7%;--y:30.8%">2</span>
+    <span class="pin" style="--x:92.1%;--y:25.2%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 16 — Generated documents.</span>
+    <ol>
+      <li><strong>Refresh</strong> — reload, useful while a document is still being made.</li>
+      <li><strong>Open</strong> opens the Google Doc; <strong>View PDF</strong> previews it here.</li>
+      <li>The <strong>Status</strong> column — <strong>Pending</strong>,
+          <strong>Completed</strong> or <strong>Failed</strong>. A failed document can be retried
+          from its submission.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<p>This page appears in the menu only when <strong>Settings → Documents Link</strong> enables it
+for your role.</p>
+
+<!-- ======================================================================
+     PART 8
+     ====================================================================== -->
+<h1 id="part8">8. Your account</h1>
+
+<figure class="shot narrow">
+  <div class="shot-frame">
+    <img src="images/A17-account-menu.png" alt="The account menu open showing Change password">
+    <span class="pin" style="--x:84%;--y:6%">1</span>
+    <span class="pin" style="--x:84%;--y:16.2%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 17 — The account menu.</span>
+    <ol>
+      <li>Your name in the banner. Click it to open the menu.</li>
+      <li><strong>Change password</strong> — you must enter your current password, then the new
+          one twice. It must be at least 8 characters.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout warning">
+  <span class="callout-title">Changing your password does not sign out other sessions</span>
+  <p>Copies of School Forms already open elsewhere stay signed in. If you think someone else is
+     using your account, change the password and review <strong>Settings → Users</strong>.</p>
+</div>
+
+<!-- ======================================================================
+     PART 9
+     ====================================================================== -->
+<h1 id="part9">9. Reference</h1>
+
+<h2>9.1 Status meanings</h2>
+
+<table>
+  <thead>
+    <tr><th>Status</th><th>Applies to</th><th>Meaning</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Submitted</strong></td><td>Submissions</td><td>Received, awaiting review.</td></tr>
+    <tr><td><strong>In Review</strong></td><td>Submissions</td><td>Someone is working on it.</td></tr>
+    <tr><td><strong>Flagged</strong></td><td>Submissions</td><td>Needs attention or follow-up.</td></tr>
+    <tr><td><strong>Completed</strong></td><td>Submissions</td><td>Reviewed and finished.</td></tr>
+    <tr><td><strong>Draft</strong></td><td>Forms</td><td>Not yet available to parents.</td></tr>
+    <tr><td><strong>Published</strong></td><td>Forms</td><td>Live and accepting submissions.</td></tr>
+    <tr><td><strong>Archived</strong></td><td>Forms</td><td>Retired. Kept, but no longer accepting.</td></tr>
+    <tr><td><strong>Pending</strong></td><td>Documents</td><td>Being generated.</td></tr>
+    <tr><td><strong>Failed</strong></td><td>Documents</td><td>Generation failed; can be retried.</td></tr>
+  </tbody>
+</table>
+
+<h2>9.2 Field types</h2>
+
+<table>
+  <thead>
+    <tr><th>Type</th><th>Use for</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Text</strong></td><td>A short single-line answer.</td></tr>
+    <tr><td><strong>Text Area</strong></td><td>A longer, multi-line answer.</td></tr>
+    <tr><td><strong>Number</strong></td><td>A numeric value.</td></tr>
+    <tr><td><strong>Date</strong></td><td>A calendar date.</td></tr>
+    <tr><td><strong>Email</strong></td><td>An email address.</td></tr>
+    <tr><td><strong>Google Document</strong></td><td>A Drive file id, shown as a link that opens the file.</td></tr>
+    <tr><td><strong>Select</strong></td><td>A dropdown of options.</td></tr>
+    <tr><td><strong>Radio</strong></td><td>One choice from a short list.</td></tr>
+    <tr><td><strong>Checkbox</strong></td><td>One or more choices from a list.</td></tr>
+    <tr><td><strong>Toggle</strong></td><td>An on/off switch storing <strong>Yes</strong> or <strong>No</strong>.</td></tr>
+  </tbody>
+</table>
+
+<h2>9.3 Where to go next</h2>
+
+<table>
+  <thead>
+    <tr><th>I want to…</th><th>Go to</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Add a user, change a role, reset a password</td><td><a href="settings-reference.pdf">Settings Reference</a>, chapter 2</td></tr>
+    <tr><td>Switch sign-in to password mode, or turn on maintenance</td><td><a href="settings-reference.pdf">Settings Reference</a>, chapter 3</td></tr>
+    <tr><td>Hide a menu item from a role</td><td><a href="settings-reference.pdf">Settings Reference</a>, chapter 5</td></tr>
+    <tr><td>Post a notice to everyone</td><td><a href="settings-reference.pdf">Settings Reference</a>, chapter 8</td></tr>
+    <tr><td>Fix a school name that does not match</td><td><a href="settings-reference.pdf">Settings Reference</a>, chapter 12</td></tr>
+    <tr><td>Understand what staff see and do</td><td><a href="staff-guide.pdf">Staff Guide</a></td></tr>
+  </tbody>
+</table>
+
+</body>
+</html>

@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>School Forms — Settings Reference</title>
+<link rel="stylesheet" href="admin-guide.css">
+</head>
+<body>
+
+<!-- ======================================================================
+     COVER
+     ====================================================================== -->
+<div class="cover">
+  <img class="logo" src="images/wcpss-logo.svg" alt="Wake County Public School System">
+  <h1>School Forms</h1>
+  <h2>Settings Reference</h2>
+  <div class="rule"></div>
+  <p class="meta">Wake County Public School System</p>
+  <p class="meta">October 2026</p>
+  <div class="audience">Companion to the Admin Guide</div>
+</div>
+
+<!-- ======================================================================
+     CONTENTS
+     ====================================================================== -->
+<div class="contents">
+  <h1>Contents</h1>
+  <ol>
+    <li>About Settings <span class="fig-ref">— Figure 1</span></li>
+    <li>Users <span class="fig-ref">— Figures 2–3</span></li>
+    <li>Roles <span class="fig-ref">— Figure 4</span></li>
+    <li>Login Mode <span class="fig-ref">— Figure 5</span></li>
+    <li>Documents Link <span class="fig-ref">— Figure 6</span></li>
+    <li>Menu Settings <span class="fig-ref">— Figure 7</span></li>
+    <li>Slack Notifications <span class="fig-ref">— Figure 8</span></li>
+    <li>Access Requests <span class="fig-ref">— Figure 9</span></li>
+    <li>Webhook Log <span class="fig-ref">— Figure 10</span></li>
+    <li>System Messages <span class="fig-ref">— Figure 11</span></li>
+    <li>Organizations <span class="fig-ref">— Figure 12</span></li>
+    <li>Schools <span class="fig-ref">— Figure 13</span></li>
+    <li>School Name Matching <span class="fig-ref">— Figure 14</span></li>
+    <li>Settings at a glance</li>
+  </ol>
+</div>
+
+<!-- ======================================================================
+     1. ABOUT SETTINGS
+     ====================================================================== -->
+<h1 class="nobreak">1. About Settings</h1>
+
+<p>Everything an administrator configures lives on one page, <strong>Settings</strong>, arranged as
+twelve collapsible sections. Click a section's heading to open it; the others stay closed, so the
+page never becomes a wall of controls.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S1-settings-overview.png" alt="The Settings page with its twelve collapsible sections">
+    <span class="pin" style="--x:94.5%;--y:11.3%">1</span>
+    <span class="pin" style="--x:6.2%;--y:19.7%">2</span>
+    <span class="pin" style="--x:19.5%;--y:29.3%">3</span>
+    <span class="pin" style="--x:11.1%;--y:39%">4</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 1 — The Settings page.</span>
+    <ol>
+      <li><strong>+ Add User</strong> — the one action that sits above the sections.</li>
+      <li><strong>Users</strong> — accounts, roles and form access. Chapter 2.</li>
+      <li><strong>Roles</strong> — what each role may do. Chapter 3.</li>
+      <li><strong>Login Mode</strong> — and, below it, <strong>Documents Link</strong> and
+          <strong>Menu Settings</strong>: how the app appears to each role. Chapters 4–6.</li>
+    </ol>
+    <p class="fig-note">Further down the same page: Slack Notifications, Access Requests, Webhook
+       Log, System Messages, Organizations, Schools and School Name Matching — chapters 7 to 13.</p>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">Changes save as you make them</span>
+  <p>Most switches and role buttons save immediately — there is no page-wide Save. Where a change
+     is risky, the app asks you to confirm first, and the confirmation states what will happen.</p>
+</div>
+
+<div class="callout warning">
+  <span class="callout-title">You can only manage users in your own organization</span>
+  <p>If your installation has more than one organization, the Users section lists and edits only
+     your own. That is a boundary, not a bug.</p>
+</div>
+
+<!-- ======================================================================
+     2. USERS
+     ====================================================================== -->
+<h1 id="ch2">2. Users</h1>
+
+<p>The <strong>Users</strong> section lists every account in your organization, with how many are
+active.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S2-users.png" alt="The Users section listing accounts with name, email, role, school and status">
+    <span class="pin" style="--x:94.5%;--y:4.3%">1</span>
+    <span class="pin" style="--x:46.3%;--y:19.9%">2</span>
+    <span class="pin" style="--x:82%;--y:19.9%">3</span>
+    <span class="pin" style="--x:50%;--y:25.2%">4</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 2 — The Users list.</span>
+    <ol>
+      <li><strong>+ Add User</strong> creates an account.</li>
+      <li>The <strong>Role</strong> column — Admin, Staff, School Contact, or a role you created.</li>
+      <li>The <strong>Status</strong> column — Active or Inactive.</li>
+      <li>A row. Click it to open the <strong>Edit User</strong> panel (Figure 3).</li>
+    </ol>
+    <p class="fig-note">Each row also shows the account's <strong>Name</strong>,
+       <strong>Email</strong> and <strong>School</strong>.</p>
+  </figcaption>
+</figure>
+
+<h2>2.1 Editing a user</h2>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S3-edit-user.png" alt="The Edit User panel with account fields, a Forms access list and a Form access history">
+    <span class="pin" style="--x:78%;--y:18%">1</span>
+    <span class="pin" style="--x:78%;--y:40%">2</span>
+    <span class="pin" style="--x:78%;--y:62%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 3 — The Edit User panel.</span>
+    <ol>
+      <li><strong>Display name</strong>, <strong>Email</strong>, <strong>Role</strong>,
+          <strong>Organization</strong> and <strong>School</strong>, plus the
+          <strong>Active</strong> switch.</li>
+      <li><strong>Forms</strong> — one checkbox per <em>private</em> form. Ticking grants access;
+          unticking takes it away. Public forms are not listed because everyone already has them.</li>
+      <li><strong>Form access</strong> — a read-only record of this account's grants and why each
+          exists (grandfathered, declined, or removed). It has no buttons: the checkboxes above are
+          the only control.</li>
+    </ol>
+    <p class="fig-note">The panel's own save button applies all of it together.</p>
+  </figcaption>
+</figure>
+
+<h2>2.2 Passwords and temporary passwords</h2>
+
+<p>There is no "forgot password" link. When someone is locked out, an administrator issues a
+<strong>temporary password</strong> from this panel. The user signs in with it once and is then
+required to choose a new password before they can reach any other page.</p>
+
+<div class="callout">
+  <span class="callout-title">Why the user must change it</span>
+  <p>A temporary password is known to you as well as to them. Forcing a change at first sign-in is
+     what stops it from becoming a permanent shared secret. The row shows a marker while that
+     change is still outstanding.</p>
+</div>
+
+<div class="callout warning">
+  <span class="callout-title">You cannot deactivate your own account</span>
+  <p>The app refuses it, so an installation can never be left without an active administrator.</p>
+</div>
+
+<!-- ======================================================================
+     3. ROLES
+     ====================================================================== -->
+<h1 id="ch3">3. Roles</h1>
+
+<p>Roles are what you assign to accounts. Each one carries three access flags and an optional
+school scope, and the flags apply across the whole installation.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S4-roles.png" alt="The Roles section listing roles with access flags, badges and usage counts">
+    <span class="pin" style="--x:93.4%;--y:20.7%">1</span>
+    <span class="pin" style="--x:50%;--y:32.7%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 4 — The Roles list.</span>
+    <ol>
+      <li><strong>+ Add Role</strong>.</li>
+      <li>A role row. It carries the role's <strong>label</strong> and key, its flags
+          (<strong>View submissions</strong>, <strong>Edit submissions</strong>,
+          <strong>Limited to their own school</strong>), an <strong>Administrator</strong> badge
+          where it manages settings, and a <strong>Usage</strong> count of the users, fields,
+          messages and menu items that reference it.</li>
+    </ol>
+    <p class="fig-note">A role in use cannot be deleted until those references are cleared.</p>
+  </figcaption>
+</figure>
+
+<h2>3.1 Built-in roles</h2>
+
+<table>
+  <thead>
+    <tr><th>Role</th><th>Built in?</th><th>Notes</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Admin</strong></td><td>Yes</td><td>Full access, including Settings. Cannot be deleted.</td></tr>
+    <tr><td><strong>Staff</strong></td><td>Yes</td><td>Sees every school in the organization.</td></tr>
+    <tr><td><strong>School Contact</strong></td><td>Yes</td><td>Limited to their own school.</td></tr>
+    <tr><td>Any role you create</td><td>No</td><td>Starts with no access to existing staff-only fields or private forms.</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="callout-title">Built-in roles are re-applied at every start</span>
+  <p>The installation re-creates its built-in roles and resets their access flags whenever it
+     starts. That is what keeps an installation from ending up with nobody able to administer it —
+     and it means editing a built-in role's flags will not stick. Create a new role instead.</p>
+</div>
+
+<h2>3.2 Creating a role</h2>
+
+<ol class="steps">
+  <li>Click <strong>+ Add Role</strong>.</li>
+  <li>Give it a <strong>label</strong> — the name people will see.</li>
+  <li>Tick the flags it needs: view, edit, school-limited, administrator.</li>
+  <li>Save. The role now appears in the <strong>Role</strong> dropdown on every user, and in the
+      <strong>Access</strong> row of every staff-only field.</li>
+</ol>
+
+<div class="callout tip">
+  <span class="callout-title">A new role sees nothing until you grant it</span>
+  <p>Creating a role does not give it access to existing private forms or staff-only fields. Grant
+     those in <strong>Users → Edit User</strong> and in the form designer's
+     <strong>Access</strong> row.</p>
+</div>
+
+<!-- ======================================================================
+     4. LOGIN MODE
+     ====================================================================== -->
+<h1 id="ch4">4. Login Mode</h1>
+
+<p>Login Mode decides what the sign-in screen does for everybody.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S5-login-mode.png" alt="The Login Mode section with three mode cards">
+    <span class="pin" style="--x:7.9%;--y:25.7%">1</span>
+    <span class="pin" style="--x:41%;--y:22.7%">2</span>
+    <span class="pin" style="--x:72.3%;--y:22.7%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 5 — The three sign-in modes.</span>
+    <ol>
+      <li><strong>Select User (Test)</strong> — pick a user from a directory; no password. For
+          demonstrations and training only.</li>
+      <li><strong>Password (Production)</strong> — email and password for every sign-in. This is
+          the normal setting.</li>
+      <li><strong>System Maintenance</strong> — blocks sign-in and shows a maintenance message.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout warning">
+  <span class="callout-title">Test mode is not a security boundary</span>
+  <p>In <strong>Select User</strong> mode anyone who reaches the sign-in screen can choose any
+     account, including an administrator's. Use it only on an installation that holds no real data,
+     and switch back to <strong>Password</strong> before real submissions arrive.</p>
+</div>
+
+<div class="callout tip">
+  <span class="callout-title">Maintenance mode is the graceful way to pause</span>
+  <p>It keeps existing sessions working for a short time while it stops new sign-ins, so you can
+     finish a migration or restore without yanking the app out from under people mid-task.</p>
+</div>
+
+<!-- ======================================================================
+     5. DOCUMENTS LINK
+     ====================================================================== -->
+<h1 id="ch5">5. Documents Link</h1>
+
+<p>Controls whether the <strong>Documents</strong> menu item exists, separately for each role.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S6-documents-link.png" alt="The Documents Link section with a per-role switch list">
+    <span class="pin" style="--x:14%;--y:30%">1</span>
+    <span class="pin" style="--x:86%;--y:30%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 6 — Documents Link.</span>
+    <ol>
+      <li>One row per role.</li>
+      <li>Its switch. On means that role sees <strong>Documents</strong> in the menu and the
+          document line on a submission; off means neither appears.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">This is the only switch for Documents</span>
+  <p>There is deliberately no second control for it in <strong>Menu Settings</strong>. If a role
+     cannot see <strong>Documents</strong>, this switch is the one to check.</p>
+</div>
+
+<!-- ======================================================================
+     6. MENU SETTINGS
+     ====================================================================== -->
+<h1 id="ch6">6. Menu Settings</h1>
+
+<p>Hides individual menu items from individual roles. Useful when a role should not be distracted
+by a section it never uses.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S7-menu-settings.png" alt="The Menu Settings section with a grid of menu items and role switches">
+    <span class="pin" style="--x:20%;--y:24.4%">1</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 7 — Menu Settings.</span>
+    <ol>
+      <li>A menu item row — <strong>Forms</strong>, <strong>Available Forms</strong>,
+          <strong>Access Requests</strong> or <strong>Reports</strong> — with a switch per role.
+          <strong>Everyone</strong> means every role, including ones created later.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">Hiding a link is not a permission</span>
+  <p>This section tidies the menu. It does not stop someone reaching a page by typing its address —
+     access is decided by roles, form visibility and staff-only field access. Treat it as
+     decluttering, not security.</p>
+</div>
+
+<div class="callout tip">
+  <span class="callout-title">Settings is always visible to administrators</span>
+  <p>You cannot hide <strong>Settings</strong> from an administrator role, and the
+     <strong>Webhook Log</strong> stays reachable from this page even when its menu item is off.</p>
+</div>
+
+<!-- ======================================================================
+     7. SLACK
+     ====================================================================== -->
+<h1 id="ch7">7. Slack Notifications</h1>
+
+<p>Turns administrator alerts on or off and lets you prove the connection works.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S8-slack.png" alt="The Slack Notifications section with an enable switch and a test message button">
+    <span class="pin" style="--x:14%;--y:30%">1</span>
+    <span class="pin" style="--x:14%;--y:50%">2</span>
+    <span class="pin" style="--x:60%;--y:70%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 8 — Slack Notifications.</span>
+    <ol>
+      <li>The on/off switch for admin alerts.</li>
+      <li>What the alerts are for.</li>
+      <li><strong>Send test message</strong> — posts to the configured channel so you can confirm
+          it arrives.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">If the test message does not arrive</span>
+  <p>The webhook address is configured on the server, not in this page. Tell whoever maintains the
+     installation — the test button reports the failure but cannot fix it.</p>
+</div>
+
+<!-- ======================================================================
+     8. ACCESS REQUESTS
+     ====================================================================== -->
+<h1 id="ch8">8. Access Requests</h1>
+
+<p>The same queue as the <strong>Access Requests</strong> page, shown here so you can answer a
+request without leaving Settings.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S9-access-requests.png" alt="The Access Requests section in Settings">
+    <span class="pin" style="--x:14%;--y:26%">1</span>
+    <span class="pin" style="--x:86%;--y:26%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 9 — Access Requests in Settings.</span>
+    <ol>
+      <li>Pending requests, with who asked and for which form.</li>
+      <li>Approve or decline. A decline can carry a reason the requester will see.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<p>Requests also arrive in the bell in the banner, which is always available to administrators even
+when the <strong>Access Requests</strong> menu item is hidden.</p>
+
+<!-- ======================================================================
+     9. WEBHOOK LOG
+     ====================================================================== -->
+<h1 id="ch9">9. Webhook Log</h1>
+
+<p>A preview of the full log, with a link to open it.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S10-webhook-log.png" alt="The Webhook Log section in Settings with recent attempts">
+    <span class="pin" style="--x:14%;--y:26%">1</span>
+    <span class="pin" style="--x:86%;--y:26%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 10 — Webhook Log in Settings.</span>
+    <ol>
+      <li>The most recent attempts, with their outcome.</li>
+      <li>The link to the full <strong>Webhook Log</strong> page, where you can filter, inspect a
+          payload and <strong>Replay</strong> a rejected response.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<p>See the <a href="admin-guide.pdf">Admin Guide</a>, Part 6, for what each rejection reason means
+and which ones can be replayed.</p>
+
+<!-- ======================================================================
+     10. SYSTEM MESSAGES
+     ====================================================================== -->
+<h1 id="ch10">10. System Messages</h1>
+
+<p>Banners shown at the top of every page until each person closes them out. Use them for planned
+maintenance, a deadline, or a change in process.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S11-system-messages.png" alt="The System Messages section listing messages with audience badges">
+    <span class="pin" style="--x:92.4%;--y:47.1%">1</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 11 — System Messages.</span>
+    <ol>
+      <li><strong>+ Add Message</strong>. Each message has a <strong>title</strong>, a body, and an
+          <strong>audience</strong> — everyone, or specific roles — and can be edited or removed
+          afterwards.</li>
+    </ol>
+    <p class="fig-note">Removing a message takes the banner away from everyone who has not yet
+       closed it.</p>
+  </figcaption>
+</figure>
+
+<div class="callout tip">
+  <span class="callout-title">Dismissal is per person</span>
+  <p>Each person closes a banner for themselves only. If you need everyone to see a message again,
+     edit it — the change makes it reappear.</p>
+</div>
+
+<!-- ======================================================================
+     11. ORGANIZATIONS
+     ====================================================================== -->
+<h1 id="ch11">11. Organizations</h1>
+
+<p>Organizations are tenant boundaries. Schools are shared across all of them, but accounts, forms
+and submissions belong to one.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S12-organizations.png" alt="The Organizations section listing organizations">
+    <span class="pin" style="--x:88%;--y:12%">1</span>
+    <span class="pin" style="--x:14%;--y:34%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 12 — Organizations.</span>
+    <ol>
+      <li><strong>+ Add Organization</strong>.</li>
+      <li>An organization. Click it to edit its name or details.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">Most installations need only one</span>
+  <p>If your district runs a single School Forms installation, you will rarely open this section.
+     It matters when one installation must serve separate groups that should not see each other's
+     data.</p>
+</div>
+
+<!-- ======================================================================
+     12. SCHOOLS
+     ====================================================================== -->
+<h1 id="ch12">12. Schools</h1>
+
+<p>The district school list, maintained by hand. It matters more than it looks: a submission is
+routed to a school by matching the parent's answer to a name in this list.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S13-schools.png" alt="The Schools section with search, grade level and calendar filters and a school table">
+    <span class="pin" style="--x:8.9%;--y:19.7%">1</span>
+    <span class="pin" style="--x:50%;--y:34.1%">2</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 13 — Schools.</span>
+    <ol>
+      <li><strong>Search</strong> by name or district. <strong>Grade Level</strong> and
+          <strong>Calendar</strong> filters sit beside it, and <strong>Import Schools</strong>
+          refreshes the list from the district source.</li>
+      <li>A school row. Click it to edit the record.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout warning">
+  <span class="callout-title">Renaming a school does not rewrite old answers</span>
+  <p>A submission keeps the parent's own words. Renaming a school here changes future matching, not
+     what was already recorded — see the next chapter for the answers that no longer match.</p>
+</div>
+
+<!-- ======================================================================
+     13. SCHOOL NAME MATCHING
+     ====================================================================== -->
+<h1 id="ch13">13. School Name Matching</h1>
+
+<p>When a Google Form asks for a school, parents type whatever they like — "Broughton", "Broughton
+High", "Broughton High School". This section lists the answers that do not match a school in the
+list, so you can match each one once and fix it for good.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/S14-school-name-matching.png" alt="The School Name Matching section listing unmatched school answers with a match control">
+    <span class="pin" style="--x:50%;--y:55.2%">1</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 14 — School Name Matching.</span>
+    <ol>
+      <li>A row holds the answer exactly as the parent typed it (<em>Test School</em>) and how many
+          submissions carry it. Choose the school it means from the list and save the match: every
+          submission with that spelling is routed to the school, and future answers with the same
+          spelling match automatically.</li>
+    </ol>
+  </figcaption>
+</figure>
+
+<div class="callout">
+  <span class="callout-title">The answer itself is never rewritten</span>
+  <p>The submission keeps the parent's own words; the match is recorded alongside. That is why a
+     staff member opening the submission sees the original spelling with a note saying which school
+     it was matched to, and by whom.</p>
+</div>
+
+<div class="callout tip">
+  <span class="callout-title">Check this after a form goes live</span>
+  <p>The first week of a new form is when most unmatched spellings appear. Matching them then is
+     far quicker than reconciling a term's worth of submissions later.</p>
+</div>
+
+<!-- ======================================================================
+     14. AT A GLANCE
+     ====================================================================== -->
+<h1 id="ch14">14. Settings at a glance</h1>
+
+<table>
+  <thead>
+    <tr><th>Section</th><th>What it controls</th><th>Saves</th></tr>
+  </thead>
+  <tbody>
+    <tr><td><strong>Users</strong></td><td>Accounts, roles, schools, form access, temporary passwords</td><td>Per panel</td></tr>
+    <tr><td><strong>Roles</strong></td><td>What each role may do, and whether it is school-limited</td><td>Per role</td></tr>
+    <tr><td><strong>Login Mode</strong></td><td>Password, test-user, or maintenance sign-in</td><td>Immediately</td></tr>
+    <tr><td><strong>Documents Link</strong></td><td>Which roles see the Documents menu item</td><td>Immediately</td></tr>
+    <tr><td><strong>Menu Settings</strong></td><td>Which roles see which menu items</td><td>Immediately</td></tr>
+    <tr><td><strong>Slack Notifications</strong></td><td>Admin alerts on or off; send a test</td><td>Immediately</td></tr>
+    <tr><td><strong>Access Requests</strong></td><td>Pending requests for private forms</td><td>Per decision</td></tr>
+    <tr><td><strong>Webhook Log</strong></td><td>Recent Google Forms responses, including rejected ones</td><td>Read-only</td></tr>
+    <tr><td><strong>System Messages</strong></td><td>Banners shown to everyone or to roles</td><td>Per message</td></tr>
+    <tr><td><strong>Organizations</strong></td><td>Tenant boundaries</td><td>Per organization</td></tr>
+    <tr><td><strong>Schools</strong></td><td>The district school list</td><td>Per school</td></tr>
+    <tr><td><strong>School Name Matching</strong></td><td>Unmatched school answers, matched once and for all</td><td>Per match</td></tr>
+  </tbody>
+</table>
+
+<div class="callout">
+  <span class="callout-title">Where to go next</span>
+  <p>Day-to-day work — forms, the designer, submissions, reports — is in the
+     <a href="admin-guide.pdf">Admin Guide</a>. What staff and School Contacts see is in the
+     <a href="staff-guide.pdf">Staff Guide</a>.</p>
+</div>
+
+</body>
+</html>
