@@ -77,7 +77,11 @@ export async function listFormAccessNotices(
   userId: number,
   organizationId: number
 ): Promise<FormAccessNotice[]> {
-  return execute<FormAccessNotice>(
+  // ★ `event_id`/`form_id` coerced on the way OUT: the notice bar posts
+  // `event_id` into `/notices/:eventId/dismiss`, which parses it with `parseId`.
+  // A TEXT id would 400 "Invalid access notice id" on the deployments whose
+  // driver returns numeric columns as strings.
+  const rows = await execute<FormAccessNotice>(
     `SELECT e.id AS event_id, e.form_id, f.title AS form_title
        FROM dbo.form_access_events e
        JOIN dbo.form_access a ON a.user_id = e.user_id AND a.form_id = e.form_id
@@ -100,6 +104,11 @@ export async function listFormAccessNotices(
       ORDER BY e.created_at DESC, e.id DESC`,
     { userId, organizationId }
   );
+  return rows.map((r) => ({
+    ...r,
+    event_id: Number(r.event_id),
+    form_id: Number(r.form_id),
+  }));
 }
 
 /**
@@ -194,14 +203,24 @@ export async function listAvailableFormsFor(
   const unrestricted = isUnrestrictedRole(viewer.role);
 
   return forms.map((f) => {
-    const row = byForm.get(Number(f.id));
+    // ★ `Number()` on the way OUT, not just on the way in. `id` is declared
+    // `number` here but the driver can hand back a numeric column as TEXT (see
+    // `access/formAccess.ts`'s `viewerId`, and `id-comparison.test.ts`), and this
+    // payload is what the client echoes straight back as `form_id` when the
+    // person clicks "Request access". Uncoerced, the browser posted
+    // `{"form_id":"3"}`, `requestAccessSchema` rejected it, and the page answered
+    // "Validation failed — form id: Expected number, received string" for every
+    // request — measured on production. The map's own lookups above coerce
+    // because they compare; this coerces because the value LEAVES the process.
+    const formId = Number(f.id);
+    const row = byForm.get(formId);
     if (unrestricted) {
       // ★ The exemption is BY RULE. An admin or staff account reads every form
       // and normally holds no row at all — which is exactly what the test suite
       // asserts, because it is what proves the rule is doing the work rather
       // than a grant.
       return {
-        id: f.id,
+        id: formId,
         title: f.title,
         description: f.description,
         code: f.code,
@@ -212,7 +231,7 @@ export async function listAvailableFormsFor(
     }
     if (f.visibility === "public") {
       return {
-        id: f.id,
+        id: formId,
         title: f.title,
         description: f.description,
         code: f.code,
@@ -223,7 +242,7 @@ export async function listAvailableFormsFor(
     }
     if (row?.status === "approved") {
       return {
-        id: f.id,
+        id: formId,
         title: f.title,
         description: f.description,
         code: f.code,
@@ -234,7 +253,7 @@ export async function listAvailableFormsFor(
     }
     if (row?.status === "pending") {
       return {
-        id: f.id,
+        id: formId,
         title: f.title,
         description: f.description,
         code: f.code,
@@ -245,7 +264,7 @@ export async function listAvailableFormsFor(
     }
     if (row?.status === "denied") {
       return {
-        id: f.id,
+        id: formId,
         title: f.title,
         description: f.description,
         code: f.code,
@@ -253,11 +272,11 @@ export async function listAvailableFormsFor(
         access: "denied" as const,
         decided_at: row.decided_at,
         note: row.note,
-        last_event: lastEvent.get(Number(f.id)) ?? null,
+        last_event: lastEvent.get(formId) ?? null,
       };
     }
     return {
-      id: f.id,
+      id: formId,
       title: f.title,
       description: f.description,
       code: f.code,
@@ -342,13 +361,31 @@ export async function listAccessRequests(
   organizationId: number,
   status: FormAccessStatus = "pending"
 ): Promise<AccessRequestRow[]> {
-  return execute<AccessRequestRow>(
-    `SELECT ${ACCESS_REQUEST_COLUMNS}
-       FROM ${ACCESS_REQUEST_JOINS}
-      WHERE f.organization_id = @organizationId AND a.status = @status
-      ORDER BY a.requested_at`,
-    { organizationId, status }
+  return normalizeAccessRequestRows(
+    await execute<AccessRequestRow>(
+      `SELECT ${ACCESS_REQUEST_COLUMNS}
+         FROM ${ACCESS_REQUEST_JOINS}
+        WHERE f.organization_id = @organizationId AND a.status = @status
+        ORDER BY a.requested_at`,
+      { organizationId, status }
+    )
   );
+}
+
+/**
+ * ★ Coerce the ids a caller SENDS BACK. `user_id` and `form_id` are declared
+ * `number` but a numeric column can arrive as TEXT (see `viewerId` and
+ * `id-comparison.test.ts`), and the queue's own buttons post both straight into
+ * `POST /requests/decide` (`decideAccessSchema`). Uncoerced, deciding a request
+ * failed with "Validation failed — user id: Expected number, received string"
+ * on exactly the deployments where the driver returns text.
+ */
+function normalizeAccessRequestRows(rows: AccessRequestRow[]): AccessRequestRow[] {
+  return rows.map((r) => ({
+    ...r,
+    user_id: Number(r.user_id),
+    form_id: Number(r.form_id),
+  }));
 }
 
 /**
@@ -374,18 +411,20 @@ export async function listRecentAccessRequests(
   organizationId: number,
   limit: number
 ): Promise<AccessRequestRow[]> {
-  return execute<AccessRequestRow>(
-    // `pageSize` carries the cap. It is a parameter here rather than a constant
-    // because the route owns the default and the maximum (see the route's
-    // `bellLimit`), and `selectPage` is what keeps the two dialects' paging
-    // syntax (`OFFSET/FETCH` vs `LIMIT/OFFSET`) out of this file.
-    dialect().selectPage({
-      select: ACCESS_REQUEST_COLUMNS,
-      from: ACCESS_REQUEST_JOINS,
-      where: "WHERE f.organization_id = @organizationId AND a.status = 'pending'",
-      orderBy: "a.requested_at DESC, a.user_id DESC, a.form_id DESC",
-    }),
-    { organizationId, pageSize: limit, offset: 0 }
+  return normalizeAccessRequestRows(
+    await execute<AccessRequestRow>(
+      // `pageSize` carries the cap. It is a parameter here rather than a constant
+      // because the route owns the default and the maximum (see the route's
+      // `bellLimit`), and `selectPage` is what keeps the two dialects' paging
+      // syntax (`OFFSET/FETCH` vs `LIMIT/OFFSET`) out of this file.
+      dialect().selectPage({
+        select: ACCESS_REQUEST_COLUMNS,
+        from: ACCESS_REQUEST_JOINS,
+        where: "WHERE f.organization_id = @organizationId AND a.status = 'pending'",
+        orderBy: "a.requested_at DESC, a.user_id DESC, a.form_id DESC",
+      }),
+      { organizationId, pageSize: limit, offset: 0 }
+    )
   );
 }
 
@@ -451,7 +490,15 @@ export async function listAccessForUser(userId: number): Promise<UserAccessRow[]
   const last = new Map<number, FormAccessEvent>();
   for (const e of events) last.set(Number(e.form_id), e.event);
 
-  return rows.map((r) => ({ ...r, last_event: last.get(Number(r.form_id)) ?? null }));
+  // ★ `form_id` coerced on the way OUT, for the same reason as
+  // `listAvailableFormsFor`'s `id`: the Edit User drawer posts these ids straight
+  // back to `POST /user/:id/remove` and `/grant`, where a TEXT id fails
+  // `removeAccessSchema` with "Expected number, received string".
+  return rows.map((r) => ({
+    ...r,
+    form_id: Number(r.form_id),
+    last_event: last.get(Number(r.form_id)) ?? null,
+  }));
 }
 
 /**
@@ -555,7 +602,11 @@ export async function listAccessGrantsFor(formId: number): Promise<AccessGrantRo
   );
   const out: AccessGrantRow[] = [];
   for (const r of rows) {
-    out.push({ ...r, events: await listAccessEvents(Number(r.user_id), formId) });
+    // ★ `user_id` coerced on the way OUT: the "Who has access?" list posts it
+    // straight into `POST /requests/decide` to revoke, which validates with
+    // `decideAccessSchema` and rejects a TEXT id.
+    const userId = Number(r.user_id);
+    out.push({ ...r, user_id: userId, events: await listAccessEvents(userId, formId) });
   }
   return out;
 }

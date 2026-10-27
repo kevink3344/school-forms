@@ -152,6 +152,25 @@ describe("Available Forms", () => {
     expect(DATA).toContain("form_access_notice_dismissals");
     expect(DATA).toContain("WHERE id = @eventId AND user_id = @userId");
   });
+
+  // ★ The ids in this payload are ECHOED BACK by the client: "Request access"
+  // posts `form.id` as `form_id`, and `requestAccessSchema` is `z.number()`.
+  // A driver that returns a numeric column as TEXT therefore made every request
+  // fail with "Validation failed — form id: Expected number, received string",
+  // measured on production. The coercion belongs at the boundary where the
+  // payload is built, so no caller has to remember it.
+  it("★ emits `id` as a NUMBER, because the client posts it back as `form_id`", () => {
+    expect(DATA).toContain("const formId = Number(f.id);");
+    expect(/id: f\.id\b/.test(DATA), "a raw row id reaches the wire").toBe(false);
+  });
+
+  it("★ coerces the ids the admin queue and bell send back", () => {
+    // Same trap on the admin side: `decideAccessSchema` and `removeAccessSchema`
+    // are `z.number()` too, and the queue's buttons post these ids verbatim.
+    expect(DATA).toContain("function normalizeAccessRequestRows(");
+    expect(DATA).toContain("form_id: Number(r.form_id),");
+    expect(DATA).toContain("event_id: Number(r.event_id),");
+  });
 });
 
 // -----------------------------------------------------------------------------
