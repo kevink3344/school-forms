@@ -2,10 +2,15 @@ import { describe, it, expect } from "vitest";
 import {
   createSubmissionSchema,
   createWebhookSubmissionSchema,
+  decideAccessSchema,
+  grantAccessSchema,
   promoteAdhocFieldSchema,
+  removeAccessSchema,
+  requestAccessSchema,
   submissionAnswerSchema,
   updateFormSchema,
   updateSubmissionValuesSchema,
+  withdrawAccessSchema,
 } from "./schemas.js";
 
 // -----------------------------------------------------------------------------
@@ -308,6 +313,53 @@ describe("updateFormSchema — transmitted field ids", () => {
       fields: [{ id: "abc", label: "Notes", type: "textarea" }],
     });
     expect(parsed.success).toBe(false);
+  });
+});
+
+
+// -----------------------------------------------------------------------------
+// Form-access ids are ECHOED BACK by the client
+//
+// The Available Forms page and the admin queue render ids the server sent and
+// post them straight back. On a driver that returns numeric columns as TEXT the
+// browser posted `{"form_id":"3"}`, and a strict `z.number()` answered
+//
+//   400 "Validation failed — form id: Expected number, received string"
+//
+// for every "Request access" click — measured on production. The schemas coerce,
+// and `.int().positive()` keeps the guard: a value that is not a usable id is
+// still refused.
+// -----------------------------------------------------------------------------
+describe("form-access schemas — ids that arrive as text", () => {
+  it("requestAccessSchema accepts a text form id and yields a NUMBER", () => {
+    expect(requestAccessSchema.parse({ form_id: "3" })).toEqual({ form_id: 3 });
+    expect(typeof requestAccessSchema.parse({ form_id: "3" }).form_id).toBe("number");
+  });
+
+  it("withdrawAccessSchema accepts a text form id", () => {
+    expect(withdrawAccessSchema.parse({ form_id: "3" })).toEqual({ form_id: 3 });
+  });
+
+  it("removeAccessSchema accepts a text form id", () => {
+    expect(removeAccessSchema.parse({ form_id: "3" })).toEqual({ form_id: 3 });
+  });
+
+  it("decideAccessSchema accepts text user and form ids", () => {
+    expect(
+      decideAccessSchema.parse({ user_id: "9", form_id: "3", decision: "approve" })
+    ).toMatchObject({ user_id: 9, form_id: 3 });
+  });
+
+  it("grantAccessSchema accepts a list of text form ids", () => {
+    expect(grantAccessSchema.parse({ form_ids: ["3", "4"] })).toEqual({ form_ids: [3, 4] });
+  });
+
+  it("CONTROL: still refuses an id that is not a number at all", () => {
+    // The coercion must not become a rubber stamp: `Number("abc")` is NaN, which
+    // `.int()` refuses, and a missing id stays missing.
+    expect(requestAccessSchema.safeParse({ form_id: "abc" }).success).toBe(false);
+    expect(requestAccessSchema.safeParse({}).success).toBe(false);
+    expect(requestAccessSchema.safeParse({ form_id: 0 }).success).toBe(false);
   });
 });
 

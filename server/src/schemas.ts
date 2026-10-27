@@ -339,14 +339,22 @@ export const updateFormSchema = z.object({
 /**
  * Ask for access to a private form. Only the form id — the USER comes from the
  * session, never the body, so a caller cannot request on someone else's behalf.
+ *
+ * ★ `z.coerce.number()`, not `z.number()`. The id is ECHOED BACK from a payload
+ * the server built, and a numeric column can arrive from the driver as TEXT (see
+ * `id-comparison.test.ts`). Strict, every "Request access" click answered
+ * `Validation failed — form id: Expected number, received string` — measured on
+ * production. The server now also emits a real number (`listAvailableFormsFor`),
+ * but the coercion is the environment-independent half: `.int().positive()` still
+ * refuses anything that is not a usable id.
  */
 export const requestAccessSchema = z.object({
-  form_id: z.number().int().positive(),
+  form_id: z.coerce.number().int().positive(),
 });
 
 /** Withdraw the caller's own pending request. Same shape, same reason. */
 export const withdrawAccessSchema = z.object({
-  form_id: z.number().int().positive(),
+  form_id: z.coerce.number().int().positive(),
 });
 
 /**
@@ -356,10 +364,14 @@ export const withdrawAccessSchema = z.object({
  * `decision`. A caller must not be able to label their own action in the audit
  * log, and `revoke` reaching the same `denied` state as `decline` is exactly the
  * case where a caller-supplied label would make the history wrong.
+ *
+ * ★ Both ids are coerced for the same reason as `requestAccessSchema`: the queue
+ * and the bell render ids the server sent, and the buttons post them straight
+ * back.
  */
 export const decideAccessSchema = z.object({
-  user_id: z.number().int().positive(),
-  form_id: z.number().int().positive(),
+  user_id: z.coerce.number().int().positive(),
+  form_id: z.coerce.number().int().positive(),
   decision: z.enum(["approve", "decline", "revoke"]),
   // A decline carries a reason and the requester sees it (§15 Q5). 400 is the
   // per-field bound; it is deliberately generous rather than derived from a
@@ -379,7 +391,7 @@ export const setVisibilitySchema = z.object({
  * the removal to a different account than the one the admin has open.
  */
 export const removeAccessSchema = z.object({
-  form_id: z.number().int().positive(),
+  form_id: z.coerce.number().int().positive(),
 });
 
 /**
@@ -393,7 +405,7 @@ export const removeAccessSchema = z.object({
  * account. The cap is a sanity bound, not a product limit.
  */
 export const grantAccessSchema = z.object({
-  form_ids: z.array(z.number().int().positive()).max(500),
+  form_ids: z.array(z.coerce.number().int().positive()).max(500),
 });
 
 // -----------------------------------------------------------------------------
