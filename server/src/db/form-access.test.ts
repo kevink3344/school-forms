@@ -171,6 +171,14 @@ describe("Available Forms", () => {
     expect(DATA).toContain("form_id: Number(r.form_id),");
     expect(DATA).toContain("event_id: Number(r.event_id),");
   });
+
+  it("★ names the deciding administrator on the queue row", () => {
+    // The Status column says "By <name> on <date>". `decided_by` is an id, so the
+    // name has to come from a join — and it must be a LEFT join, or a deleted
+    // administrator account would drop the request out of the queue entirely.
+    expect(DATA).toContain("d.display_name AS decided_by_name");
+    expect(DATA).toContain("LEFT JOIN dbo.users d ON d.id = a.decided_by");
+  });
 });
 
 // -----------------------------------------------------------------------------

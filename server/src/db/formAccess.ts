@@ -326,6 +326,8 @@ export interface AccessRequestRow {
   requested_at: Date | string;
   decided_at: Date | string | null;
   decided_by: number | null;
+  /** The administrator who approved or declined — `null` while pending. */
+  decided_by_name: string | null;
   note: string | null;
   user_name: string | null;
   user_email: string | null;
@@ -342,20 +344,31 @@ export interface AccessRequestRow {
  * added to one and not the other is a field that is present on the page and
  * `undefined` in the bell, with nothing to error and point at it.
  *
- * `user_name`/`school_name` are LEFT JOINs rather than inner ones on purpose — a
- * request whose account was deleted must still be visible to the administrator,
- * and an inner join would drop it out of the queue that exists to answer it.
+ * `user_name`/`school_name`/`decided_by_name` are LEFT JOINs rather than inner
+ * ones on purpose — a request whose account was deleted must still be visible to
+ * the administrator, and an inner join would drop it out of the queue that
+ * exists to answer it. The same holds for the deciding administrator: a deleted
+ * admin account must not hide the request they answered.
+ *
+ * ★ `decided_by_name` is the DECIDER's name, read from the joined account rather
+ * than from `form_access_events`. The two agree — `decideFormAccess` writes the
+ * row's `decided_by` and the event's `actor_id` in one transaction — but the row
+ * is what the Status column already renders from (`status`, `decided_at`), so
+ * reading the third fact from the same place keeps the sentence consistent even
+ * for a row that predates the audit log.
  */
 const ACCESS_REQUEST_COLUMNS = `a.user_id, a.form_id, a.status, a.source, a.requested_at,
             a.decided_at, a.decided_by, a.note,
             u.display_name AS user_name, u.email AS user_email,
             f.title AS form_title, f.code AS form_code,
-            s.name AS school_name`;
+            s.name AS school_name,
+            d.display_name AS decided_by_name`;
 
 const ACCESS_REQUEST_JOINS = `dbo.form_access a
        JOIN dbo.forms f ON f.id = a.form_id
        LEFT JOIN dbo.users u ON u.id = a.user_id
-       LEFT JOIN dbo.schools s ON s.id = u.school_id`;
+       LEFT JOIN dbo.schools s ON s.id = u.school_id
+       LEFT JOIN dbo.users d ON d.id = a.decided_by`;
 
 export async function listAccessRequests(
   organizationId: number,

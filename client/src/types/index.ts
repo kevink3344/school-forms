@@ -353,6 +353,8 @@ export interface AccessRequestRow {
   requested_at: string;
   decided_at: string | null;
   decided_by: number | null;
+  /** The administrator who approved or declined — `null` while pending. */
+  decided_by_name: string | null;
   note: string | null;
   user_name: string | null;
   user_email: string | null;

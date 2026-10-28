@@ -328,7 +328,18 @@ export default function AccessRequests() {
                     </td>
                     <td data-label="Status">
                       <span className={`badge ${STATUS_BADGE[r.status]}`}>{r.status}</span>
-                      {r.decided_at && <div className="cell-sub">Decided {day(r.decided_at)}</div>}
+                      {/* ★ Names the DECIDER, not the action. "Approved by Ada" is
+                          the sentence an administrator is asked for after the fact,
+                          and it is the one fact the badge cannot carry. The date is
+                          the decision date — the same `decided_at` the row is
+                          stamped with in the same transaction as `decided_by`. */}
+                      {r.decided_at && (
+                        <div className="cell-sub">
+                          {r.status === "pending"
+                            ? `Decided ${day(r.decided_at)}`
+                            : `By ${r.decided_by_name ?? "an administrator"} on ${day(r.decided_at)}`}
+                        </div>
+                      )}
                     </td>
                     <td data-label="Note">
                       {r.note ? <span className="cell-sub">“{r.note}”</span> : <span className="muted-note">—</span>}
