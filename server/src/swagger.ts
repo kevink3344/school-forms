@@ -1846,6 +1846,7 @@ export function buildSwaggerSpec(req?: Request) {
           summary: "The access-request queue — admin",
           description:
             "Requests joined to the requester (name, e-mail, school) and the form. `?status=pending` (the default) | `approved` | `denied`, oldest first.\n\n" +
+            "**Oldest first is the API contract**, not the page's order: the Access Requests page reverses it for display so a new request appears at the top, and its filter box narrows the loaded rows client-side.\n\n" +
             "A decided row also carries `decided_by_name` — the administrator who approved or declined — so the Status column can read *\"By Ada Lovelace on 10/16/2026\"* without a second lookup.\n\n" +
             "**This is the entire notification mechanism** — nothing pushes. The pending count is rendered on the closed Settings section title, because a count inside a closed section is a count nobody sees.",
           security: [{ [bearerScheme]: [] }],

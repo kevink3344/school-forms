@@ -370,6 +370,15 @@ const ACCESS_REQUEST_JOINS = `dbo.form_access a
        LEFT JOIN dbo.schools s ON s.id = u.school_id
        LEFT JOIN dbo.users d ON d.id = a.decided_by`;
 
+/**
+ * The admin queue, ONE status at a time.
+ *
+ * ★ OLDEST first, deliberately — triage wants the request that has waited
+ * longest at the top of the *work*, and this ordering is the documented contract
+ * of `GET /api/form-access/requests`. The page reverses it for DISPLAY (a new
+ * arrival belongs at the top of the screen); it does not re-ask the server.
+ * Anything else reading this function gets the same oldest-first list.
+ */
 export async function listAccessRequests(
   organizationId: number,
   status: FormAccessStatus = "pending"

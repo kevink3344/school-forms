@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import { RefreshCw } from "lucide-react";
 import { PageHead } from "../../components/layout";
@@ -56,6 +56,42 @@ function day(value: string | null): string {
   return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString();
 }
 
+/**
+ * NEWEST FIRST — the request that just arrived belongs at the top.
+ *
+ * ★ This is one comparator used by every tab, because the server returns the
+ * queue OLDEST first (`ORDER BY a.requested_at`). Sorting only the merged "All"
+ * tab would have made the same row appear at the bottom of Pending and the top
+ * of All, which reads as two different queues.
+ *
+ * ★ `requested_at` alone is not a total order: a batch grant or a backfill
+ * writes several rows inside the same millisecond, and `Array.sort` is stable
+ * but the INPUT order is whatever the three reads returned. The id pair is the
+ * same tie-breaker `listRecentAccessRequests` uses in SQL, so the page and the
+ * bell agree about which of two simultaneous requests is "newer".
+ */
+function newestFirst(a: AccessRequestRow, b: AccessRequestRow): number {
+  const delta = new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime();
+  if (delta !== 0 && !Number.isNaN(delta)) return delta;
+  return b.form_id - a.form_id || b.user_id - a.user_id;
+}
+
+/** The free-text haystack for one row — every fact the reader can see. */
+function searchText(row: AccessRequestRow): string {
+  return [
+    row.user_name,
+    row.user_email,
+    row.school_name,
+    row.form_title,
+    row.form_code,
+    `#${row.form_id}`,
+    row.note,
+  ]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+}
+
 export default function AccessRequests() {
   const { refresh: refreshBell, decide, decideError, clearDecideError } = useAccessRequests();
   const [params, setParams] = useSearchParams();
@@ -67,6 +103,12 @@ export default function AccessRequests() {
   const [busy, setBusy] = useState<string | null>(null);
   const [declineFor, setDeclineFor] = useState<string | null>(null);
   const [declineNote, setDeclineNote] = useState("");
+
+  // The filter box. Client-side on purpose: the queue is tens of rows, already
+  // loaded, and the tabs are three reads of one endpoint — a `?q=` parameter
+  // would be a fourth spelling of "which rows do I mean" that the bell does not
+  // share, and it would round-trip on every keystroke for a list this small.
+  const [search, setSearch] = useState("");
 
   // The per-form access list, with a Revoke per row and each account's history.
   // A revoke control needs a list to act on, and the HISTORY is what makes
@@ -95,12 +137,10 @@ export default function AccessRequests() {
           api.listAccessRequests("denied"),
         ]);
         setRows(
-          [...pending, ...approved, ...denied].sort(
-            (a, b) => new Date(b.requested_at).getTime() - new Date(a.requested_at).getTime()
-          )
+          [...pending, ...approved, ...denied].sort(newestFirst)
         );
       } else {
-        setRows(await api.listAccessRequests(which));
+        setRows((await api.listAccessRequests(which)).sort(newestFirst));
       }
     } catch (e) {
       setRows([]);
@@ -150,6 +190,31 @@ export default function AccessRequests() {
   // someone else answered the request a minute ago.
   const focusMissing =
     focusKey !== null && !loading && !rows.some((r) => rowKey(r) === focusKey);
+
+  // --- Filter ---------------------------------------------------------------
+  //
+  // Every whitespace-separated term must match somewhere in the row, so
+  // "ada math" narrows to Ada's math request rather than widening to everything
+  // that mentions either word. Case-insensitive, and matched against what is on
+  // screen — a reader who can see "Lincoln High" types "lincoln", not a school id.
+  const terms = search.trim().toLowerCase().split(/\s+/).filter(Boolean);
+  const visible = useMemo(() => {
+    if (terms.length === 0) return rows;
+    return rows.filter((r) => {
+      const haystack = searchText(r);
+      return terms.every((t) => haystack.includes(t));
+    });
+    // `terms` is rebuilt every render; joining it is the stable dependency.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [rows, terms.join(" ")]);
+
+  // ★ A filter that hides the row a deep link points at must SAY so. Without
+  // this the page scrolls to nothing and the reviewer concludes the link is
+  // broken, when the real cause is a filter they typed ten minutes ago.
+  const focusFilteredOut =
+    focusKey !== null && !loading && !focusMissing && !visible.some((r) => rowKey(r) === focusKey);
+
+  const clearSearch = () => setSearch("");
 
   // Takes the pair rather than a row, because a revoke acts on a grant row and a
   // decision acts on a request row — the endpoint only ever wanted the two ids.
@@ -249,6 +314,45 @@ export default function AccessRequests() {
         ))}
       </div>
 
+      <div className="filter-bar">
+        <div className="filter-group" style={{ flex: "1 1 240px" }}>
+          <label htmlFor="access-search">Filter</label>
+          <input
+            id="access-search"
+            type="search"
+            placeholder="Name, e-mail, school, form, or note…"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+          />
+        </div>
+        <div className="filter-spacer" />
+        {/* The count is the honest answer to "did the filter do anything?" —
+            a filtered table with no denominator looks like a broken table. */}
+        <span className="muted-note" aria-live="polite">
+          {loading
+            ? "Loading…"
+            : terms.length > 0
+              ? `${visible.length} of ${rows.length} shown`
+              : `${rows.length} ${rows.length === 1 ? "request" : "requests"}`}
+        </span>
+        {search && (
+          <button className="clear" onClick={clearSearch} type="button">
+            Clear
+          </button>
+        )}
+      </div>
+
+      {focusFilteredOut && (
+        <div className="card" style={{ marginBottom: 14 }}>
+          <div className="card-body" style={{ fontSize: "0.8125rem" }}>
+            The request this link points at is hidden by the filter above.{" "}
+            <button type="button" className="badge-button" onClick={clearSearch}>
+              Clear the filter
+            </button>
+          </div>
+        </div>
+      )}
+
       {(error || decideError) && (
         <div className="alert-error" role="alert" style={{ marginBottom: 14 }}>
           {error ?? decideError}
@@ -290,20 +394,36 @@ export default function AccessRequests() {
                   Loading…
                 </td>
               </tr>
-            ) : rows.length === 0 ? (
+            ) : visible.length === 0 ? (
               <tr>
                 <td colSpan={6} style={{ textAlign: "center", padding: 24 }}>
-                  {EMPTY[tab]}
-                  {tab === "pending" && (
-                    <div className="muted-note" style={{ marginTop: 6 }}>
-                      Requests appear here when someone asks for access to a private form from{" "}
-                      <Link to="/staff/forms">Available Forms</Link>.
-                    </div>
+                  {/* ★ "Nothing matched" and "nothing is waiting" are different
+                      facts. Saying "No requests are waiting" under an active
+                      filter would be a false statement about the queue. */}
+                  {terms.length > 0 ? (
+                    <>
+                      No requests match “{search.trim()}”.
+                      <div className="muted-note" style={{ marginTop: 6 }}>
+                        <button type="button" className="badge-button" onClick={clearSearch}>
+                          Clear the filter
+                        </button>
+                      </div>
+                    </>
+                  ) : (
+                    <>
+                      {EMPTY[tab]}
+                      {tab === "pending" && (
+                        <div className="muted-note" style={{ marginTop: 6 }}>
+                          Requests appear here when someone asks for access to a private form from{" "}
+                          <Link to="/staff/forms">Available Forms</Link>.
+                        </div>
+                      )}
+                    </>
                   )}
                 </td>
               </tr>
             ) : (
-              rows.map((r) => {
+              visible.map((r) => {
                 const key = rowKey(r);
                 const rowBusy = busy === key;
                 return (
