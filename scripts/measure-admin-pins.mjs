@@ -179,17 +179,17 @@ const PLAN = [
       ["Private", { text: "Private", exact: true }],
     ];
   }],
-  ["A11 public link", async (page) => {
+  ["A11 staff attachments", async (page) => {
     await go(page, "/admin/forms/2");
     await page.evaluate(() => {
-      const h = Array.from(document.querySelectorAll("h3")).find((x) => x.textContent.trim() === "Public link");
+      const h = Array.from(document.querySelectorAll("h3")).find((x) => x.textContent.trim() === "Attachments");
       if (h) window.scrollTo(0, h.getBoundingClientRect().top + window.scrollY - 140);
     });
     await sleep(700);
     return [
-      ["Public link heading", { text: "Public link", exact: true }],
-      ["link field", { selector: "input" }],
-      ["copy button", { selector: "button" }],
+      ["Attachments heading", { text: "Attachments", exact: true }],
+      ["Enable Staff Attachments toggle", { text: "Enable Staff Attachments" }],
+      ["Access row", { text: "Access", exact: true }],
     ];
   }],
   ["A12 access requests", async (page) => {

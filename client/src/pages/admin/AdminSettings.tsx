@@ -449,6 +449,13 @@ export default function AdminSettings() {
   const [docRoles, setDocRoles] = useState<string[] | null>(null);
   const [docBusy, setDocBusy] = useState(false);
 
+  // Staff Attachments — the GLOBAL default for which roles may use a form's
+  // Attachments card (docs/plans/staff-attachments.md §7). Same contract and
+  // same three states as `docRoles`: `null` = unrestricted, `[]` = nobody.
+  // A form's own `attachments_roles` overrides this.
+  const [attachmentRoles, setAttachmentRoles] = useState<string[] | null>(null);
+  const [attachmentBusy, setAttachmentBusy] = useState(false);
+
   // Menu visibility per item, from the `menu_items` setting. `null` per item means
   // the item is shown to everyone.
   const [menuItems, setMenuItems] = useState<Record<MenuItemKey, string[] | null>>(defaultMenuItems);
@@ -538,19 +545,21 @@ export default function AdminSettings() {
     // Load the Login Mode + maintenance settings (separate try so a settings
     // failure never blocks the users/orgs panels).
     try {
-      const [mode, info, msg, docs, menu, slack] = await Promise.all([
+      const [mode, info, msg, docs, menu, slack, attach] = await Promise.all([
         api.getPublicSetting("login_mode"),
         api.getInfo(),
         api.getPublicSetting("maintenance_message"),
         api.getPublicSetting("documents_link"),
         api.getPublicSetting("menu_items"),
         api.getPublicSetting("slack_notifications_enabled"),
+        api.getPublicSetting("attachments_roles"),
       ]);
       setLoginMode((mode.value as LoginMode) || "select");
       setLoginModeOverride(info.loginModeOverride);
       if (msg.value) setMaintenanceMessage(msg.value);
       setDocRoles(parseDocumentRoles(docs.value));
       setMenuItems(parseMenuItems(menu.value));
+      setAttachmentRoles(parseDocumentRoles(attach.value));
       // Default ON when unset/blank, mirroring the server's default so the switch
       // never renders "off" for a setting that has never been written.
       setSlackEnabled(slack.value.trim().toLowerCase() !== "false");
@@ -934,8 +943,33 @@ export default function AdminSettings() {
     }
   };
 
-  // Toggle a role's access to the Documents link. Optimistic with rollback.
-  //
+  // Toggle a role's access to attachments (the global default). Optimistic with
+  // rollback, and the same `null` handling as the Documents toggle above:
+  // turning ONE role off out of the unrestricted state has to materialise the
+  // explicit list of the others, or the click looks like it did nothing.
+  const toggleAttachmentRole = async (role: string) => {
+    setError("");
+    setAttachmentBusy(true);
+    const prev = attachmentRoles;
+    const current = prev ?? roleKeys;
+    const next = current.includes(role)
+      ? current.filter((r) => r !== role)
+      : [...current, role];
+    setAttachmentRoles(next);
+    try {
+      await api.updateSetting("attachments_roles", JSON.stringify(next));
+      setMessage(
+        `Attachments ${next.includes(role) ? "enabled" : "hidden"} for ${roleLabelFor(role)}.`
+      );
+    } catch (err) {
+      setAttachmentRoles(prev);
+      setError(err instanceof ApiError ? err.message : "Could not update Attachments visibility");
+    } finally {
+      setAttachmentBusy(false);
+    }
+  };
+
+  // Toggle a role's access to the Documents link. Optimistic with rollback.  //
   // ★ `null` is unrestricted, so turning ONE role off out of that state has to
   // materialise the explicit list of the others. Writing `null` back would make
   // the click look like it did nothing, and writing `[]` would hide Documents from
@@ -1835,6 +1869,74 @@ export default function AdminSettings() {
             );
           })}
         </div>
+        )}
+      </CollapsibleSection>
+
+      {/* Attachments panel (docs/plans/staff-attachments.md §6.5) — the GLOBAL
+          default for which roles may use a form's Attachments card. A form can
+          override it in its own designer; this is what an untouched form falls
+          back to. The per-form "Enable Staff Attachments" switch is the real
+          gate — this only decides who, once it is on. */}
+      <CollapsibleSection
+        title="Attachments"
+        subtitle="Choose which roles can add files to a submission's Attachments card"
+      >
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
+          This is the <strong>default</strong> for every form. An individual form can override it in
+          its designer, and a form only shows the card at all once its
+          <strong> Enable Staff Attachments</strong> switch is turned on.
+        </p>
+        <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
+          {attachmentRoles === null
+            ? "Currently unrestricted: every role can use attachments, including any role created later."
+            : attachmentRoles.length === 0
+              ? "Currently enabled for no role — the card is hidden from everyone but administrators."
+              : `Currently enabled for ${attachmentRoles.map((r) => roleLabelFor(r)).join(", ")}.`}
+        </p>
+        {roles.length === 0 ? (
+          <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+            {roleCatalog.error ? `Could not load the role list: ${roleCatalog.error}` : "Loading roles…"}
+          </p>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+            {roles.map((row) => {
+              const has = attachmentRoles === null || attachmentRoles.includes(row.role_key);
+              const badge = roleBadgeFor(row.role_key);
+              return (
+                <div
+                  key={row.role_key}
+                  style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "space-between",
+                    gap: 12,
+                    padding: "12px 14px",
+                    borderRadius: "var(--radius)",
+                    border: "1px solid var(--border)",
+                    background: "var(--app-bg)",
+                  }}
+                >
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <span className={`badge ${badge.cls}`}>{badge.label}</span>
+                    <span style={{ fontSize: "0.8125rem", color: "var(--text)" }}>
+                      {badge.label}
+                      {has ? " — can use attachments" : " — cannot use attachments"}
+                    </span>
+                  </div>
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <span style={{ fontSize: "0.75rem", color: "var(--text-muted)" }}>
+                      {has ? "Allowed" : "Hidden"}
+                    </span>
+                    <Toggle
+                      checked={has}
+                      disabled={attachmentBusy}
+                      onChange={() => void toggleAttachmentRole(row.role_key)}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
         )}
       </CollapsibleSection>
 

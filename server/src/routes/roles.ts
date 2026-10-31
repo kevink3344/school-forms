@@ -40,6 +40,8 @@ const USAGE_LABELS: Record<keyof RoleUsage, string> = {
   system_messages: "system message audience",
   menu_items: "menu item",
   documents_link: "Documents Link setting",
+  form_attachments: "form Attachments access list",
+  attachments_roles: "Attachments setting",
 };
 
 function describeUsage(usage: RoleUsage): string {

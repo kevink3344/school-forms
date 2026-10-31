@@ -148,6 +148,12 @@ const TURSO_DDL: string[] = [
      -- docs/plans/submission-link-label.md. JSON array of form_fields.id, in
      -- display order; NULL means "not configured" (first non-staff answer).
      link_field_ids  TEXT,
+     -- docs/plans/staff-attachments.md. The per-form switch; 0 for every form
+     -- that predates the column, so the feature is opt-in per form.
+     attachments_enabled BOOLEAN NOT NULL DEFAULT 0,
+     -- JSON array of role keys, same contract as form_fields.roles:
+     -- NULL = unrestricted, [] = nobody, [...] = exactly those.
+     attachments_roles   TEXT,
      created_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT},
      updated_at      TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
    )`,
@@ -245,6 +251,24 @@ const TURSO_DDL: string[] = [
      error         TEXT
    )`,
   `CREATE INDEX IF NOT EXISTS IX_documents_submission ON documents(submission_id)`,
+
+  // --- submission_attachments ------------------------------------------------
+  // docs/plans/staff-attachments.md. One row per file uploaded from a
+  // submission's Attachments card; the bytes live in Google Drive. Deleting the
+  // submission removes the ROW (via the cascade) but never the Drive file —
+  // same deliberate rule as generated documents.
+  `CREATE TABLE IF NOT EXISTS submission_attachments (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+     drive_file_id TEXT NOT NULL,
+     file_name     TEXT NOT NULL,
+     mime_type     TEXT,
+     size_bytes    INTEGER,
+     web_view_link TEXT,
+     uploaded_by   INTEGER REFERENCES users(id) ON DELETE SET NULL,
+     uploaded_at   TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE INDEX IF NOT EXISTS IX_submission_attachments_submission ON submission_attachments(submission_id)`,
 
   // --- report_views ----------------------------------------------------------
   `CREATE TABLE IF NOT EXISTS report_views (
@@ -588,6 +612,23 @@ export const tursoDialect: Dialect = {
       // not appear in BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
       table: "forms",
       column: "link_field_ids",
+      definition: "TEXT",
+    },
+    {
+      // Staff Attachments (docs/plans/staff-attachments.md). In `TURSO_DDL` as
+      // well, so a fresh database gets it from CREATE TABLE; this entry is for a
+      // database created before the column existed. DEFAULT 0 keeps every
+      // pre-existing form with attachments OFF, which is the whole deploy story.
+      table: "forms",
+      column: "attachments_enabled",
+      definition: "BOOLEAN NOT NULL DEFAULT 0",
+    },
+    {
+      // Which roles may use the Attachments card. A JSON array of role keys —
+      // NOT a boolean and NOT a timestamp — so it must not appear in
+      // BOOLEAN_COLUMNS or TIMESTAMP_COLUMNS.
+      table: "forms",
+      column: "attachments_roles",
       definition: "TEXT",
     },
   ],

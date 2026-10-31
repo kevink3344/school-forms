@@ -153,8 +153,20 @@ export function buildSwaggerSpec(req?: Request) {
             },
             code: { type: "string", nullable: true },
             submission_seq: { type: "integer" },
-            doc_folder_id: { type: "string", nullable: true, description: "Google Drive parent folder for this form's generated documents. NULL falls back to the global env folder." },
+            doc_folder_id: { type: "string", nullable: true, description: "Google Drive parent folder for this form's generated documents AND staff attachments. NULL falls back to the global env folder." },
             google_form_url: { type: "string", nullable: true, description: "Optional link to the source Google Form this form mirrors. Informational only — no API integration." },
+            attachments_enabled: {
+              type: "boolean",
+              description:
+                "The per-form 'Enable Staff Attachments' switch (docs/plans/staff-attachments.md). FALSE for every form that predates the column, so the feature is opt-in per form. When false, the Attachments card is hidden from every non-admin regardless of `attachments_roles`.",
+            },
+            attachments_roles: {
+              type: "array",
+              items: { type: "string" },
+              nullable: true,
+              description:
+                "Which roles may use the Attachments card once it is enabled. `null` = UNRESTRICTED (every role, including ones created later), `[]` = granted to nobody, `[...]` = exactly those. Administrators are always allowed regardless. Deliberately NOT cleared when `attachments_enabled` is turned off.",
+            },
             visibility: {
               type: "string",
               enum: ["public", "private"],
@@ -409,6 +421,22 @@ export function buildSwaggerSpec(req?: Request) {
             phase1_result: { type: "string", nullable: true },
           },
         },
+        SubmissionAttachment: {
+          type: "object",
+          description: "A file staff attached to a submission (docs/plans/staff-attachments.md). The bytes live in Google Drive.",
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            drive_file_id: { type: "string", description: "Google Drive file id." },
+            file_name: { type: "string", description: "The original name, as uploaded." },
+            mime_type: { type: "string", nullable: true },
+            size_bytes: { type: "integer", nullable: true, description: "Null when Google does not report a size." },
+            web_view_link: { type: "string", nullable: true },
+            uploaded_by: { type: "integer", nullable: true, description: "Null once that account is deleted." },
+            uploaded_by_name: { type: "string", nullable: true },
+            uploaded_at: { type: "string", format: "date-time" },
+          },
+        },
         WebhookEvent: {
           type: "object",
           description:
@@ -566,10 +594,10 @@ export function buildSwaggerSpec(req?: Request) {
       "/api/settings/{key}": {
         get: {
           tags: ["Settings"],
-          summary: "Get a public app setting (login_mode / maintenance_message / documents_link / menu_items / slack_notifications_enabled)",
+          summary: "Get a public app setting (login_mode / maintenance_message / documents_link / attachments_roles / menu_items / slack_notifications_enabled)",
           security: [],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "menu_items", "slack_notifications_enabled"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "attachments_roles", "menu_items", "slack_notifications_enabled"] } },
           ],
           responses: {
             "200": {
@@ -591,7 +619,7 @@ export function buildSwaggerSpec(req?: Request) {
           summary: "Update an app setting (admin only)",
           security: [{ [bearerScheme]: [] }],
           parameters: [
-            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "menu_items", "slack_notifications_enabled"] } },
+            { name: "key", in: "path", required: true, schema: { type: "string", enum: ["login_mode", "maintenance_message", "documents_link", "attachments_roles", "menu_items", "slack_notifications_enabled"] } },
           ],
           requestBody: {
             required: true,
@@ -2865,6 +2893,100 @@ export function buildSwaggerSpec(req?: Request) {
                 "application/json": { schema: { type: "array", items: { $ref: "#/components/schemas/ListDocumentRow" } } },
               },
             },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/attachments": {
+        get: {
+          tags: ["Submissions"],
+          summary: "List a submission's staff attachments (staff/admin)",
+          description:
+            "The files staff attached to this submission (docs/plans/staff-attachments.md). Returns the rows plus the server's own verdict on whether THIS caller may upload: `can_upload` resolves the form's `attachments_enabled` switch, its `attachments_roles` list, the Drive folder's reachability and the 10-file cap, so the client never re-derives the rule.\n\n" +
+            "A parent viewer never receives attachment data.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          responses: {
+            "200": {
+              description: "OK",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      attachments: { type: "array", items: { $ref: "#/components/schemas/SubmissionAttachment" } },
+                      can_upload: { type: "boolean" },
+                      enabled: { type: "boolean" },
+                      folder_valid: { type: "boolean" },
+                      max: { type: "integer" },
+                    },
+                  },
+                },
+              },
+            },
+            "403": { description: "Forbidden (another school, or no access to the form)" },
+            "404": { description: "Submission not found" },
+          },
+        },
+        post: {
+          tags: ["Submissions"],
+          summary: "Upload one attachment (staff/admin)",
+          description:
+            "The raw file bytes are the request body (`Content-Type` = the file's type) and the original name travels in the percent-encoded `X-File-Name` header. The server streams the body straight to Google Drive — nothing is buffered — and records a `submission_attachments` row on success.\n\n" +
+            "**This route is mounted ABOVE `express.json`** so the request stream is still readable; it applies its own auth, role, school and form guards.\n\n" +
+            "★ There is no size cap in the code, but Azure App Service cuts any request at **230 seconds**, so a very large file on a slow link fails with a 502/504 from the proxy. The client reports that as \"try a smaller file\".\n\n" +
+            "Refusals: `403` when the form's Enable Staff Attachments switch is off or the caller's role is not granted; `409` when the form has no Drive Folder ID, the folder is unreachable, or the submission already has 10 attachments.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "X-File-Name", in: "header", required: true, schema: { type: "string" }, description: "Percent-encoded original file name." },
+          ],
+          requestBody: {
+            required: true,
+            content: { "application/octet-stream": { schema: { type: "string", format: "binary" } } },
+          },
+          responses: {
+            "201": { description: "Created — the new attachment row" },
+            "400": { description: "No file was received" },
+            "403": { description: "Attachments are not enabled for this form, or not available for this role" },
+            "409": { description: "No Drive Folder ID, folder unreachable, or the 10-file cap is reached" },
+            "502": { description: "Google Drive rejected the upload" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/attachments/{id}": {
+        get: {
+          tags: ["Submissions"],
+          summary: "Open one attachment (staff/admin)",
+          description:
+            "Answers **302** with a `Location` pointing at the file in Google Drive, rather than proxying the bytes — with no size cap, streaming a video through the API would tie up an instance for the whole download.\n\n" +
+            "★ This is the only route that accepts the access token as a `?t=` query parameter, because a plain `<a href>` cannot send an `Authorization` header. The token is the same session credential, verified by the same function.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "id", in: "path", required: true, schema: { type: "integer" } },
+            { name: "t", in: "query", required: false, schema: { type: "string" }, description: "Access token, for link navigation only." },
+          ],
+          responses: {
+            "302": { description: "Redirect to the file in Google Drive" },
+            "404": { description: "Submission or attachment not found" },
+          },
+        },
+        delete: {
+          tags: ["Submissions"],
+          summary: "Remove one attachment (admin only)",
+          description:
+            "**Administrators only.** Removing an attachment deletes the only copy of a file someone supplied, and the uploader is not necessarily the right person to decide that later — so the role is fixed rather than derived from who attached it.\n\n" +
+            "The UI requires a confirmation drawer before calling this. Deletes the file from Google Drive FIRST, then the row, so a failure between the two leaves a file with no row (recoverable) rather than a row pointing at a deleted file. Answers `502` and changes nothing if Drive refuses.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "id", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": { description: "OK — the remaining attachments" },
+            "403": { description: "Not an administrator" },
+            "404": { description: "Submission or attachment not found" },
+            "502": { description: "Google Drive refused the delete; nothing was changed" },
           },
         },
       },

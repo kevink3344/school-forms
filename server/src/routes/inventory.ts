@@ -104,6 +104,15 @@ export const ROUTES: RouteEntry[] = [
   // DEFINITION (`form_fields`) and rewrites the same question on the form's other
   // submissions, so it is a form-design action rather than a queue action.
   { method: "post", path: "/api/submissions/{publicId}/adhoc/{fieldId}/promote", auth: "admin", tags: "Submissions" },
+  // Staff Attachments (docs/plans/staff-attachments.md). The POST is mounted
+  // ABOVE express.json (routes/attachments-upload.ts) because it streams the
+  // raw request body to Google; the other three live on the ordinary router.
+  { method: "get", path: "/api/submissions/{publicId}/attachments", auth: "staff", tags: "Submissions" },
+  { method: "post", path: "/api/submissions/{publicId}/attachments", auth: "staff", tags: "Submissions" },
+  { method: "get", path: "/api/submissions/{publicId}/attachments/{id}", auth: "staff", tags: "Submissions" },
+  // Admin-only, like every other route that destroys data: removing an
+  // attachment deletes the only copy of a file someone supplied.
+  { method: "delete", path: "/api/submissions/{publicId}/attachments/{id}", auth: "admin", tags: "Submissions" },
   { method: "get", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "post", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "put", path: "/api/users/{id}", auth: "admin", tags: "Users" },

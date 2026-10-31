@@ -33,6 +33,7 @@ import type {
   SchoolPage,
   UnmatchedSchoolName,
   SubmissionAnswer,
+  SubmissionAttachment,
   SubmissionDetail,
   SubmissionRow,
   SubmissionStatus,
@@ -762,6 +763,10 @@ export const api = {
       // Submission Detail Link: which answers make up the grid link's text, in
       // display order. `null` / `[]` clears the choice.
       link_field_ids?: number[] | null;
+      // Staff Attachments (docs/plans/staff-attachments.md). `attachments_roles`
+      // keeps its three states: `null` = unrestricted, `[]` = nobody.
+      attachments_enabled?: boolean;
+      attachments_roles?: string[] | null;
       fields: {
         id?: number;
         label: string;
@@ -918,6 +923,114 @@ export const api = {
 
   async getSubmission(publicId: string): Promise<SubmissionDetail> {
     return request<SubmissionDetail>(`/api/submissions/${publicId}`, { auth: true });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Staff Attachments (docs/plans/staff-attachments.md).
+  //
+  // The upload does NOT go through `request()`: that helper forces
+  // `Content-Type: application/json` and `JSON.stringify`s the body, which would
+  // base64 a video into a JSON string. The raw File is sent as the request body
+  // and the server streams it straight to Google, so nothing is buffered on
+  // either side.
+  // ---------------------------------------------------------------------------
+  async listAttachments(publicId: string): Promise<{
+    attachments: SubmissionAttachment[];
+    can_upload: boolean;
+    enabled: boolean;
+    folder_valid: boolean;
+    max: number;
+  }> {
+    return request(`/api/submissions/${publicId}/attachments`, { auth: true });
+  },
+
+  async deleteAttachment(publicId: string, attachmentId: number): Promise<SubmissionAttachment[]> {
+    return request<SubmissionAttachment[]>(
+      `/api/submissions/${publicId}/attachments/${attachmentId}`,
+      { method: "DELETE", auth: true }
+    );
+  },
+
+  /**
+   * A link that opens one attachment.
+   *
+   * The API answers with a 302 to Drive, but a plain <a href> cannot carry the
+   * Authorization header, so the access token travels as a single-use-purpose
+   * query parameter instead. It is the SAME token the session already holds —
+   * this is not a new credential, only a transport for it — and the server
+   * accepts it on this one route only.
+   */
+  attachmentUrl(publicId: string, attachmentId: number): string {
+    const token = getToken();
+    const base = `${API_BASE}/api/submissions/${encodeURIComponent(publicId)}/attachments/${attachmentId}`;
+    return token ? `${base}?t=${encodeURIComponent(token)}` : base;
+  },
+
+  /**
+   * Upload one file.
+   *
+   * `onProgress` receives 0..1. The 401 -> refresh -> replay path from
+   * `request()` is replicated here because a large upload can outlive the access
+   * token, and because XHR (unlike fetch) gives us upload progress.
+   */
+  async uploadAttachment(
+    publicId: string,
+    file: File,
+    onProgress?: (fraction: number) => void
+  ): Promise<SubmissionAttachment> {
+    const send = (token: string | null): Promise<SubmissionAttachment> =>
+      new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open("POST", `${API_BASE}/api/submissions/${publicId}/attachments`);
+        xhr.withCredentials = true;
+        if (token) xhr.setRequestHeader("Authorization", `Bearer ${token}`);
+        xhr.setRequestHeader("Content-Type", file.type || "application/octet-stream");
+        // Percent-encoded: non-ASCII names are legal and a raw header would be
+        // mangled by the browser.
+        xhr.setRequestHeader("X-File-Name", encodeURIComponent(file.name));
+        if (onProgress) {
+          xhr.upload.onprogress = (e) => {
+            if (e.lengthComputable && e.total > 0) onProgress(e.loaded / e.total);
+          };
+        }
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              resolve(JSON.parse(xhr.responseText) as SubmissionAttachment);
+            } catch {
+              reject(new ApiError(xhr.status, "The server returned an unreadable response."));
+            }
+            return;
+          }
+          let message = xhr.statusText || "Upload failed";
+          try {
+            const body = JSON.parse(xhr.responseText) as { error?: string };
+            if (body?.error) message = body.error;
+          } catch {
+            // keep the status text
+          }
+          reject(new ApiError(xhr.status, message));
+        };
+        xhr.onerror = () =>
+          reject(
+            new ApiError(
+              0,
+              "The upload did not finish. Very large files (long video or audio) can time out — try a smaller file or a faster connection."
+            )
+          );
+        xhr.send(file);
+      });
+
+    try {
+      return await send(getToken());
+    } catch (err) {
+      // One retry after a token refresh, exactly like `request()`.
+      if (err instanceof ApiError && err.status === 401) {
+        const fresh = await refreshAccessToken();
+        if (fresh) return send(fresh);
+      }
+      throw err;
+    }
   },
 
   // Archive / restore. Available to staff and school contacts as well as

@@ -192,6 +192,8 @@ formsRouter.post("/", requireAuth, requireRoles("admin"), async (req, res, next)
         organizationId,
         docFolderId: parsed.data.doc_folder_id?.trim() ?? null,
         googleFormUrl: parsed.data.google_form_url?.trim() || null,
+        attachmentsEnabled: parsed.data.attachments_enabled ?? false,
+        attachmentsRoles: parsed.data.attachments_roles ?? null,
       },
       parsed.data.fields
     );
@@ -273,6 +275,16 @@ formsRouter.put("/:id", requireAuth, requireRoles("admin"), async (req, res, nex
         ? { google_form_url: parsed.data.google_form_url?.trim() || null }
         : {}),
       ...(linkFieldIds !== undefined ? { link_field_ids: linkFieldIds } : {}),
+      // Staff Attachments (docs/plans/staff-attachments.md). Both are forwarded
+      // only when supplied, so an omitted key leaves the stored value alone.
+      // `attachments_roles` in particular must survive as `null` (unrestricted)
+      // rather than being coerced — see updateForm.
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "attachments_enabled")
+        ? { attachments_enabled: parsed.data.attachments_enabled }
+        : {}),
+      ...(Object.prototype.hasOwnProperty.call(parsed.data, "attachments_roles")
+        ? { attachments_roles: parsed.data.attachments_roles ?? null }
+        : {}),
     });
     if (!updated) {
       res.status(404).json({ error: "Form not found" });

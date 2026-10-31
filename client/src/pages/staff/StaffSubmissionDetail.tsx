@@ -10,6 +10,7 @@ import { PdfViewerDrawer } from "../../components/PdfViewer";
 // admin Submissions grid (which renders the same staff-only fields inline), so
 // there is exactly one type -> control mapping in the app.
 import { FieldValue, valuesToDraft } from "../../components/FieldValue";
+import { AttachmentsCard } from "../../components/AttachmentsCard";
 
 const STATUSES: SubmissionStatus[] = ["submitted", "in_review", "flagged", "completed"];
 
@@ -771,6 +772,45 @@ export default function StaffSubmissionDetail() {
         </div>
       </div>
 
+      {/* Staff Attachments (docs/plans/staff-attachments.md).
+          Sits directly below the Staff-only fields card, as the brief asks.
+          Visibility is the SERVER's verdict — `attachments_folder_valid` and
+          `attachments_can_upload` are resolved in getSubmissionDetail — so this
+          page never re-derives who may upload.
+
+          An admin still sees the card on a form where the feature is switched
+          off (or where their role is not in the list), read-only and with the
+          reason stated: otherwise there is no way to confirm what staff see
+          without a second account. Everyone else sees nothing at all. */}
+      {detail.attachments_folder_valid && (
+        <div style={{ marginTop: 18 }}>
+          <AttachmentsCard
+            publicId={detail.public_id}
+            initial={detail.attachments}
+            canUpload={detail.attachments_can_upload}
+            // Administrators only — the server refuses anyone else, so this is
+            // the courtesy half of the same rule.
+            canDelete={isAdmin}
+          />
+        </div>
+      )}
+      {isAdmin && !detail.attachments_folder_valid && detail.attachments_enabled && (        <div style={{ marginTop: 18 }}>
+          <div className="card">
+            <div className="card-head">
+              <h3>Attachments</h3>
+              <span className="sub">Staff Attachments are enabled but the Drive folder is unreachable</span>
+            </div>
+            <div className="card-body">
+              <div className="muted-note" style={{ marginLeft: 0 }}>
+                Check the form&rsquo;s <strong>Drive Folder ID</strong> in the form designer — the folder
+                must exist and be reachable by the app&rsquo;s Google account. Staff do not see this card
+                until it is.
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Right slide-out PDF preview */}
       {previewDoc && (
         <PdfViewerDrawer
@@ -869,7 +909,8 @@ export default function StaffSubmissionDetail() {
                 Its answers, any ad-hoc fields added to it, and its generated-document record all go
                 with it. The generated Google Doc file itself is <strong>not</strong> deleted — it
                 stays in the organization&rsquo;s Drive folder, and this app simply loses its link to
-                it.
+                it. Attached files are not deleted either — they stay in the organization&rsquo;s
+                Drive folder too.
               </p>
               {deleteError && (
                 <div className="alert-error" style={{ marginTop: 12 }}>

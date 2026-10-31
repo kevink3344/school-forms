@@ -175,11 +175,29 @@ export async function copyTemplate(
 }
 
 /** Strip characters Google Drive disallows in file names and collapse spaces. */
-function sanitizeFileName(name: string): string {
+export function sanitizeFileName(name: string): string {
   return name
     .replace(/[/\\"<>:|?*]/g, "")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** The OAuth client every Drive call in this app shares (OAuth2 + refresh token). */
+export function driveAuth() {
+  return getAuth();
+}
+
+/**
+ * The Drive parent folder generated documents AND staff attachments go to for a
+ * form: the form's own `doc_folder_id`, else the global `env.google.docFolderId`,
+ * else null (nothing configured).
+ *
+ * Exported so `google/drive-upload.ts` resolves the folder EXACTLY as the
+ * document generator does — attachments and generated documents for one form
+ * must never land in different places.
+ */
+export async function resolveFormFolderId(formId: number): Promise<string | null> {
+  return resolveParentFolderId(formId);
 }
 
 /**

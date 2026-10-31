@@ -20,9 +20,15 @@ import {
   getOrganizationBySlug,
 } from "../db/queries.js";
 import { filterColumnsForRole } from "../export/table.js";
-import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId } from "../auth.js";
+import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId, requireAuthOrQueryToken } from "../auth.js";
 import { canAccessForm } from "../access/formAccess.js";
 import { maybeGenerateDocument } from "../google/docs.js";
+import { deleteDriveFile, attachmentOpenUrl } from "../google/drive-upload.js";
+import {
+  listAttachmentsBySubmission,
+  deleteAttachmentRow,
+  MAX_SUBMISSION_ATTACHMENTS,
+} from "../db/attachments.js";
 import { sendSlackAlert } from "../notify/slack.js";
 import {
   createSubmissionSchema,
@@ -593,6 +599,127 @@ submissionsRouter.put("/:publicId/adhoc/:fieldId", requireAuth, requireRoles("st
       value: parsed.data.value ?? null,
     });
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/:publicId/attachments — the Attachments card list
+// (docs/plans/staff-attachments.md)
+//
+// Returns everything the card needs in one response: the rows, whether THIS
+// viewer may upload right now, whether the folder is reachable, and the cap —
+// so the client never re-derives the access rule and cannot disagree with the
+// API about who may upload.
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/:publicId/attachments", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    res.json({
+      attachments: submission.attachments,
+      can_upload: submission.attachments_can_upload,
+      enabled: submission.attachments_enabled,
+      folder_valid: submission.attachments_folder_valid,
+      max: MAX_SUBMISSION_ATTACHMENTS,
+    });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/:publicId/attachments/:id — open one file
+//
+// A 302 to Drive rather than proxying the bytes: with no size cap, streaming a
+// video through this process would tie up an instance for the whole download.
+//
+// ★ This is the ONE route that accepts the access token as `?t=` instead of the
+// Authorization header, because a plain <a href> cannot send a header. The token
+// is the same session credential, verified by the same function, and it is read
+// only here — no other route looks at the query string for identity.
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/:publicId/attachments/:id", requireAuthOrQueryToken, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    const attachmentId = Number(req.params.id);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
+      res.status(400).json({ error: "Invalid attachment id" });
+      return;
+    }
+    const row = submission.attachments.find((a) => Number(a.id) === attachmentId);
+    if (!row) {
+      res.status(404).json({ error: "Attachment not found on this submission" });
+      return;
+    }
+    res.redirect(302, attachmentOpenUrl(row.drive_file_id, row.web_view_link));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// ADMIN: DELETE /api/submissions/:publicId/attachments/:id — remove a file
+//
+// ★ ADMIN-ONLY, deliberately. Deleting an attachment destroys the only copy of
+// a document a parent or colleague supplied, and the uploader is not necessarily
+// the right person to decide that later (a queue worker who attached the wrong
+// scan on day one should not be able to erase it from the record months on).
+// The card hides the ✕ from everyone else; this is the control.
+//
+// ★ Drive FIRST, then the row. A failure between the two leaves a file with no
+// row (harmless, and recoverable by hand); the reverse order would leave a row
+// pointing at a file that is gone.
+// -----------------------------------------------------------------------------
+submissionsRouter.delete("/:publicId/attachments/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    const attachmentId = Number(req.params.id);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
+      res.status(400).json({ error: "Invalid attachment id" });
+      return;
+    }
+    const row = submission.attachments.find((a) => Number(a.id) === attachmentId);
+    if (!row) {
+      res.status(404).json({ error: "Attachment not found on this submission" });
+      return;
+    }
+    const deletedFromDrive = await deleteDriveFile(row.drive_file_id);
+    if (!deletedFromDrive) {
+      res.status(502).json({
+        error: "Could not remove the file from Google Drive. Nothing was changed; try again.",
+      });
+      return;
+    }
+    await deleteAttachmentRow(submission.id, attachmentId);
+    res.json(await listAttachmentsBySubmission(submission.id));
   } catch (err) {
     next(err);
   }

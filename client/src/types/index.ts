@@ -213,6 +213,7 @@ export type AppSettingKey =
   | "login_mode"
   | "maintenance_message"
   | "documents_link"
+  | "attachments_roles"
   | "menu_items"
   | "slack_notifications_enabled";
 
@@ -294,6 +295,15 @@ export interface Form {
   // `private` hides it from the organization's School Contacts unless they hold
   // an approved grant; administrators and staff are unaffected either way.
   visibility: FormVisibility;
+  // Staff Attachments (docs/plans/staff-attachments.md). The per-form switch,
+  // surfaced in the designer as "Enable Staff Attachments". FALSE for every form
+  // that predates the column, so the feature is opt-in per form.
+  attachments_enabled: boolean;
+  // Which roles may use the Attachments card once it is enabled. Same contract
+  // as FormField.roles: `null` = unrestricted (every role, including ones
+  // created later), `[]` = nobody, `[...]` = exactly those. Admins are always
+  // allowed regardless of this list.
+  attachments_roles: string[] | null;
   // Which answers make up the submission-grid link TEXT, in display order
   // (docs/plans/submission-link-label.md). `null` means "not configured" — the
   // grid then shows the first non-staff-only answer, exactly as it always did.
@@ -540,6 +550,21 @@ export interface SchoolMatchNote {
   matched_by_name: string | null;
 }
 
+// A file uploaded from a submission's Attachments card
+// (docs/plans/staff-attachments.md). The bytes live in Google Drive.
+export interface SubmissionAttachment {
+  id: number;
+  submission_id: number;
+  drive_file_id: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  web_view_link: string | null;
+  uploaded_by: number | null;
+  uploaded_by_name: string | null;
+  uploaded_at: string;
+}
+
 export interface SubmissionDetail extends Submission {
   form_name: string;
   student_name: string | null;
@@ -554,6 +579,13 @@ export interface SubmissionDetail extends Submission {
   parentFields: FormField[];
   // Generated Google Docs for this submission (idempotent: at most one active).
   documents: DocumentRow[];
+  // Staff Attachments (docs/plans/staff-attachments.md). Always empty for a
+  // parent viewer. The three flags are the server's verdict — the card renders
+  // from them rather than re-deriving the access rule.
+  attachments: SubmissionAttachment[];
+  attachments_enabled: boolean;
+  attachments_can_upload: boolean;
+  attachments_folder_valid: boolean;
   // "Matched with <school> by <admin>" — see SchoolMatchNote. Absent/null when the
   // spelling had no alias, and never present for a parent viewer.
   school_match?: SchoolMatchNote | null;

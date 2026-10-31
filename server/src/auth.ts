@@ -154,8 +154,52 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
   }
 }
 
-// Named-role guard. Kept for the routes whose membership genuinely is a fixed
-// set — `admin` is not a capability (it is the `is_admin` flag), and the public
+// -----------------------------------------------------------------------------
+// Token from the Authorization header OR a `?t=` query parameter.
+//
+// Exists for exactly one route: opening an attachment, which the browser fetches
+// from a plain <a href> that cannot carry a header. It is NOT a general-purpose
+// auth mode — a query token leaks into history, logs and Referer headers, so it
+// is accepted only where a link must work, and the token itself is the same
+// short-lived access token the session already holds (verified by the same
+// function, with the same organization check as requireAuth).
+//
+// The role guard is applied by the route afterwards, so this only establishes
+// WHO is calling.
+// -----------------------------------------------------------------------------
+export function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): void {
+  const header = req.headers.authorization;
+  if (header && header.startsWith("Bearer ")) {
+    requireAuth(req, res, next);
+    return;
+  }
+  const queryToken = typeof req.query.t === "string" ? req.query.t : "";
+  if (!queryToken) {
+    res.status(401).json({ error: "Missing bearer token" });
+    return;
+  }
+  try {
+    const payload = verifyAccessToken(queryToken);
+    const orgClaim = payload.organization_id;
+    const orgId = orgClaim === null || orgClaim === undefined ? NaN : Number(orgClaim);
+    if (!Number.isFinite(orgId) || orgId <= 0) {
+      res.status(401).json({ error: "Session is missing an organization. Sign in again." });
+      return;
+    }
+    req.user = {
+      id: payload.sub,
+      email: payload.email,
+      role: payload.role,
+      school_id: payload.school_id,
+      organization_id: orgClaim,
+    };
+    next();
+  } catch {
+    res.status(401).json({ error: "Invalid or expired token" });
+  }
+}
+
+// Named-role guard. Kept for the routes whose membership genuinely is a fixed// set — `admin` is not a capability (it is the `is_admin` flag), and the public
 // self-registration route hard-codes its own list.
 //
 // ⚠ Do NOT reach for this to gate a new feature. A list of role keys is a

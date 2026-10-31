@@ -68,6 +68,10 @@ export const BOOLEAN_COLUMNS: ReadonlySet<string> = new Set([
   "school_scoped",
   "is_admin",
   "built_in",
+  // Added with forms.attachments_enabled (docs/plans/staff-attachments.md).
+  // Declared BOOLEAN in the Turso DDL; this entry is the fallback that stops a
+  // libSQL row serving `0` where every TypeScript signature says `boolean`.
+  "attachments_enabled",
 ]);
 
 // -----------------------------------------------------------------------------
@@ -105,6 +109,10 @@ export const TIMESTAMP_COLUMNS: ReadonlySet<string> = new Set([
   // `Date` on one engine and a string on the other.
   "requested_at",
   "decided_at",
+  // Added with dbo.submission_attachments (docs/plans/staff-attachments.md).
+  // DATETIME2 on SQL Server, TEXT on Turso — listed here so both engines serve
+  // the same shape.
+  "uploaded_at",
 ]);
 
 /**

@@ -2,11 +2,13 @@ import { getClient, getDbKind } from "./pool.js";
 import { getDialect } from "./dialect/index.js";
 import { SCHOOL_FIELD_LABELS, notArchived, archivedOnly } from "./dialect/shared.js";
 import { planSubmissionFields, normalizeItemId, adhocRowsMatchingLabel, type IncomingAnswer } from "../webhook/field-mapping.js";
-import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES, normalizeSchoolKey } from "./schema.js";
+import { formatSubmissionPublicId, fieldAccessRoles, canSeeField, canUseAttachments, schoolYearForDate, messageAudienceRoles, COLLECTION_FIELD_TYPES, normalizeSchoolKey } from "./schema.js";
 import type { FormVisibility, SchoolAlias } from "./schema.js";
 import { findAliasedSchoolId, invalidateSchoolAliasCache } from "./school-alias-cache.js";
 import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
 import { listDocumentsBySubmission } from "./documents.js";
+import { listAttachmentsBySubmission, MAX_SUBMISSION_ATTACHMENTS } from "./attachments.js";
+import { validateDriveFolder } from "../google/docs.js";
 import { env } from "../config/env.js";
 import type {
   School,
@@ -21,6 +23,7 @@ import type {
   RoleRow,
   Organization,
   ListDocumentRow,
+  SubmissionAttachment,
   SystemMessage,
 } from "./schema.js";
 
@@ -1044,6 +1047,12 @@ export interface RoleUsage {
   system_messages: number;
   menu_items: number;
   documents_link: number;
+  // Staff Attachments (docs/plans/staff-attachments.md). Both are JSON role
+  // arrays with no foreign key, so both must be censused or deleting a role and
+  // recreating it "to fix a label" would silently restore a grant an admin had
+  // taken away.
+  form_attachments: number;
+  attachments_roles: number;
 }
 
 /** Total references, i.e. whether the role may be deleted at all. */
@@ -1053,7 +1062,9 @@ export function roleUsageTotal(usage: RoleUsage): number {
     usage.form_fields +
     usage.system_messages +
     usage.menu_items +
-    usage.documents_link
+    usage.documents_link +
+    usage.form_attachments +
+    usage.attachments_roles
   );
 }
 
@@ -1111,6 +1122,15 @@ export async function roleUsage(roleKey: string): Promise<RoleUsage> {
 
   const menuRaw = await getSetting("menu_items");
   const documentsRaw = await getSetting("documents_link");
+  const attachmentsRolesRaw = await getSetting("attachments_roles");
+
+  // Staff Attachments — the per-form role list. Same JSON-array-in-a-column
+  // shape as `form_fields.roles`, so it uses the same LIKE census.
+  const attachmentRows = await execute<{ n: unknown }>(
+    `SELECT COUNT(*) AS n FROM dbo.forms
+      WHERE attachments_roles IS NOT NULL AND attachments_roles LIKE @pattern ESCAPE '\\'`,
+    params
+  );
 
   return {
     users: countOf(userRows, "users.role"),
@@ -1118,6 +1138,8 @@ export async function roleUsage(roleKey: string): Promise<RoleUsage> {
     system_messages: countOf(messageRows, "system_messages.audience"),
     menu_items: countJsonReferences(menuRaw, roleKey, "object"),
     documents_link: countJsonReferences(documentsRaw, roleKey, "array"),
+    form_attachments: countOf(attachmentRows, "forms.attachments_roles"),
+    attachments_roles: countJsonReferences(attachmentsRolesRaw, roleKey, "array"),
   };
 }
 
@@ -1200,6 +1222,7 @@ export async function listForms(
     `SELECT f.id, f.title, f.description, f.school_id, f.designer_id, f.organization_id,
             f.status, f.pre_archive_status, f.view_columns, f.code, f.submission_seq,
             f.doc_folder_id, f.google_form_url, f.visibility, f.link_field_ids,
+            f.attachments_enabled, f.attachments_roles,
             f.created_at, f.updated_at,
             (SELECT COUNT(*) FROM dbo.submissions s WHERE s.form_id = f.id) AS submission_count
      FROM dbo.forms f ${where} ORDER BY f.updated_at DESC`,
@@ -1284,7 +1307,9 @@ export async function getForm(id: number, organizationId?: number | null): Promi
   const rows = await execute<Form>(
     `SELECT id, title, description, school_id, designer_id, organization_id, status,
             pre_archive_status, view_columns, code, submission_seq, doc_folder_id,
-            google_form_url, visibility, link_field_ids, created_at, updated_at
+            google_form_url, visibility, link_field_ids,
+            attachments_enabled, attachments_roles,
+            created_at, updated_at
      FROM dbo.forms WHERE ${clauses.join(" AND ")}`,
     params
   );
@@ -1432,12 +1457,18 @@ export function parseLinkFieldIds(raw: number[] | string | null | undefined): nu
 }
 
 /** Apply the `link_field_ids` parse to one form row. */
-function parseFormRow<T extends { link_field_ids?: number[] | string | null }>(row: T): T {
-  return { ...row, link_field_ids: parseLinkFieldIds(row.link_field_ids) };
+function parseFormRow<T extends { link_field_ids?: number[] | string | null; attachments_roles?: string[] | string | null }>(row: T): T {
+  return {
+    ...row,
+    link_field_ids: parseLinkFieldIds(row.link_field_ids),
+    // Same JSON-array contract as `form_fields.roles`; `parseFormFieldRoles`
+    // keeps the three states distinct (null = unrestricted, [] = nobody).
+    attachments_roles: parseFormFieldRoles(row.attachments_roles),
+  };
 }
 
 /** Apply the `link_field_ids` parse to every form row. */
-function parseFormRowList<T extends { link_field_ids?: number[] | string | null }>(rows: T[]): T[] {
+function parseFormRowList<T extends { link_field_ids?: number[] | string | null; attachments_roles?: string[] | string | null }>(rows: T[]): T[] {
   return rows.map(parseFormRow);
 }
 
@@ -1532,6 +1563,8 @@ export async function createForm(
     googleFormUrl,
     visibility,
     linkFieldIds,
+    attachmentsEnabled,
+    attachmentsRoles,
   }: {
     title: string;
     description: string | null;
@@ -1548,6 +1581,10 @@ export async function createForm(
     // Omitted -> NULL, which is the "not configured" state and keeps the legacy
     // first-non-staff-answer behaviour.
     linkFieldIds?: number[] | null;
+    // Staff Attachments (docs/plans/staff-attachments.md). Omitted -> OFF and
+    // unrestricted, which is what every form created before the feature has.
+    attachmentsEnabled?: boolean;
+    attachmentsRoles?: string[] | null;
   },
   fields: {
     label: string;
@@ -1580,6 +1617,8 @@ export async function createForm(
         "google_form_url",
         "visibility",
         "link_field_ids",
+        "attachments_enabled",
+        "attachments_roles",
       ],
       returning: [
         "id",
@@ -1595,13 +1634,15 @@ export async function createForm(
         "google_form_url",
         "visibility",
         "link_field_ids",
+        "attachments_enabled",
+        "attachments_roles",
         "created_at",
         "updated_at",
       ],
       values:
-        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl, @visibility, @linkFieldIds",
+        "@title, @description, @schoolId, @designerId, @organizationId, 'draft', @code, 0, @docFolderId, @googleFormUrl, @visibility, @linkFieldIds, @attachmentsEnabled, @attachmentsRoles",
     }),
-    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null, visibility: visibility ?? "public", linkFieldIds: serializeLinkFieldIds(linkFieldIds) }
+    { title, description, schoolId: schoolId ?? null, designerId: designerId ?? null, organizationId, code, docFolderId: docFolderId ?? null, googleFormUrl: googleFormUrl ?? null, visibility: visibility ?? "public", linkFieldIds: serializeLinkFieldIds(linkFieldIds), attachmentsEnabled: attachmentsEnabled ?? false, attachmentsRoles: attachmentsRoles ? JSON.stringify(attachmentsRoles) : null }
   );
   const form = forms[0];
   for (const f of fields) {
@@ -1636,6 +1677,8 @@ export async function updateForm(
     doc_folder_id?: string | null;
     google_form_url?: string | null;
     link_field_ids?: number[] | null;
+    attachments_enabled?: boolean;
+    attachments_roles?: string[] | null;
     fields?: {
       id?: number;
       label: string;
@@ -1689,12 +1732,30 @@ export async function updateForm(
   const linkFieldIds = Object.prototype.hasOwnProperty.call(data, "link_field_ids")
     ? data.link_field_ids
     : existing.link_field_ids;
+  // Staff Attachments (docs/plans/staff-attachments.md).
+  //
+  // The boolean follows the plain `??` rule: an absent key leaves the switch as
+  // it was, and `false` is a real value that must survive (so `??` — not `||`).
+  const attachmentsEnabled = data.attachments_enabled ?? existing.attachments_enabled;
+  // The role list uses the null-vs-absent rule, like `doc_folder_id`: an explicit
+  // `null` means UNRESTRICTED and must be written, an absent key leaves whatever
+  // the admin chose. `??` would conflate the two and silently re-grant everyone.
+  //
+  // ★ Turning the switch OFF deliberately does NOT clear this. The two controls
+  // answer different questions ("whether" and "who"), and clearing the list here
+  // would make switching the feature back on grant it to every role instead of
+  // restoring the admin's earlier choice.
+  const attachmentsRoles = Object.prototype.hasOwnProperty.call(data, "attachments_roles")
+    ? data.attachments_roles
+    : existing.attachments_roles;
 
   await execute(
     `UPDATE dbo.forms SET title=@title, description=@description, status=@status,
             pre_archive_status=@preArchiveStatus, code=@code,
             doc_folder_id=@docFolderId, google_form_url=@googleFormUrl,
             link_field_ids=@linkFieldIds,
+            attachments_enabled=@attachmentsEnabled,
+            attachments_roles=@attachmentsRoles,
             updated_at=SYSUTCDATETIME() WHERE id=@id`,
     {
       id: formId,
@@ -1706,6 +1767,10 @@ export async function updateForm(
       docFolderId: docFolderId ?? null,
       googleFormUrl: googleFormUrl ?? null,
       linkFieldIds: serializeLinkFieldIds(linkFieldIds),
+      attachmentsEnabled,
+      // An explicit [] ("granted to nobody") is stored as '[]' and must not
+      // collapse to NULL, which would mean "unrestricted".
+      attachmentsRoles: attachmentsRoles ? JSON.stringify(attachmentsRoles) : null,
     }
   );
 
@@ -1884,6 +1949,20 @@ export interface SubmissionDetail extends SubmissionRow {
   parentFields: FormField[];
   // Generated Google documents for this submission (detail-card audit line).
   documents: ListDocumentRow[];
+  // Files staff attached to this submission (docs/plans/staff-attachments.md).
+  // Empty for a parent viewer — the bytes live in Drive and are internal.
+  attachments: SubmissionAttachment[];
+  // The form's "Enable Staff Attachments" switch, sent separately from
+  // `attachments_can_upload` so an admin can be shown a read-only "turned off"
+  // card without the client re-deriving the rule.
+  attachments_enabled: boolean;
+  // Whether THIS viewer may upload right now: resolves the switch + role list +
+  // the folder's reachability + the 10-file cap, server-side, so the client
+  // cannot disagree with the API about who may upload.
+  attachments_can_upload: boolean;
+  // Whether the form's Drive folder is reachable. FALSE hides the card: a card
+  // that can never upload reads as broken rather than as misconfigured.
+  attachments_folder_valid: boolean;
   // "Matched with <school> by <admin>" — see SchoolMatchNote. NULL for a parent
   // viewer, and for any submission whose declared spelling had no alias.
   school_match: SchoolMatchNote | null;
@@ -2302,6 +2381,26 @@ export async function getSubmissionDetail(
   // member without access) never receives out-of-view answers.
   const visibleValues = values.filter((v) => visibleFieldIds.has(v.field_id));
   const documents = await listDocumentsBySubmission(submission.id);
+  // Staff Attachments (docs/plans/staff-attachments.md). A parent never
+  // receives them — the files are internal working material and the bytes live
+  // in the organization's Drive.
+  //
+  // The three flags are resolved HERE, once, so the detail page renders from a
+  // single server verdict rather than re-deriving the rule in the client. The
+  // folder's reachability is a live Drive call; it is only made when the viewer
+  // could actually use the card, so a parent or an ungranted role costs nothing.
+  const form = await getForm(submission.form_id);
+  const attachments = viewer === "parent" ? [] : await listAttachmentsBySubmission(submission.id);
+  const attachmentsEnabled = viewer === "parent" ? false : (form?.attachments_enabled ?? false);
+  const roleAllowed = viewer === "parent" ? false : !!form && canUseAttachments(form, viewer);
+  const folderValid =
+    !!form?.doc_folder_id?.trim() && roleAllowed
+      ? (await validateDriveFolder(form.doc_folder_id)).valid
+      : false;
+  const attachmentsCanUpload =
+    roleAllowed &&
+    folderValid &&
+    attachments.length < MAX_SUBMISSION_ATTACHMENTS;
   // "Matched with <school> by <admin>": the answer itself is never rewritten —
   // it is the parent's own words — so the attribution lives here instead. Parents
   // do not receive it (it is internal routing plus a colleague's name).
@@ -2316,6 +2415,10 @@ export async function getSubmissionDetail(
     staffOnlyFields,
     parentFields,
     documents,
+    attachments,
+    attachments_enabled: attachmentsEnabled,
+    attachments_can_upload: attachmentsCanUpload,
+    attachments_folder_valid: folderValid,
     school_match: schoolMatch,
   };
 }
@@ -2771,7 +2874,7 @@ export async function restoreSubmission(id: number): Promise<boolean> {
 // genuinely means "nothing was deleted". Without the rollback, that same race
 // would leave a restored submission standing with its answers and document rows
 // gone, which is the half-deletion this ordering exists to make impossible.
-const SUBMISSION_CHILD_TABLES = ["submission_values", "submission_adhoc_fields", "documents"] as const;
+const SUBMISSION_CHILD_TABLES = ["submission_values", "submission_adhoc_fields", "documents", "submission_attachments"] as const;
 
 /** Internal signal: the parent delete matched nothing, so unwind the children. */
 const NOT_ARCHIVED = new Error("submission is not archived");

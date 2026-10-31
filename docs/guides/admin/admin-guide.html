@@ -49,7 +49,7 @@
         <li>Adding fields <span class="fig-ref">— Figure 8</span></li>
         <li>Staff-only fields and access <span class="fig-ref">— Figure 9</span></li>
         <li>Visibility: public and private <span class="fig-ref">— Figure 10</span></li>
-        <li>Publishing and the public link <span class="fig-ref">— Figure 11</span></li>
+        <li>Staff attachments <span class="fig-ref">— the Attachments card</span></li>
       </ol>
     </li>
     <li>Access requests <span class="fig-ref">— Figure 12</span></li>
@@ -428,23 +428,42 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
   </figcaption>
 </figure>
 
-<h2>3.7 Publishing and the public link</h2>
+<h2>3.7 Staff attachments</h2>
 
-<figure class="shot">
-  <div class="shot-frame">
-    <img src="images/A11-public-link.png" alt="The Public link card with the parent-facing URL and a copy button">
-    <span class="pin" style="--x:5.8%;--y:87.8%">1</span>
-  </div>
-  <figcaption>
-    <span class="fig-label">Figure 11 — The public link.</span>
-    <ol>
-      <li>The <strong>Public link</strong> card, which appears at the bottom of the designer once
-          the form is published. It holds the address to share with parents —
-          <code>/org/{organization}/forms/{form-id}</code> — and a button to copy it. No sign-in is
-          required to use the link.</li>
-    </ol>
-  </figcaption>
-</figure>
+<div class="callout">
+  <span class="callout-title">The Attachments card</span>
+  <p>At the bottom of the designer is an <strong>Attachments</strong> card. It replaces the old
+     <em>Public link</em> card, which is no longer shown.</p>
+  <ol>
+    <li><strong>Enable Staff Attachments</strong> — the switch that turns the feature on for this
+        form. It is <strong>off for every form</strong> until you turn it on, and it stays disabled
+        until the form has a <strong>Drive Folder ID</strong>.</li>
+    <li><strong>Access</strong> — one button per role. A filled button (<strong>✓ Staff</strong>)
+        means that role can add and see files on a submission; an outlined one
+        (<strong>+ Staff</strong>) means it cannot. Administrators always can. Turning the switch
+        off does <em>not</em> clear these choices, so switching it back on restores them.</li>
+  </ol>
+  <p class="fig-note">Files are saved to the form&rsquo;s Drive folder under
+     <code>Attachments/&lt;submission id&gt;/</code>, named <code>&lt;submission id&gt; - &lt;file name&gt;</code>.
+     Up to <strong>10 files per submission</strong>, of any type. There is no size limit in the app,
+     but very large files (long video or audio) can fail on a slow connection — the page says so
+     when it happens.</p>
+</div>
+
+<div class="callout tip">
+  <span class="callout-title">Where staff see it</span>
+  <p>On a submission, the <strong>Attachments</strong> card sits directly below the
+     <strong>Staff-only fields</strong> card. Staff click <strong>+ Attachment</strong> to upload and
+     the files are listed underneath. An administrator or the person who uploaded a file can remove
+     it. Deleting the submission removes the record but leaves the files in Drive.</p>
+</div>
+
+<div class="callout">
+  <span class="callout-title">Settings → Attachments</span>
+  <p>Settings has an <strong>Attachments</strong> panel that sets the <em>default</em> roles for every
+     form. A form&rsquo;s own Access row overrides it. The panel does not turn the feature on — each
+     form still needs its <strong>Enable Staff Attachments</strong> switch.</p>
+</div>
 
 <div class="callout warning">
   <span class="callout-title">Unpublishing keeps existing submissions</span>

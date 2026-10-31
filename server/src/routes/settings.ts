@@ -9,6 +9,13 @@ export const settingsRouter = Router();
 
 export const DOCUMENTS_LINK_KEY = "documents_link";
 
+// Staff Attachments — the GLOBAL default for which roles may use a form's
+// Attachments card (docs/plans/staff-attachments.md §7). A JSON role array with
+// the same three states as `documents_link`: `null` = unrestricted, `[]` =
+// nobody, `[...]` = exactly those. A form's own `forms.attachments_roles`
+// overrides it; this row is what an untouched form falls back to.
+export const ATTACHMENTS_ROLES_KEY = "attachments_roles";
+
 // Menu visibility — which sidebar items are shown, by role. Stored as a JSON
 // object of `{ [menuKey]: string[] | null }`, e.g. `{"forms":["admin","staff"]}`.
 // A missing key (or a null/blank setting, or an explicit null) means "visible to
@@ -38,6 +45,7 @@ export const ALLOWED_SETTING_KEYS = new Set([
   "login_mode",
   "maintenance_message",
   DOCUMENTS_LINK_KEY,
+  ATTACHMENTS_ROLES_KEY,
   MENU_ITEMS_KEY,
   SLACK_ENABLED_KEY,
 ]);
@@ -68,6 +76,13 @@ function defaultValue(key: string): string {
   if (key === MENU_ITEMS_KEY) {
     // Every menu item visible to everyone by default (null = unrestricted).
     return JSON.stringify(defaultMenuItems());
+  }
+  if (key === ATTACHMENTS_ROLES_KEY) {
+    // NULL means UNRESTRICTED, the same sentinel `documents_link` uses. The
+    // per-form "Enable Staff Attachments" toggle is the real gate; this only
+    // decides who, and unrestricted is the least surprising default for a form
+    // an admin has just switched on.
+    return JSON.stringify(null);
   }
   if (key === SLACK_ENABLED_KEY) {
     // ON by default, so an installation created before this switch existed keeps
@@ -157,6 +172,18 @@ export function parseDocumentRoles(raw: string | null | undefined): string[] | n
 // Decide whether a given role currently sees the Documents link.
 export function documentsEnabledFor(raw: string | null | undefined, role: string): boolean {
   const allowed = parseDocumentRoles(raw);
+  return allowed === null || allowed.includes(role);
+}
+
+// Staff Attachments — the GLOBAL default for which roles may use the card.
+// The same three-state contract as `documents_link`, so it reuses the parser
+// rather than growing a second, subtly different one.
+export function parseAttachmentRoles(raw: string | null | undefined): string[] | null {
+  return parseDocumentRoles(raw);
+}
+
+export function attachmentsEnabledFor(raw: string | null | undefined, role: string): boolean {
+  const allowed = parseAttachmentRoles(raw);
   return allowed === null || allowed.includes(role);
 }
 
@@ -251,11 +278,12 @@ settingsRouter.put("/:key", requireAuth, requireRoles("admin"), async (req, res,
     }
 
     let effective = value.trim();
-    if (key === DOCUMENTS_LINK_KEY) {
+    if (key === DOCUMENTS_LINK_KEY || key === ATTACHMENTS_ROLES_KEY) {
       // Two accepted shapes:
       //   `null`            → UNRESTRICTED (every role, including future ones)
       //   ["admin","staff"] → exactly those roles
       // An empty array is a third, distinct meaning: hidden for everyone.
+      // Both settings share this contract, so they share this validation.
       let roles: unknown;
       try {
         roles = JSON.parse(effective);

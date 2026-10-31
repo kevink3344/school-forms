@@ -488,7 +488,7 @@ describe("archive visibility — schema", () => {
 
 describe("archive visibility — the permanent delete's child set", () => {
   // `deleteSubmission` cannot lean on ON DELETE CASCADE, and that is a
-  // measurement rather than a preference. schema.ts declares all three child
+  // measurement rather than a preference. schema.ts declares all four child
   // foreign keys CASCADE, but the LIVE Azure database was created by an earlier
   // revision of that DDL whose constraints carry different names and NO ACTION —
   // and every CREATE TABLE here is guarded by `IF OBJECT_ID(…) IS NULL`, so
@@ -526,8 +526,17 @@ describe("archive visibility — the permanent delete's child set", () => {
     return out.sort();
   }
 
-  it("reads the same three children out of both dialects' DDL", () => {
-    const expected = ["documents", "submission_adhoc_fields", "submission_values"];
+  it("reads the same four children out of both dialects' DDL", () => {
+    // `submission_attachments` joined this set with Staff Attachments
+    // (docs/plans/staff-attachments.md): deleting a submission removes its
+    // attachment ROWS, while the Drive files themselves are deliberately kept
+    // (the same rule as generated documents).
+    const expected = [
+      "documents",
+      "submission_adhoc_fields",
+      "submission_attachments",
+      "submission_values",
+    ];
     expect(
       childrenOfSubmissions(DDL_SQL),
       "CONTROL: the parser must find foreign keys at all. If this fails, every assertion below " +

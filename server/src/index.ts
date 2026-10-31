@@ -23,6 +23,7 @@ import { documentsRouter } from "./routes/documents.js";
 import { systemMessagesRouter } from "./routes/systemMessages.js";
 import { formAccessRouter } from "./routes/formAccess.js";
 import { rolesRouter } from "./routes/roles.js";
+import { attachmentsUploadRouter } from "./routes/attachments-upload.js";
 import { healthRouter, infoHandler } from "./routes/health.js";
 import { settingsRouter } from "./routes/settings.js";
 import { buildSwaggerSpec } from "./swagger.js";
@@ -44,6 +45,19 @@ app.use(
     credentials: true,
   })
 );
+// -----------------------------------------------------------------------------
+// Staff Attachments upload (docs/plans/staff-attachments.md §5.1).
+//
+// ★ MOUNTED ABOVE `express.json` DELIBERATELY. That parser is global and runs
+// before every router, so a route mounted after it never sees the request
+// stream — it would have already been consumed (or rejected at its 2 MB limit).
+// This router handles exactly `POST /api/submissions/:publicId/attachments`,
+// applies its own auth/role/school/form guards, and hands `req` straight to
+// Google as the upload body so nothing is buffered. Every other request falls
+// through to the ordinary router below.
+// -----------------------------------------------------------------------------
+app.use("/api/submissions", attachmentsUploadRouter);
+
 // `verify` stashes the verbatim body for the webhook path only, so a failed
 // intake can be replayed later (docs/plans/webhook-log.md). `JSON.stringify(req.body)`
 // cannot stand in for it: it loses key order and whitespace, drops fields that

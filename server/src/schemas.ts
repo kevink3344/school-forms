@@ -299,6 +299,10 @@ export const createFormSchema = z.object({
   school_id: z.number().int().positive().optional().nullable(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
+  // Staff Attachments (docs/plans/staff-attachments.md). Omitted -> OFF and
+  // unrestricted, which is what every form created before the feature has.
+  attachments_enabled: z.boolean().optional(),
+  attachments_roles: z.array(z.string().max(64)).nullable().optional(),
   // A form may be created already private. That is allowed and grants NOBODY:
   // there is no account that "currently sees it", because it did not exist a
   // moment ago (docs/plans/public-private-forms.md §6.4). Omitted -> 'public'.
@@ -324,6 +328,11 @@ export const updateFormSchema = z.object({
   code: formCodeSchema.optional(),
   doc_folder_id: z.string().max(255).optional().nullable(),
   google_form_url: z.string().max(1000).optional().nullable(),
+  // Staff Attachments (docs/plans/staff-attachments.md). `attachments_roles`
+  // keeps the three states distinct: `null` = unrestricted, `[]` = nobody,
+  // `[...]` = exactly those. The route preserves whichever is sent.
+  attachments_enabled: z.boolean().optional(),
+  attachments_roles: z.array(z.string().max(64)).nullable().optional(),
   // Which answers make up the submission-grid link text, in display order
   // (docs/plans/submission-link-label.md). `null` / `[]` clears the choice and
   // restores the legacy first-non-staff-answer label. The route additionally

@@ -314,6 +314,20 @@ export interface Form {
   // subquery) so the admin Forms list can gate the Delete action. A form with any
   // submissions is NOT deletable (submissions.form_id cascades on delete).
   submission_count?: number;
+  // Staff Attachments (docs/plans/staff-attachments.md). The per-form master
+  // switch, surfaced in the designer as "Enable Staff Attachments". FALSE for
+  // every form that predates the column (`DEFAULT 0`), so the feature is opt-in
+  // per form and shipping it changes nothing for anyone.
+  attachments_enabled: boolean;
+  // Which roles may use the Attachments card once it is enabled. Same JSON
+  // array contract as `FormField.roles`: NULL = UNRESTRICTED (every role,
+  // including ones created later), [] = granted to nobody, [...] = exactly
+  // those. Admins are always allowed regardless (see canUseAttachments).
+  //
+  // ★ Meaningless while `attachments_enabled` is false — but deliberately NOT
+  // cleared when the switch is turned off, so switching it back on restores the
+  // previous grant instead of silently granting everyone.
+  attachments_roles: string[] | null;
 }
 
 export interface FormField {
@@ -390,6 +404,31 @@ export function toFieldAccessRoles(
   field: Pick<FormField, "staff_only" | "roles">
 ): string[] | null {
   return fieldAccessRoles(field);
+}
+
+// Whether a role may USE a form's Attachments card
+// (docs/plans/staff-attachments.md §3.2).
+//
+// ★ The per-form toggle is checked FIRST, before the role list. A form with
+// attachments switched off must refuse every non-admin even if it still carries
+// a role grant from when it was on — and answering "not available for your role"
+// on a form where the feature is simply off sends the admin to the wrong control.
+//
+// Admins are superusers, matching canSeeField above: hiding the card from an
+// admin would leave nobody able to diagnose an attachment problem. The caller
+// decides whether an admin sees a read-only "turned off" card (the detail page
+// does) or nothing at all.
+//
+// This answers "who", not "where": the Drive folder's reachability is a live
+// Google call and is checked by the route, not here.
+export function canUseAttachments(
+  form: Pick<Form, "attachments_enabled" | "attachments_roles">,
+  viewer: string
+): boolean {
+  if (viewer === "admin") return true;
+  if (!form.attachments_enabled) return false;
+  const allowed = form.attachments_roles;
+  return allowed === null || allowed === undefined || allowed.includes(viewer);
 }
 
 export interface Submission {
@@ -471,6 +510,27 @@ export interface ListDocumentRow extends Document {
   student_name: string | null;
   course_title: string | null;
   phase1_result: string | null;
+}
+
+// A file uploaded from a submission's Attachments card
+// (docs/plans/staff-attachments.md). The bytes live in Google Drive; this row is
+// the app's link to them.
+//
+// `size_bytes` arrives from the driver as a STRING (SQL numeric columns are
+// served that way — see the note in queries.ts resolveSubmissionSchoolId), so
+// db/attachments.ts converts it to a number on read.
+export interface SubmissionAttachment {
+  id: number;
+  submission_id: number;
+  drive_file_id: string;
+  file_name: string;
+  mime_type: string | null;
+  size_bytes: number | null;
+  web_view_link: string | null;
+  uploaded_by: number | null;
+  // Joined for display: who attached it. NULL once that account is deleted.
+  uploaded_by_name: string | null;
+  uploaded_at: Date;
 }
 
 // -----------------------------------------------------------------------------
@@ -1984,6 +2044,58 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // share the batch with the ALTER that adds it).
   `IF COL_LENGTH('dbo.submissions', 'declared_school_name') IS NULL
      ALTER TABLE dbo.submissions ADD declared_school_name NVARCHAR(200) NULL;`,
+
+  // ---------------------------------------------------------------------
+  // Staff Attachments (docs/plans/staff-attachments.md)
+  //
+  // The per-form master switch. `DEFAULT 0` is the whole deploy story: every
+  // existing form, and every form created without touching the switch, has
+  // attachments OFF, so shipping the feature changes nothing until an admin
+  // deliberately turns it on for a specific form. Same reasoning as
+  // `forms.visibility DEFAULT 'public'`.
+  //
+  // Its own batch (error 207: a batch that references a just-added column
+  // cannot share the batch with the ALTER that adds it).
+  // ---------------------------------------------------------------------
+  `IF COL_LENGTH('dbo.forms', 'attachments_enabled') IS NULL
+     ALTER TABLE dbo.forms ADD attachments_enabled BIT NOT NULL
+       CONSTRAINT DF_forms_attachments_enabled DEFAULT 0;`,
+
+  // Which roles may use the Attachments card, once it is enabled. Same JSON
+  // array contract as `form_fields.roles`: NULL = unrestricted (every role,
+  // including ones created later), [] = nobody, [...] = exactly those.
+  `IF COL_LENGTH('dbo.forms', 'attachments_roles') IS NULL
+     ALTER TABLE dbo.forms ADD attachments_roles NVARCHAR(MAX) NULL;`,
+
+  // One row per file uploaded from a submission's Attachments card. The Drive
+  // file itself is NOT deleted when the submission is (same deliberate rule as
+  // generated documents — see SUBMISSION_CHILD_TABLES in queries.ts); only this
+  // row goes. `uploaded_by` is SET NULL so deleting a user never blocks on a
+  // file they once attached.
+  //
+  // `size_bytes` is BIGINT because "no size restriction" means a file can
+  // exceed 2 GB. The driver returns SQL numerics as strings, so the read path
+  // converts explicitly (see db/attachments.ts).
+  `IF OBJECT_ID('dbo.submission_attachments', 'U') IS NULL
+   CREATE TABLE dbo.submission_attachments (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     submission_id INT NOT NULL,
+     drive_file_id NVARCHAR(255) NOT NULL,
+     file_name     NVARCHAR(255) NOT NULL,
+     mime_type     NVARCHAR(255) NULL,
+     size_bytes    BIGINT NULL,
+     web_view_link NVARCHAR(1000) NULL,
+     uploaded_by   INT NULL,
+     uploaded_at   DATETIME2 NOT NULL CONSTRAINT DF_submission_attachments_uploaded_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_submission_attachments_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
+     CONSTRAINT FK_submission_attachments_uploader FOREIGN KEY (uploaded_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+   );`,
+
+  // Its own batch (error 207) and declared through indexGuard so
+  // expectedIndexNames() sees it and the boot-time "N indexes MISSING" warning
+  // stays honest.
+  `${indexGuard("IX_submission_attachments_submission", "submission_attachments", ["submission_id"])}
+     CREATE INDEX IX_submission_attachments_submission ON dbo.submission_attachments(submission_id);`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

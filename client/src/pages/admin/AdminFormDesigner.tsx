@@ -6,6 +6,7 @@ import type { FormField, FieldType, FormVisibility, FormWithFields, RoleRow } fr
 import { PageHead, formStatusBadge } from "../../components/layout";
 import { useAuth } from "../../context/AuthContext";
 import { useRoleCatalog, roleLabelFor, BUILT_IN_ROLES } from "../../lib/roles";
+import { Toggle } from "../../components/Toggle";
 
 const FIELD_TYPES: { value: FieldType; label: string }[] = [
   { value: "text", label: "Text" },
@@ -47,6 +48,17 @@ const FIELD_TYPES: { value: FieldType; label: string }[] = [
 function accessRoleKeys(field: FormField, catalog: readonly RoleRow[]): string[] {
   const base = catalog.length > 0 ? catalog.map((r) => r.role_key) : [...BUILT_IN_ROLES];
   const extra = (field.roles ?? []).filter((key) => !base.includes(key));
+  return [...base, ...extra];
+}
+
+// The roles the Attachments card can be granted to: the live catalog, unioned
+// with any key the form already names (same reasoning as `accessRoleKeys`).
+function attachmentRoleKeys(
+  roles: string[] | null,
+  catalog: readonly RoleRow[]
+): string[] {
+  const base = catalog.length > 0 ? catalog.map((r) => r.role_key) : [...BUILT_IN_ROLES];
+  const extra = (roles ?? []).filter((key) => !base.includes(key));
   return [...base, ...extra];
 }
 
@@ -96,6 +108,15 @@ export default function AdminFormDesigner() {
   const [docFolderId, setDocFolderId] = useState("");
   const [docFolderValid, setDocFolderValid] = useState<boolean | null>(null);
   const [docFolderName, setDocFolderName] = useState("");
+
+  // Staff Attachments (docs/plans/staff-attachments.md). The per-form switch and
+  // the roles it applies to. `attachmentsRoles === null` means UNRESTRICTED —
+  // every role, including ones created later — and must never be materialised
+  // into a role array on save (that is defect D2 in
+  // staff-only-field-access-toggles.md §2.1).
+  const [attachmentsEnabled, setAttachmentsEnabled] = useState(false);
+  const [attachmentsRoles, setAttachmentsRoles] = useState<string[] | null>(null);
+  const { roles: roleCatalog } = useRoleCatalog();
 
   // Optional link to the source Google Form. Informational — it is shown to
   // staff so they can open the original alongside the submission, and nothing
@@ -171,6 +192,8 @@ export default function AdminFormDesigner() {
         setDocFolderId(f.doc_folder_id ?? "");
         setGoogleFormUrl(f.google_form_url ?? "");
         setLinkFieldIds(f.link_field_ids ?? []);
+        setAttachmentsEnabled(f.attachments_enabled ?? false);
+        setAttachmentsRoles(f.attachments_roles ?? null);
       })
       .catch(() => setError("Could not load form"))
       .finally(() => {
@@ -302,6 +325,11 @@ export default function AdminFormDesigner() {
         ...(prefix.trim() ? { code: prefix.trim() } : {}),
         doc_folder_id: docFolderId.trim() || null,
         google_form_url: googleFormUrl.trim() || null,
+        // Staff Attachments. Both are sent ALWAYS so clearing every role toggle
+        // is a real clear, and `null` stays null (unrestricted) rather than
+        // being materialised into today's role list.
+        attachments_enabled: attachmentsEnabled,
+        attachments_roles: attachmentsRoles,
         // Sent as an array (not omitted) so clearing every chip is a real
         // clear rather than "leave the stored selection alone".
         link_field_ids: linkFieldIds,
@@ -333,6 +361,8 @@ export default function AdminFormDesigner() {
       setDocFolderId(fresh.doc_folder_id ?? "");
       setGoogleFormUrl(fresh.google_form_url ?? "");
       setLinkFieldIds(fresh.link_field_ids ?? []);
+      setAttachmentsEnabled(fresh.attachments_enabled ?? false);
+      setAttachmentsRoles(fresh.attachments_roles ?? null);
       setDirty(false);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "Could not save form");
@@ -988,19 +1018,120 @@ export default function AdminFormDesigner() {
         </div>
       </div>
 
-      {form?.status === "published" && user?.organization_slug && (
-        <div className="card" style={{ marginTop: 16 }}>
-          <div className="card-head">
-            <h3>Public link</h3>
-            <span className="sub">Share this link with parents</span>
-          </div>
-          <div className="card-body">
-            <code className="cell-mono" style={{ wordBreak: "break-all" }}>
-              {`/org/${user.organization_slug}/forms/${form.id}`}
-            </code>
-          </div>
+      {/* Staff Attachments access (docs/plans/staff-attachments.md).
+          Replaces the old "Public link" card, which nothing used: the parent
+          form URL is already reachable from the Forms list.
+
+          Two controls answering two different questions:
+            Enable Staff Attachments -> WHETHER the card exists on a submission
+            Access row               -> WHO may use it, once it does
+
+          Turning the switch off deliberately does NOT clear the role list, so
+          switching it back on restores the admin's earlier choice instead of
+          silently granting every role. */}
+      <div className="card" style={{ marginTop: 16 }}>
+        <div className="card-head">
+          <h3>Attachments</h3>
+          <span className="sub">Let staff attach files to each submission of this form</span>
         </div>
-      )}
+        <div className="card-body">
+          <p style={{ fontSize: "0.8125rem", color: "var(--text-muted)", margin: "0 0 14px" }}>
+            Files are saved to this form&rsquo;s Google Drive folder, under
+            <code className="cell-mono" style={{ margin: "0 4px" }}>Attachments/&lt;submission id&gt;/</code>.
+            Up to 10 files per submission.
+          </p>
+
+          {!docFolderId.trim() && (
+            <div className="alert-error" style={{ marginBottom: 14 }}>
+              Set a <strong>Drive Folder ID</strong> above to enable attachments. The card cannot
+              upload without a folder to save into.
+            </div>
+          )}
+
+          <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 6 }}>
+            <Toggle
+              checked={attachmentsEnabled}
+              disabled={!docFolderId.trim() || saving}
+              onChange={(v) => {
+                setAttachmentsEnabled(v);
+                setDirty(true);
+              }}
+            >
+              Enable Staff Attachments
+            </Toggle>
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: "0 0 16px" }}>
+            {attachmentsEnabled
+              ? "Staff can add up to 10 files per submission."
+              : "The Attachments card is hidden from staff on every submission of this form."}
+          </p>
+
+          <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+            <span
+              style={{
+                fontSize: "0.6875rem",
+                fontWeight: 700,
+                letterSpacing: "0.06em",
+                textTransform: "uppercase",
+                color: "var(--text-muted)",
+              }}
+            >
+              Access
+            </span>
+            {attachmentRoleKeys(attachmentsRoles, roleCatalog).map((role) => {
+              // Same three states as the staff-only Access row:
+              //   null -> unrestricted, so every role reads as granted
+              //   []   -> granted to nobody
+              //   [..] -> exactly those
+              const granted = Array.isArray(attachmentsRoles) ? attachmentsRoles : null;
+              const has = granted === null || granted.includes(role);
+              return (
+                <button
+                  key={role}
+                  type="button"
+                  title={`${has ? "Remove" : "Grant"} ${roleLabelFor(role)} access to attachments`}
+                  onClick={() => {
+                    // Base the toggle on the CURRENT selection, keeping the two
+                    // sentinels apart: an unrestricted list starts from "every
+                    // role", while an explicit empty array stays empty.
+                    const current = Array.isArray(attachmentsRoles)
+                      ? attachmentsRoles
+                      : attachmentRoleKeys(attachmentsRoles, roleCatalog);
+                    const next = has ? current.filter((r) => r !== role) : [...current, role];
+                    setAttachmentsRoles(next);
+                    setDirty(true);
+                  }}
+                  style={{
+                    cursor: "pointer",
+                    fontSize: "0.8125rem",
+                    fontWeight: 700,
+                    padding: "7px 14px",
+                    borderRadius: "var(--radius)",
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: 6,
+                    transition: "background-color .13s ease, border-color .13s ease, color .13s ease",
+                    background: has ? "var(--accent)" : "var(--card-bg)",
+                    color: has ? "#fff" : "var(--accent)",
+                    border: "1px solid var(--accent)",
+                  }}
+                >
+                  {has ? <Check size={14} /> : <Plus size={14} />}
+                  <span>{roleLabelFor(role)}</span>
+                </button>
+              );
+            })}
+          </div>
+          <p style={{ fontSize: "0.75rem", color: "var(--text-muted)", margin: "12px 0 0" }}>
+            {attachmentsRoles === null
+              ? "Currently unrestricted: every role can use attachments, including any role created later."
+              : attachmentsRoles.length === 0
+                ? "Currently granted to no role — the card is hidden from everyone but administrators."
+                : `Currently granted to ${attachmentsRoles.map((r) => roleLabelFor(r)).join(", ")}.`}
+            {!attachmentsEnabled && " Role access is saved and applies when Enable Staff Attachments is turned on."}
+          </p>
+        </div>
+      </div>
     </div>
   );
 }
