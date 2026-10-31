@@ -6,6 +6,10 @@
     "server",
     "client"
   ],
+  "//engines": "Pins the runtime Azure App Service and the GitHub Actions build use. Node 22 reaches end of life in April 2027; Node 24 is the current LTS. Keep this in step with `node-version` in .github/workflows/*.yml and with the App Service STACK setting (docs/plans/deploy-azure.md §1).",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "dev": "npm-run-all --parallel dev:server dev:client",
     "dev:server": "npm --workspace server run dev",

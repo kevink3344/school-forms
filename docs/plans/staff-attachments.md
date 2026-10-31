@@ -545,7 +545,7 @@ ticket, and the cap is only 10 — one wrong file costs a tenth of the allowance
 **The code imposes no limit. The hosting platform does.** This is the part of the feature most
 likely to disappoint, so it is written down before anything is built.
 
-The app is deployed to **Azure App Service (Linux, Node 22)** — `docs/plans/deploy-azure.md`
+The app is deployed to **Azure App Service (Linux, Node 24)** — `docs/plans/deploy-azure.md`
 §1–§2, app `webform`, slot `sandbox`, startup command `node server/dist/index.js`. App Service
 sits in front of the Node process as a reverse proxy, and that proxy has a fixed request timeout
 of **230 seconds** (documented in the App Service app-settings reference as "a general idle

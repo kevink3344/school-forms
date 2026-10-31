@@ -25,7 +25,32 @@ origin as the API, so no CORS is needed in production.
 
 ### 1. Confirm the runtime stack
 - Azure portal → your web app → **Settings → Configuration → General settings**
-- **Stack**: `Node 22 LTS` (the auto workflow sets `node-version: '22.x'`).
+- **Stack**: `Node 24 LTS` (the workflows set `node-version: '24.x'`, and the root
+  `package.json` declares `"engines": { "node": ">=24.0.0" }`).
+
+> **★ This portal setting is the one Azure's EOL notice is about.** Changing
+> `node-version` in the workflow only changes the *build* machine; the app itself
+> runs on whatever stack the App Service is configured for. If the portal still
+> says **Node 22**, you will keep getting *"Your app is targeting a runtime that
+> will reach EOL in less than 6 months"* even after deploying this change.
+>
+> Set it on **every slot** (`sandbox`, `staging`, and production):
+> ```bash
+> az webapp config set -g <resource-group> -n webform --slot sandbox \
+>   --linux-fx-version "NODE|24-lts"
+> az webapp config set -g <resource-group> -n webform --slot staging \
+>   --linux-fx-version "NODE|24-lts"
+> ```
+> Confirm with `az webapp config show -g <resource-group> -n webform --slot sandbox --query linuxFxVersion`.
+>
+> **Why Node 24:** Node 22 reaches end of life in **April 2027**; Node 24 is the
+> current LTS. The app was verified against Node 24 locally — typecheck, the full
+> 382-test suite and the client build all pass on `v24.14.1`.
+>
+> **Rollback:** set the stack back to `NODE|22-lts` and redeploy the previous
+> commit. Nothing in this change is runtime-version-specific except the
+> `@types/node` bump, which is compile-time only.
+
 - **Startup command**: `node server/dist/index.js`
 
 ### 2. Set the app environment variables (App settings)
@@ -102,6 +127,10 @@ az webapp config appsettings set -g <resource-group> -n webform --slot sandbox \
 - `NPM_CONFIG_PRODUCTION=false` works identically, but npm 11 warns *"Use `--omit=dev`
   instead"*, so prefer `NPM_CONFIG_INCLUDE=dev`.
 - An **empty** `NPM_CONFIG_OMIT=` does **not** work — `NODE_ENV` still wins (verified).
+- **This applies to the Node 24 stack too.** Node 24 images ship npm 11, so the
+  `NODE_ENV=production` → `omit=dev` behaviour is unchanged. If the app fails to
+  boot after the stack switch with `Cannot find module 'npm-run-all'` (or `tsc` /
+  `vite`), this setting is the cause, not the Node version.
 
 **Alternative — skip the second build entirely.** The GitHub Actions job already
 installs and builds and uploads the whole repo (including `node_modules/` and
