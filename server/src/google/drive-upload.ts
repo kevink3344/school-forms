@@ -173,7 +173,56 @@ export async function deleteDriveFile(fileId: string): Promise<boolean> {
  * A link that opens the file in Drive. Prefers the stored `webViewLink`; falls
  * back to a constructed URL so a row written before the link was captured still
  * opens.
+ *
+ * ⚠ Only useful to a Google account that can already see the file. The app's
+ * OAuth account owns every uploaded file, so a signed-in staff member following
+ * this URL gets Google's sign-in page. `downloadAttachmentFromDrive` is what the
+ * app actually serves (see routes/submissions.ts).
  */
 export function attachmentOpenUrl(fileId: string, webViewLink: string | null): string {
   return webViewLink || `https://drive.google.com/uc?export=download&id=${encodeURIComponent(fileId)}`;
+}
+
+/**
+ * Stream one attachment's bytes back through the app.
+ *
+ * ★ This is why the open route does not simply redirect to Drive. Every file is
+ * uploaded by the app's own OAuth account, so it is PRIVATE to that account — a
+ * staff member following a `webViewLink` lands on Google's sign-in page even
+ * though they are signed in here. The generated-document PDF route solves the
+ * same problem the same way (see `getDocumentPdf` in docs.ts): the app proves
+ * access with its own credentials and relays the bytes.
+ *
+ * The body is returned as a Node stream and piped to the response, so a large
+ * video is never held in memory. The caller must handle backpressure — piping
+ * does.
+ */
+export async function downloadAttachmentFromDrive(fileId: string): Promise<{
+  stream: Readable;
+  mimeType: string;
+  sizeBytes: number | null;
+  name: string | null;
+}> {
+  const drive = driveClient();
+
+  // Metadata first: the response needs the real content type (Drive stores
+  // whatever was uploaded) and a size for Content-Length when it is known.
+  const meta = await drive.files.get({
+    fileId,
+    fields: "id, name, mimeType, size",
+    supportsAllDrives: env.google.isSharedDrive,
+  });
+
+  const res = await drive.files.get(
+    { fileId, alt: "media", supportsAllDrives: env.google.isSharedDrive },
+    { responseType: "stream" }
+  );
+
+  const size = meta.data.size === null || meta.data.size === undefined ? null : Number(meta.data.size);
+  return {
+    stream: res.data as unknown as Readable,
+    mimeType: meta.data.mimeType ?? "application/octet-stream",
+    sizeBytes: size !== null && Number.isFinite(size) ? size : null,
+    name: meta.data.name ?? null,
+  };
 }

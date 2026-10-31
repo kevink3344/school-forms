@@ -24,16 +24,25 @@ import type { SubmissionAttachment } from "../types";
 const MAX_ATTACHMENTS = 10;
 
 /**
- * Where a file row links to.
+ * Open one attachment.
  *
- * ★ NOT the API path directly: the API answers with a 302 to Drive, and the
- * browser does not attach the Authorization header to a plain <a href>, so the
- * request would 401. The server therefore also accepts a short-lived `?t=`
- * token minted by `api.attachmentUrl` (see routes/submissions.ts), and both the
- * name and the Open button use that one URL so they cannot drift.
+ * ★ Mints the link on click rather than rendering it into the href. The link is
+ * a 10-minute, single-file token, so a page left open for an hour still works —
+ * and the URL never carries the session credential.
+ *
+ * `window.open` is called synchronously inside the click handler so the browser
+ * does not treat it as a pop-up; the tab is navigated once the link arrives.
  */
-function attachmentHref(publicId: string, attachmentId: number): string {
-  return api.attachmentUrl(publicId, attachmentId);
+async function openAttachment(publicId: string, attachmentId: number) {
+  const tab = window.open("", "_blank");
+  try {
+    const url = await api.getAttachmentLink(publicId, attachmentId);
+    if (tab) tab.location.href = url;
+    else window.location.href = url;
+  } catch {
+    if (tab) tab.close();
+    throw new Error("Could not open the file. Reload the page and try again.");
+  }
 }
 
 function formatBytes(bytes: number | null): string {
@@ -246,30 +255,44 @@ export function AttachmentsCard({
                   }}
                 >
                   <Paperclip size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
-                  <a
-                    href={attachmentHref(publicId, row.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     className="link-name"
-                    style={{ flex: "1 1 240px", minWidth: 0, wordBreak: "break-word" }}
+                    style={{
+                      flex: "1 1 240px",
+                      minWidth: 0,
+                      wordBreak: "break-word",
+                      background: "none",
+                      border: 0,
+                      padding: 0,
+                      font: "inherit",
+                      textAlign: "left",
+                      cursor: "pointer",
+                      color: "var(--accent)",
+                    }}
+                    onClick={() => {
+                      setError("");
+                      void openAttachment(publicId, row.id).catch((e: Error) => setError(e.message));
+                    }}
                   >
                     {row.file_name}
-                  </a>
+                  </button>
                   <span className="muted-note" style={{ marginLeft: 0 }}>
                     {formatBytes(row.size_bytes)}
                     {row.uploaded_by_name ? ` · ${row.uploaded_by_name}` : ""}
                     {row.uploaded_at ? ` · ${new Date(row.uploaded_at).toLocaleString()}` : ""}
                   </span>
-                  <a
-                    href={attachmentHref(publicId, row.id)}
-                    target="_blank"
-                    rel="noopener noreferrer"
+                  <button
+                    type="button"
                     className="badge-button"
-                    style={{ textDecoration: "none" }}
+                    onClick={() => {
+                      setError("");
+                      void openAttachment(publicId, row.id).catch((e: Error) => setError(e.message));
+                    }}
                   >
                     <ExternalLink size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
                     Open
-                  </a>
+                  </button>
                   {canDelete && (
                     <button
                       type="button"

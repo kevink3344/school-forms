@@ -38,6 +38,24 @@ export interface RefreshPayload {
   type: "refresh";
 }
 
+// A short-lived token for ONE attachment link (docs/plans/staff-attachments.md).
+//
+// ★ The session access token must NOT be put in a URL. It lives 15 minutes, so a
+// page left open longer produces a dead link ("Invalid or expired token") — and
+// because it is a full session credential, pasting that link into a chat or
+// letting it reach a proxy log would hand over the whole session.
+//
+// This token is scoped to one user and one attachment, signed with the ACCESS
+// secret (so it inherits the same rotation story) but carrying `type: "attachment"`
+// so `verifyAccessToken` refuses it everywhere else, and `verifyAttachmentToken`
+// refuses a real access token here.
+export interface AttachmentLinkPayload {
+  sub: number;
+  submissionId: number;
+  attachmentId: number;
+  type: "attachment";
+}
+
 interface JwtUser {
   id: number;
   email: string;
@@ -52,6 +70,14 @@ declare global {
   namespace Express {
     interface Request {
       user?: JwtUser;
+      /**
+       * Set by `requireAuthOrAttachmentToken` when the caller proved identity
+       * with a scoped `?t=` link token instead of a header. The route must load
+       * the user's real role and organization from the database — the token
+       * carries only the user id, deliberately, so a stale link cannot assert a
+       * role the account no longer has.
+       */
+      attachmentLink?: AttachmentLinkPayload;
     }
   }
 }
@@ -89,6 +115,49 @@ export function verifyAccessToken(token: string): AccessPayload {
 
 export function verifyRefreshToken(token: string): RefreshPayload {
   return jwt.verify(token, env.auth.refreshSecret) as unknown as RefreshPayload;
+}
+
+// -----------------------------------------------------------------------------
+// Attachment link tokens
+//
+// Ten minutes is enough to click a link and follow the Drive redirect, and short
+// enough that a leaked URL is useless by the time anyone finds it. The client
+// mints one per click, so an old page never carries a stale one.
+// -----------------------------------------------------------------------------
+export const ATTACHMENT_LINK_TTL = "10m";
+
+export function signAttachmentLinkToken(input: {
+  userId: number;
+  submissionId: number;
+  attachmentId: number;
+}): string {
+  const payload: AttachmentLinkPayload = {
+    sub: input.userId,
+    submissionId: input.submissionId,
+    attachmentId: input.attachmentId,
+    type: "attachment",
+  };
+  return jwt.sign(payload, env.auth.accessSecret, {
+    expiresIn: ATTACHMENT_LINK_TTL,
+  } as SignOptions);
+}
+
+/**
+ * Verify an attachment link token. Returns null for anything that is not a
+ * well-formed, unexpired attachment token — including a real access token, which
+ * carries `type: "access"` and must not be usable as a link.
+ */
+export function verifyAttachmentLinkToken(token: string): AttachmentLinkPayload | null {
+  try {
+    const payload = jwt.verify(token, env.auth.accessSecret) as unknown as AttachmentLinkPayload;
+    if (payload?.type !== "attachment") return null;
+    if (!Number.isFinite(Number(payload.sub))) return null;
+    if (!Number.isFinite(Number(payload.submissionId))) return null;
+    if (!Number.isFinite(Number(payload.attachmentId))) return null;
+    return payload;
+  } catch {
+    return null;
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -155,19 +224,21 @@ export function requireAuth(req: Request, res: Response, next: NextFunction): vo
 }
 
 // -----------------------------------------------------------------------------
-// Token from the Authorization header OR a `?t=` query parameter.
+// Attachment link authorization: Authorization header OR a scoped `?t=` token.
 //
 // Exists for exactly one route: opening an attachment, which the browser fetches
-// from a plain <a href> that cannot carry a header. It is NOT a general-purpose
-// auth mode — a query token leaks into history, logs and Referer headers, so it
-// is accepted only where a link must work, and the token itself is the same
-// short-lived access token the session already holds (verified by the same
-// function, with the same organization check as requireAuth).
+// from a plain <a href> that cannot carry a header.
 //
-// The role guard is applied by the route afterwards, so this only establishes
-// WHO is calling.
+// ★ The query token is NOT the session token. It is a short-lived (10 min) token
+// scoped to one user and one attachment (see signAttachmentLinkToken). Putting
+// the 15-minute access token in a URL meant a page left open produced a dead
+// link, and a copied link handed over the whole session.
+//
+// This only VALIDATES the token and stashes its claims on the request. The route
+// then checks that the claims name the submission and attachment it resolved —
+// it is the only place the submission's numeric id is known.
 // -----------------------------------------------------------------------------
-export function requireAuthOrQueryToken(req: Request, res: Response, next: NextFunction): void {
+export function requireAuthOrAttachmentToken(req: Request, res: Response, next: NextFunction): void {
   const header = req.headers.authorization;
   if (header && header.startsWith("Bearer ")) {
     requireAuth(req, res, next);
@@ -178,25 +249,18 @@ export function requireAuthOrQueryToken(req: Request, res: Response, next: NextF
     res.status(401).json({ error: "Missing bearer token" });
     return;
   }
-  try {
-    const payload = verifyAccessToken(queryToken);
-    const orgClaim = payload.organization_id;
-    const orgId = orgClaim === null || orgClaim === undefined ? NaN : Number(orgClaim);
-    if (!Number.isFinite(orgId) || orgId <= 0) {
-      res.status(401).json({ error: "Session is missing an organization. Sign in again." });
-      return;
-    }
-    req.user = {
-      id: payload.sub,
-      email: payload.email,
-      role: payload.role,
-      school_id: payload.school_id,
-      organization_id: orgClaim,
-    };
-    next();
-  } catch {
-    res.status(401).json({ error: "Invalid or expired token" });
+  const payload = verifyAttachmentLinkToken(queryToken);
+  if (!payload) {
+    // Deliberately one message for "expired" and "wrong token": the reader can
+    // act on both the same way (reload the page and click again), and naming
+    // which one it was tells an attacker whether a token was ever valid.
+    res.status(401).json({
+      error: "This link has expired. Reload the page and click the file again.",
+    });
+    return;
   }
+  req.attachmentLink = payload;
+  next();
 }
 
 // Named-role guard. Kept for the routes whose membership genuinely is a fixed// set — `admin` is not a capability (it is the `is_admin` flag), and the public

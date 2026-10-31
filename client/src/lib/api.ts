@@ -952,18 +952,20 @@ export const api = {
   },
 
   /**
-   * A link that opens one attachment.
+   * Mint a short-lived link for one attachment (docs/plans/staff-attachments.md).
    *
-   * The API answers with a 302 to Drive, but a plain <a href> cannot carry the
-   * Authorization header, so the access token travels as a single-use-purpose
-   * query parameter instead. It is the SAME token the session already holds —
-   * this is not a new credential, only a transport for it — and the server
-   * accepts it on this one route only.
+   * ★ Called on CLICK, not at render. The old version embedded the 15-minute
+   * session access token in the href, so a page left open produced a dead link
+   * ("Invalid or expired token") — and a copied link handed over the whole
+   * session. This returns a token scoped to one user and one file, good for ten
+   * minutes, minted at the moment it is needed.
    */
-  attachmentUrl(publicId: string, attachmentId: number): string {
-    const token = getToken();
-    const base = `${API_BASE}/api/submissions/${encodeURIComponent(publicId)}/attachments/${attachmentId}`;
-    return token ? `${base}?t=${encodeURIComponent(token)}` : base;
+  async getAttachmentLink(publicId: string, attachmentId: number): Promise<string> {
+    const res = await request<{ url: string }>(
+      `/api/submissions/${publicId}/attachments/${attachmentId}/link`,
+      { method: "POST", auth: true }
+    );
+    return res.url;
   },
 
   /**

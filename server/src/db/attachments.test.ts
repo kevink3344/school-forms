@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import { canUseAttachments } from "./schema.js";
 import { sqlserverDialect } from "./dialect/sqlserver.js";
 import { tursoDialect } from "./dialect/turso.js";
+import {
+  signAttachmentLinkToken,
+  verifyAttachmentLinkToken,
+  signAccessToken,
+} from "../auth.js";
 
 // -----------------------------------------------------------------------------
 // Staff Attachments — the access rule (docs/plans/staff-attachments.md §3.2).
@@ -92,6 +97,51 @@ describe("submission_attachments is a child of submissions on both dialects", ()
         expect.objectContaining({ table: "forms", column: "attachments_enabled" }),
         expect.objectContaining({ table: "forms", column: "attachments_roles" }),
       ])
+    );
+  });
+});
+
+describe("attachment link tokens", () => {
+  // The link is minted on click and lives 10 minutes. These pin the two
+  // properties that made the first version fail: it must not BE the session
+  // token, and it must be bound to one file.
+  const mint = () =>
+    signAttachmentLinkToken({ userId: 1, submissionId: 22, attachmentId: 2 });
+
+  it("round-trips the user, submission and attachment", () => {
+    const payload = verifyAttachmentLinkToken(mint());
+    expect(payload).not.toBeNull();
+    expect(Number(payload!.sub)).toBe(1);
+    expect(Number(payload!.submissionId)).toBe(22);
+    expect(Number(payload!.attachmentId)).toBe(2);
+    expect(payload!.type).toBe("attachment");
+  });
+
+  it("refuses a real ACCESS token, so a session token cannot be used as a link", () => {
+    // ★ This is the regression that produced "Invalid or expired token": the
+    // href used to carry the 15-minute access token, which died with the page.
+    const accessToken = signAccessToken({
+      id: 1,
+      email: "a@b.c",
+      role: "admin",
+      school_id: null,
+      organization_id: 1,
+    });
+    expect(verifyAttachmentLinkToken(accessToken)).toBeNull();
+  });
+
+  it("refuses a tampered or garbage token", () => {
+    expect(verifyAttachmentLinkToken("")).toBeNull();
+    expect(verifyAttachmentLinkToken("not-a-jwt")).toBeNull();
+    const good = mint();
+    expect(verifyAttachmentLinkToken(`${good}x`)).toBeNull();
+  });
+
+  it("mints a DIFFERENT token per file, so a link cannot be reused for another", () => {
+    const a = signAttachmentLinkToken({ userId: 1, submissionId: 22, attachmentId: 2 });
+    const b = signAttachmentLinkToken({ userId: 1, submissionId: 22, attachmentId: 3 });
+    expect(verifyAttachmentLinkToken(a)!.attachmentId).not.toBe(
+      verifyAttachmentLinkToken(b)!.attachmentId
     );
   });
 });

@@ -16,14 +16,15 @@ import {
   listAdhocFields,
   promoteAdhocFieldToFormField,
   getForm,
+  getUserById,
   getExportColumns,
   getOrganizationBySlug,
 } from "../db/queries.js";
 import { filterColumnsForRole } from "../export/table.js";
-import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId, requireAuthOrQueryToken } from "../auth.js";
+import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId, requireAuthOrAttachmentToken, signAttachmentLinkToken } from "../auth.js";
 import { canAccessForm } from "../access/formAccess.js";
 import { maybeGenerateDocument } from "../google/docs.js";
-import { deleteDriveFile, attachmentOpenUrl } from "../google/drive-upload.js";
+import { deleteDriveFile, downloadAttachmentFromDrive } from "../google/drive-upload.js";
 import {
   listAttachmentsBySubmission,
   deleteAttachmentRow,
@@ -638,17 +639,17 @@ submissionsRouter.get("/:publicId/attachments", requireAuth, requireRoles("staff
 });
 
 // -----------------------------------------------------------------------------
-// STAFF: GET /api/submissions/:publicId/attachments/:id — open one file
+// STAFF: POST /api/submissions/:publicId/attachments/:id/link — mint a link
 //
-// A 302 to Drive rather than proxying the bytes: with no size cap, streaming a
-// video through this process would tie up an instance for the whole download.
+// Returns a short-lived (10 min) token scoped to THIS user and THIS attachment.
+// The client calls it on click, so a page that has been open for hours still
+// produces a working link — which embedding the 15-minute session token did not.
 //
-// ★ This is the ONE route that accepts the access token as `?t=` instead of the
-// Authorization header, because a plain <a href> cannot send a header. The token
-// is the same session credential, verified by the same function, and it is read
-// only here — no other route looks at the query string for identity.
+// Minting requires the normal Authorization header, so the caller is already
+// authenticated; the token it returns proves only "this user may open this file
+// for the next ten minutes".
 // -----------------------------------------------------------------------------
-submissionsRouter.get("/:publicId/attachments/:id", requireAuthOrQueryToken, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+submissionsRouter.post("/:publicId/attachments/:id/link", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
   try {
     const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     if (!submission) {
@@ -670,7 +671,105 @@ submissionsRouter.get("/:publicId/attachments/:id", requireAuthOrQueryToken, req
       res.status(404).json({ error: "Attachment not found on this submission" });
       return;
     }
-    res.redirect(302, attachmentOpenUrl(row.drive_file_id, row.web_view_link));
+    const token = signAttachmentLinkToken({
+      userId: req.user!.id,
+      submissionId: submission.id,
+      attachmentId,
+    });
+    res.json({ url: `/api/submissions/${submission.public_id}/attachments/${attachmentId}?t=${encodeURIComponent(token)}` });
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: GET /api/submissions/:publicId/attachments/:id — open one file
+//
+// A 302 to Drive rather than proxying the bytes: with no size cap, streaming a
+// video through this process would tie up an instance for the whole download.
+//
+// ★ Accepts a scoped `?t=` link token instead of the Authorization header,
+// because a plain <a href> cannot send a header. The token names ONE user and
+// ONE attachment; this route re-reads that user's real role and organization
+// from the database and applies the ordinary guards, so a link cannot outlive a
+// revoked role or reach another submission's file.
+// -----------------------------------------------------------------------------
+submissionsRouter.get("/:publicId/attachments/:id", requireAuthOrAttachmentToken, async (req, res, next) => {
+  try {
+    // A link token proves identity only; the account's CURRENT role and tenant
+    // are what authorize the read, so they come from the database.
+    if (req.attachmentLink) {
+      const user = await getUserById(Number(req.attachmentLink.sub));
+      if (!user || !user.active) {
+        res.status(401).json({ error: "This link has expired. Reload the page and click the file again." });
+        return;
+      }
+      req.user = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        school_id: user.school_id,
+        organization_id: user.organization_id,
+      };
+    }
+    if (!req.user || !["staff", "cdm_contact", "admin"].includes(req.user.role)) {
+      res.status(403).json({ error: "Forbidden: insufficient role" });
+      return;
+    }
+
+    const submission = await getSubmissionDetail(req.params.publicId, req.user.organization_id, req.user.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    const attachmentId = Number(req.params.id);
+    if (!Number.isInteger(attachmentId) || attachmentId <= 0) {
+      res.status(400).json({ error: "Invalid attachment id" });
+      return;
+    }
+    // A link is bound to the file it was minted for: editing the URL to another
+    // submission or another attachment is refused rather than followed.
+    if (
+      req.attachmentLink &&
+      (Number(req.attachmentLink.submissionId) !== Number(submission.id) ||
+        Number(req.attachmentLink.attachmentId) !== attachmentId)
+    ) {
+      res.status(403).json({ error: "This link is not valid for this file." });
+      return;
+    }
+    const row = submission.attachments.find((a) => Number(a.id) === attachmentId);
+    if (!row) {
+      res.status(404).json({ error: "Attachment not found on this submission" });
+      return;
+    }
+
+    // ★ Relay the bytes rather than redirecting to Drive. Every file is owned by
+    // the app's OAuth account, so it is private to that account: a `webViewLink`
+    // sends a signed-in staff member to Google's sign-in page. The app proves
+    // access with its own credentials and streams the file back, exactly as the
+    // generated-document PDF route does.
+    const file = await downloadAttachmentFromDrive(row.drive_file_id);
+    const safeName = (row.file_name || file.name || `attachment-${attachmentId}`).replace(
+      /[^\w\-. ]+/g,
+      "_"
+    );
+    res.setHeader("Content-Type", file.mimeType);
+    // `inline` so a PDF or image opens in the tab; the browser still downloads
+    // types it cannot render.
+    res.setHeader("Content-Disposition", `inline; filename="${safeName}"`);
+    if (file.sizeBytes !== null) res.setHeader("Content-Length", String(file.sizeBytes));
+    file.stream.on("error", (err) => {
+      // Headers are already sent, so the connection is all that can be closed.
+      // eslint-disable-next-line no-console
+      console.error(`[attachments] stream failed for ${row.drive_file_id}:`, err);
+      res.destroy(err);
+    });
+    file.stream.pipe(res);
   } catch (err) {
     next(err);
   }
