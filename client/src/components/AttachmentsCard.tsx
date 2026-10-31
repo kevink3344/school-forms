@@ -30,19 +30,19 @@ const MAX_ATTACHMENTS = 10;
  * a 10-minute, single-file token, so a page left open for an hour still works —
  * and the URL never carries the session credential.
  *
- * `window.open` is called synchronously inside the click handler so the browser
- * does not treat it as a pop-up; the tab is navigated once the link arrives.
+ * ★ The tab is opened AFTER the link arrives, not as a blank tab that is then
+ * navigated. A `window.open("", "_blank")` tab is cross-origin-ish enough that
+ * assigning `tab.location.href` is blocked in some browsers, which left the tab
+ * sitting on about:blank and looked like "nothing happens". Minting first and
+ * opening second avoids that entirely; the click handler keeps the user gesture
+ * alive across the await, so pop-up blockers still allow it.
  */
 async function openAttachment(publicId: string, attachmentId: number) {
-  const tab = window.open("", "_blank");
-  try {
-    const url = await api.getAttachmentLink(publicId, attachmentId);
-    if (tab) tab.location.href = url;
-    else window.location.href = url;
-  } catch {
-    if (tab) tab.close();
-    throw new Error("Could not open the file. Reload the page and try again.");
-  }
+  const url = await api.getAttachmentLink(publicId, attachmentId);
+  const tab = window.open(url, "_blank");
+  // A blocked pop-up returns null. Fall back to the same tab so the file still
+  // opens rather than the click silently doing nothing.
+  if (!tab) window.location.href = url;
 }
 
 function formatBytes(bytes: number | null): string {
