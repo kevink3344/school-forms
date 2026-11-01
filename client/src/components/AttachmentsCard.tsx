@@ -1,8 +1,8 @@
 import { useRef, useState } from "react";
-import { Paperclip, Lock, X, ExternalLink, Upload, AlertTriangle } from "lucide-react";
+import { Paperclip, Lock, X, ExternalLink, Upload, AlertTriangle, Link2 } from "lucide-react";
 import { api, ApiError } from "../lib/api";
 import { useBodyScrollLock } from "../lib/useBodyScrollLock";
-import type { SubmissionAttachment } from "../types";
+import type { SubmissionAttachment, SubmissionLink } from "../types";
 
 // -----------------------------------------------------------------------------
 // Staff Attachments card (docs/plans/staff-attachments.md §6.2).
@@ -22,6 +22,28 @@ import type { SubmissionAttachment } from "../types";
 // -----------------------------------------------------------------------------
 
 const MAX_ATTACHMENTS = 10;
+
+/**
+ * The brief's rule for a Link URL: it must begin with `https://`.
+ *
+ * ★ Mirrors `isHttpsUrl` in `server/src/schemas.ts` — the same prefix check plus
+ * the same `new URL()` host check, so the panel cannot accept something the
+ * server will refuse (or the reverse). The server is still the authority; this
+ * copy exists so the message appears next to the field the user is typing in.
+ */
+function isHttpsUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^https:\/\//i.test(trimmed)) return false;
+  if (trimmed.length > 2048) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+const HTTPS_MESSAGE = "Link URL must begin with https://";
 
 /**
  * Open one attachment.
@@ -61,11 +83,17 @@ function formatBytes(bytes: number | null): string {
 export function AttachmentsCard({
   publicId,
   initial,
+  initialLinks = [],
   canUpload,
   canDelete,
 }: {
   publicId: string;
   initial: SubmissionAttachment[];
+  /**
+   * Links already on this submission (docs/plans/staff-attachments.md §3.6).
+   * Rendered BELOW every attachment, oldest first.
+   */
+  initialLinks?: SubmissionLink[];
   canUpload: boolean;
   /**
    * Whether this viewer may remove a file at all. Administrators only — the
@@ -74,16 +102,28 @@ export function AttachmentsCard({
   canDelete: boolean;
 }) {
   const [items, setItems] = useState<SubmissionAttachment[]>(initial);
+  const [links, setLinks] = useState<SubmissionLink[]>(initialLinks);
   const [busy, setBusy] = useState(false);
   const [progress, setProgress] = useState<number | null>(null);
   const [uploadingName, setUploadingName] = useState("");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
+  // The add-link panel. Kept open on failure so the typed values are not lost.
+  const [linkOpen, setLinkOpen] = useState(false);
+  const [linkTitle, setLinkTitle] = useState("");
+  const [linkUrl, setLinkUrl] = useState("");
+  const [linkError, setLinkError] = useState("");
+  const [linkSaving, setLinkSaving] = useState(false);
   // The row ARMED for deletion. The ✕ only sets this; the drawer is what
   // actually deletes, so the press that cannot be undone is never the first
   // press. Nothing in this app uses `window.confirm`, and a native prompt could
   // not name the file it is about to remove.
-  const [confirmTarget, setConfirmTarget] = useState<SubmissionAttachment | null>(null);
+  //
+  // One drawer serves both groups: a file and a link differ only in what the
+  // drawer says and which call it makes.
+  const [confirmTarget, setConfirmTarget] = useState<
+    { kind: "attachment"; row: SubmissionAttachment } | { kind: "link"; row: SubmissionLink } | null
+  >(null);
   const [deleting, setDeleting] = useState(false);
   const [deleteError, setDeleteError] = useState("");
   const inputRef = useRef<HTMLInputElement>(null);
@@ -135,17 +175,65 @@ export function AttachmentsCard({
     setDeleteError("");
     setDeleting(true);
     try {
-      const next = await api.deleteAttachment(publicId, confirmTarget.id);
-      setItems(next);
-      setNotice(`Removed “${confirmTarget.file_name}”.`);
+      if (confirmTarget.kind === "attachment") {
+        const next = await api.deleteAttachment(publicId, confirmTarget.row.id);
+        setItems(next);
+        setNotice(`Removed “${confirmTarget.row.file_name}”.`);
+      } else {
+        const next = await api.deleteSubmissionLink(publicId, confirmTarget.row.id);
+        setLinks(next);
+        setNotice(`Removed the link “${confirmTarget.row.title}”.`);
+      }
       setConfirmTarget(null);
     } catch (err) {
-      // Kept INSIDE the drawer: the message is about the file named there, and
+      // Kept INSIDE the drawer: the message is about the row named there, and
       // closing it would leave the reader looking at a list that still has the
       // row with no explanation.
-      setDeleteError(err instanceof ApiError ? err.message : "The file could not be removed.");
+      setDeleteError(
+        err instanceof ApiError
+          ? err.message
+          : confirmTarget.kind === "attachment"
+            ? "The file could not be removed."
+            : "The link could not be removed."
+      );
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const closeLinkForm = () => {
+    setLinkOpen(false);
+    setLinkTitle("");
+    setLinkUrl("");
+    setLinkError("");
+  };
+
+  const handleAddLink = async () => {
+    setLinkError("");
+    const title = linkTitle.trim();
+    const url = linkUrl.trim();
+    if (!title) {
+      setLinkError("Link Title is required.");
+      return;
+    }
+    // ★ Refused, not rewritten: storing a URL the user did not type is worse
+    // than refusing it. The server says the same sentence (schemas.ts).
+    if (!isHttpsUrl(url)) {
+      setLinkError(HTTPS_MESSAGE);
+      return;
+    }
+    setLinkSaving(true);
+    try {
+      const row = await api.addSubmissionLink(publicId, { title, url });
+      // Appended, so the new link lands BELOW every attachment and every earlier
+      // link — the brief's ordering.
+      setLinks((prev) => [...prev, row]);
+      setNotice(`Added “${row.title}”.`);
+      closeLinkForm();
+    } catch (err) {
+      setLinkError(err instanceof ApiError ? err.message : "The link could not be added.");
+    } finally {
+      setLinkSaving(false);
     }
   };
 
@@ -153,7 +241,9 @@ export function AttachmentsCard({
     <div className="card">
       <div className="card-head">
         <h3>Attachments</h3>
-        <span className="sub">Files are saved to this form&rsquo;s Google Drive folder</span>
+        <span className="sub">
+          Files are saved to this form&rsquo;s Google Drive folder. Links point to pages elsewhere.
+        </span>
         <span className="lock-tag" style={{ marginLeft: "auto" }}>
           <Lock size={12} />
           Staff only
@@ -193,10 +283,102 @@ export function AttachmentsCard({
             <Paperclip size={14} />
             + Attachment
           </button>
+          {/* The brief puts "+ Link" NEXT TO "+ Attachment". It is NOT disabled at
+              the 10-file cap: links are not files and do not count against it. */}
+          <button
+            type="button"
+            className="secondary-button"
+            disabled={busy || !canUpload || linkSaving}
+            title={
+              !canUpload
+                ? "Attachments are not available for your role on this form"
+                : "Add a link (title and https:// URL)"
+            }
+            aria-expanded={linkOpen}
+            onClick={() => {
+              if (linkOpen) {
+                closeLinkForm();
+              } else {
+                setError("");
+                setNotice("");
+                setLinkError("");
+                setLinkOpen(true);
+              }
+            }}
+          >
+            <Link2 size={14} />
+            + Link
+          </button>
           <span className="muted-note" style={{ marginLeft: "auto" }}>
             {items.length} of {MAX_ATTACHMENTS} attachments
           </span>
         </div>
+
+        {linkOpen && (
+          <div
+            className="card"
+            style={{ marginBottom: 14, padding: "12px 14px", background: "var(--panel-bg)" }}
+            role="group"
+            aria-label="Add a link"
+          >
+            <div style={{ fontWeight: 600, fontSize: "0.875rem", marginBottom: 10 }}>Add a link</div>
+            <label style={{ display: "block", marginBottom: 8 }}>
+              <span className="muted-note" style={{ display: "block", marginLeft: 0, marginBottom: 4 }}>
+                Link Title
+              </span>
+              <input
+                type="text"
+                value={linkTitle}
+                maxLength={200}
+                placeholder="e.g. Student handbook"
+                disabled={linkSaving}
+                onChange={(e) => setLinkTitle(e.target.value)}
+                style={{ width: "100%" }}
+              />
+            </label>
+            <label style={{ display: "block", marginBottom: 8 }}>
+              <span className="muted-note" style={{ display: "block", marginLeft: 0, marginBottom: 4 }}>
+                Link URL
+              </span>
+              <input
+                type="url"
+                value={linkUrl}
+                maxLength={2048}
+                placeholder="https://"
+                disabled={linkSaving}
+                onChange={(e) => {
+                  setLinkUrl(e.target.value);
+                  if (linkError) setLinkError("");
+                }}
+                onBlur={() => {
+                  // Only complain once something was typed — an empty field the
+                  // user has not reached yet is not an error.
+                  if (linkUrl.trim() && !isHttpsUrl(linkUrl)) setLinkError(HTTPS_MESSAGE);
+                }}
+                aria-invalid={linkError ? true : undefined}
+                style={{ width: "100%" }}
+              />
+            </label>
+            {linkError && (
+              <div className="alert-error" role="alert" style={{ marginBottom: 8 }}>
+                {linkError}
+              </div>
+            )}
+            <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+              <button type="button" className="secondary-button" disabled={linkSaving} onClick={closeLinkForm}>
+                Cancel
+              </button>
+              <button
+                type="button"
+                className="primary-button"
+                disabled={linkSaving}
+                onClick={() => void handleAddLink()}
+              >
+                {linkSaving ? "Adding…" : "Add link"}
+              </button>
+            </div>
+          </div>
+        )}
 
         {progress !== null && (
           <div style={{ marginBottom: 14 }} role="status" aria-live="polite">
@@ -235,12 +417,14 @@ export function AttachmentsCard({
           </div>
         )}
 
-        {items.length === 0 ? (
+        {items.length === 0 && links.length === 0 ? (
           <div className="muted-note" style={{ marginLeft: 0 }}>
-            No attachments yet.
+            No attachments or links yet.
           </div>
         ) : (
           <div className="field-list">
+            {/* ATTACHMENTS FIRST, then LINKS — the brief's ordering: a new link
+                displays below any attachments or other links. */}
             {items.map((row) => {
               return (
                 <div
@@ -300,7 +484,7 @@ export function AttachmentsCard({
                       disabled={busy}
                       onClick={() => {
                         setDeleteError("");
-                        setConfirmTarget(row);
+                        setConfirmTarget({ kind: "attachment", row });
                       }}
                       title="Remove this attachment (deletes the file from Google Drive)"
                       aria-label={`Remove ${row.file_name}`}
@@ -311,6 +495,72 @@ export function AttachmentsCard({
                 </div>
               );
             })}
+            {links.map((row) => (
+              <div
+                key={`link-${row.id}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 10,
+                  padding: "8px 0",
+                  borderBottom: "1px solid var(--border)",
+                  flexWrap: "wrap",
+                }}
+              >
+                <Link2 size={14} style={{ flexShrink: 0, color: "var(--text-muted)" }} />
+                {/* The href is the STORED, server-validated URL — never a value
+                    echoed back from an unvalidated source. `noopener noreferrer`
+                    so the opened page cannot reach back into this window. */}
+                <a
+                  href={row.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="link-name"
+                  title={row.url}
+                  style={{
+                    flex: "1 1 240px",
+                    minWidth: 0,
+                    wordBreak: "break-word",
+                    color: "var(--accent)",
+                  }}
+                >
+                  {row.title}
+                </a>
+                <span
+                  className="muted-note"
+                  style={{ marginLeft: 0, maxWidth: "26ch", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}
+                  title={row.url}
+                >
+                  {row.url}
+                  {row.created_by_name ? ` · ${row.created_by_name}` : ""}
+                  {row.created_at ? ` · ${new Date(row.created_at).toLocaleString()}` : ""}
+                </span>
+                <a
+                  className="badge-button"
+                  href={row.url}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                >
+                  <ExternalLink size={12} style={{ verticalAlign: "-1px", marginRight: 4 }} />
+                  Open
+                </a>
+                {canDelete && (
+                  <button
+                    type="button"
+                    className="badge-button danger"
+                    disabled={busy}
+                    onClick={() => {
+                      setDeleteError("");
+                      setConfirmTarget({ kind: "link", row });
+                    }}
+                    title="Remove this link from the submission (the web page itself is not affected)"
+                    aria-label={`Remove link ${row.title}`}
+                  >
+                    <X size={12} style={{ verticalAlign: "-1px" }} />
+                  </button>
+                )}
+              </div>
+            ))}
           </div>
         )}
       </div>
@@ -328,11 +578,13 @@ export function AttachmentsCard({
             className="drawer"
             role="dialog"
             aria-modal="true"
-            aria-label="Remove attachment"
+            aria-label={confirmTarget.kind === "attachment" ? "Remove attachment" : "Remove link"}
             onClick={(e) => e.stopPropagation()}
           >
             <div className="drawer-head">
-              <h2>Remove this attachment?</h2>
+              <h2>
+                {confirmTarget.kind === "attachment" ? "Remove this attachment?" : "Remove this link?"}
+              </h2>
               <button
                 className="icon-button close"
                 onClick={() => setConfirmTarget(null)}
@@ -348,17 +600,46 @@ export function AttachmentsCard({
                 <AlertTriangle size={14} style={{ verticalAlign: "-2px", marginRight: 6 }} />
                 This cannot be undone.
               </div>
-              <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5 }}>
-                <strong>{confirmTarget.file_name}</strong> will be deleted from Google Drive and
-                removed from this submission.
-              </p>
-              <p style={{ margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
-                {formatBytes(confirmTarget.size_bytes)}
-                {confirmTarget.uploaded_by_name ? ` · uploaded by ${confirmTarget.uploaded_by_name}` : ""}
-                {confirmTarget.uploaded_at
-                  ? ` on ${new Date(confirmTarget.uploaded_at).toLocaleString()}`
-                  : ""}
-              </p>
+              {confirmTarget.kind === "attachment" ? (
+                <>
+                  <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5 }}>
+                    <strong>{confirmTarget.row.file_name}</strong> will be deleted from Google Drive
+                    and removed from this submission.
+                  </p>
+                  <p style={{ margin: "10px 0 0", fontSize: "0.8125rem", color: "var(--text-muted)" }}>
+                    {formatBytes(confirmTarget.row.size_bytes)}
+                    {confirmTarget.row.uploaded_by_name
+                      ? ` · uploaded by ${confirmTarget.row.uploaded_by_name}`
+                      : ""}
+                    {confirmTarget.row.uploaded_at
+                      ? ` on ${new Date(confirmTarget.row.uploaded_at).toLocaleString()}`
+                      : ""}
+                  </p>
+                </>
+              ) : (
+                <>
+                  <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.5 }}>
+                    <strong>{confirmTarget.row.title}</strong> will be removed from this submission.
+                    The web page itself is not affected.
+                  </p>
+                  <p
+                    style={{
+                      margin: "10px 0 0",
+                      fontSize: "0.8125rem",
+                      color: "var(--text-muted)",
+                      wordBreak: "break-all",
+                    }}
+                  >
+                    {confirmTarget.row.url}
+                    {confirmTarget.row.created_by_name
+                      ? ` · added by ${confirmTarget.row.created_by_name}`
+                      : ""}
+                    {confirmTarget.row.created_at
+                      ? ` on ${new Date(confirmTarget.row.created_at).toLocaleString()}`
+                      : ""}
+                  </p>
+                </>
+              )}
               {deleteError && (
                 <div className="alert-error" role="alert" style={{ marginTop: 14 }}>
                   {deleteError}
@@ -366,7 +647,9 @@ export function AttachmentsCard({
               )}
             </div>
             <div className="drawer-foot">
-              <span className="muted-note">Deleting an attachment</span>
+              <span className="muted-note">
+                {confirmTarget.kind === "attachment" ? "Deleting an attachment" : "Removing a link"}
+              </span>
               <button
                 type="button"
                 className="secondary-button"

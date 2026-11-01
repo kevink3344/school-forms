@@ -35,6 +35,7 @@ import type {
   SubmissionAnswer,
   SubmissionAttachment,
   SubmissionDetail,
+  SubmissionLink,
   SubmissionRow,
   SubmissionStatus,
   SystemMessage,
@@ -936,12 +937,38 @@ export const api = {
   // ---------------------------------------------------------------------------
   async listAttachments(publicId: string): Promise<{
     attachments: SubmissionAttachment[];
+    links: SubmissionLink[];
     can_upload: boolean;
     enabled: boolean;
     folder_valid: boolean;
     max: number;
   }> {
     return request(`/api/submissions/${publicId}/attachments`, { auth: true });
+  },
+
+  // ---------------------------------------------------------------------------
+  // Links on the Attachments card (docs/plans/staff-attachments.md §3.6).
+  //
+  // Ordinary JSON routes, so they go through `request()` — unlike the upload,
+  // which needs XHR for progress and a raw body.
+  // ---------------------------------------------------------------------------
+  async addSubmissionLink(
+    publicId: string,
+    input: { title: string; url: string }
+  ): Promise<SubmissionLink> {
+    return request<SubmissionLink>(`/api/submissions/${publicId}/links`, {
+      method: "POST",
+      auth: true,
+      body: input,
+    });
+  },
+
+  /** Administrators only — the server refuses anyone else. */
+  async deleteSubmissionLink(publicId: string, linkId: number): Promise<SubmissionLink[]> {
+    return request<SubmissionLink[]>(`/api/submissions/${publicId}/links/${linkId}`, {
+      method: "DELETE",
+      auth: true,
+    });
   },
 
   async deleteAttachment(publicId: string, attachmentId: number): Promise<SubmissionAttachment[]> {

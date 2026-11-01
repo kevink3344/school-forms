@@ -6,6 +6,11 @@
 > exist, and every pre-existing form reads `attachments_enabled = 0` as designed.
 > **Not yet verified live:** the Google Drive upload path (needs an admin to set a Drive Folder ID
 > and turn the switch on) and the >230 s failure path (§5.3).
+>
+> **Extension — Links (2026-10-31):** a **"+ Link"** button now sits next to "+ Attachment" and
+> records a **Link Title + Link URL** (the URL must start with `https://`). Links render in the
+> same list, **below every attachment**, and are stored in their own table
+> (`dbo.submission_links`, §3.6). Implemented; see §3.6, §4.6, §5.5, §6.6 and §14.
 > **Date:** 2026-10-31
 > **Audience:** Engineering, and the admin who will configure it
 > **Area:** Submission detail page (staff/admin), Google Drive, roles
@@ -52,6 +57,20 @@ Restated as requirements:
 | R6 | Uploaded files are **listed below the "+ Attachment" control**. |
 | R7 | At most **10 attachments per submission**. |
 | R8 | **No size limit** on an individual attachment. → **True in the code; capped by the host at ~130–700 MB in practice.** See §5.3 and decision D7. |
+
+**Extension (2026-10-31) — Links:**
+
+> "Add a button next to Attachments for Links. The person can click '+Link' and add a Link Title &
+> Link Url. The link url must begin with 'https://' and when added displays below any attachments
+> or other links."
+
+| # | Requirement |
+| --- | --- |
+| R9 | A **"+ Link"** button sits **next to** "+ Attachment" in the same card. |
+| R10 | Clicking it asks for a **Link Title** and a **Link URL**. |
+| R11 | The URL **must begin with `https://`** — enforced on the client (immediate message) and again on the server (the authority). |
+| R12 | Links display **below any attachments**, and below the previously added links (oldest first). |
+| R13 | The same per-form toggle and role list govern links — a link is the same class of staff-only material as a file. |
 
 ### 1.1 One question I need answered before building
 
@@ -333,6 +352,79 @@ Plan is **(1)**. The upload happens *before* the transaction (Drive first), so t
 short: lock → count → insert → commit. If the count check fails, the just-uploaded Drive file is
 deleted (`drive.files.delete`) before answering `409`.
 
+### 3.6 Extension — Links (+ Link), added 2026-10-31
+
+A **link** is a title + an external URL, recorded against the same submission, shown by the same
+card. It is deliberately a **separate table** from `submission_attachments`:
+
+- the attachment table is a *Drive* table (`drive_file_id NOT NULL`, `size_bytes`, `mime_type`);
+  a link has none of those, and making them nullable would put two row shapes in one table that
+  every query then has to branch on;
+- the 10-file cap applies to **files only**. Links are not files, are not stored in Drive, and do
+  not count against it;
+- deleting a submission cascades both, and both are added to `SUBMISSION_CHILD_TABLES`.
+
+#### 3.6.1 `dbo.submission_links`
+
+| Column | Type (SQL Server) | Type (Turso) | Notes |
+| --- | --- | --- | --- |
+| `id` | `INT IDENTITY(1,1) PRIMARY KEY` | `INTEGER PRIMARY KEY AUTOINCREMENT` | |
+| `submission_id` | `INT NOT NULL` | `INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE` | FK → `dbo.submissions(id)` `ON DELETE CASCADE` |
+| `title` | `NVARCHAR(200) NOT NULL` | `TEXT NOT NULL` | "Link Title", trimmed, 1–200 chars |
+| `url` | `NVARCHAR(2048) NOT NULL` | `TEXT NOT NULL` | "Link URL"; **must start with `https://`** |
+| `created_by` | `INT NULL` | `INTEGER REFERENCES users(id) ON DELETE SET NULL` | FK → `dbo.users(id)` `ON DELETE SET NULL` |
+| `created_at` | `DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()` | `TEXT NOT NULL DEFAULT (strftime(...))` | Add `created_at`… **already** in `TIMESTAMP_COLUMNS` |
+
+Index: `IX_submission_links_submission ON submission_links(submission_id)` — declared through
+`indexGuard`, like the attachment index, so the boot-time "missing index" report stays honest.
+
+#### 3.6.2 The URL rule — `https://` only
+
+`isHttpsUrl(value)` (one helper, used by the Zod schema **and** the client):
+
+```
+trim → must start with "https://" (case-insensitive) → the remainder must parse as an absolute
+URL whose protocol is https: and whose host is non-empty → ≤ 2048 characters
+```
+
+- **No `http://`**, no `javascript:`, no `data:`, no protocol-relative `//host`. The prefix check
+  is what the brief asks for; the `new URL()` parse is what makes it *safe* — `https://` alone
+  would still admit `https://` with no host, and a stored `javascript:`-style string is the one
+  way a link list becomes an XSS vector. Since the prefix is required, `javascript:` can never be
+  stored; the parse is belt-and-braces for the host.
+- Enforced **twice**: the card refuses to submit and says why (`Link URL must begin with
+  https://`), and `POST …/links` answers `400` with the same sentence. The client check is a
+  courtesy; the server is the authority.
+- Rendered with `rel="noopener noreferrer"` and `target="_blank"`, and the `href` is the **stored,
+  validated** URL — never a value echoed back from an unvalidated source.
+
+#### 3.6.3 Ordering and display
+
+The card renders **attachments first, then links** (R12). Within each group the order is
+`id` ascending — oldest first — which is what "displays below any attachments or other links"
+means: a new link is appended at the bottom of the list, beneath every file and every earlier
+link.
+
+```
+[ + Attachment ]  [ + Link ]            3 of 10 attachments
+──────────────────────────────────────────────────────────────
+📄 CDM-00123 - Report Card.pdf   …  [Open] [✕]
+📄 CDM-00123 - IEP.pdf           …  [Open] [✕]
+🔗 Student handbook   https://…/handbook  · A. Smith, 10/31 2:20  [Open] [✕]
+🔗 Course catalog     https://…/catalog   · A. Smith, 10/31 2:21  [Open] [✕]
+```
+
+#### 3.6.4 Who may add, and who may remove
+
+- **Add**: the same verdict as uploading — the form's toggle, the role list, and the folder being
+  reachable (`attachments_can_upload`). A link is staff-only material; letting a role that cannot
+  attach a file add a link would be a hole in the same rule.
+- **Remove**: **administrators only**, exactly like deleting an attachment (D2), through the same
+  confirmation drawer. Removing a link deletes the row only — nothing external is touched, so the
+  drawer says *"This removes the link from this submission. The web page itself is not affected."*
+
+---
+
 ---
 
 ## 4. Database change, in full
@@ -446,6 +538,77 @@ New tests to add:
 - `routes/submissions.attachments.test.ts` — 403 for a role not in the list, 403 for a role in
   the list but with an invalid folder, 409 at the cap, 400 with no file, and the happy path with
   the Drive client mocked.
+
+### 4.6 Extension — Links, in full (added 2026-10-31)
+
+**`server/src/db/schema.ts`** — appended to the same ladder, after the attachment index batch:
+
+```sql
+IF OBJECT_ID('dbo.submission_links', 'U') IS NULL
+CREATE TABLE dbo.submission_links (
+  id            INT IDENTITY(1,1) PRIMARY KEY,
+  submission_id INT NOT NULL,
+  title         NVARCHAR(200) NOT NULL,
+  url           NVARCHAR(2048) NOT NULL,
+  created_by    INT NULL,
+  created_at    DATETIME2 NOT NULL CONSTRAINT DF_submission_links_created_at DEFAULT SYSUTCDATETIME(),
+  CONSTRAINT FK_submission_links_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
+  CONSTRAINT FK_submission_links_creator FOREIGN KEY (created_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+);
+```
+
+```sql
+-- indexGuard("IX_submission_links_submission", "submission_links", ["submission_id"])
+CREATE INDEX IX_submission_links_submission ON dbo.submission_links(submission_id);
+```
+
+Typed interface next to `SubmissionAttachment`:
+
+```ts
+export interface SubmissionLink {
+  id: number;
+  submission_id: number;
+  title: string;
+  url: string;
+  created_by: number | null;
+  created_by_name: string | null;   // joined for display
+  created_at: Date;
+}
+```
+
+**`server/src/db/dialect/turso.ts`** — `CREATE TABLE IF NOT EXISTS submission_links (…)` in final
+shape + `CREATE INDEX IF NOT EXISTS IX_submission_links_submission`. New table, so **no**
+`addColumns` entry. `created_at` is already in `TIMESTAMP_COLUMNS`, so the
+`libsql.test.ts` "covers every timestamp column" guard stays green without an edit.
+
+**`server/src/db/queries.ts`**
+
+- `SUBMISSION_CHILD_TABLES` gains `"submission_links"` — `submissions-archive.test.ts` fails
+  until it does, which is the point (the parser reads the FK out of the DDL).
+- `SubmissionDetail` gains `links: SubmissionLink[]`, populated for every non-parent viewer
+  (`viewer === "parent" ? [] : await listLinksBySubmission(...)`).
+
+**`server/src/db/links.ts`** *(new)* — `listLinksBySubmission`, `createLink`, `deleteLinkRow`,
+mirroring `db/attachments.ts` (no transaction needed: there is no cap and no external call).
+
+**`server/src/schemas.ts`**
+
+```ts
+export const createSubmissionLinkSchema = z.object({
+  title: z.string().trim().min(1).max(200),
+  url: z.string().trim().max(2048).refine(isHttpsUrl, {
+    message: "Link URL must begin with https://",
+  }),
+});
+```
+
+`isHttpsUrl` lives here (exported) so the route, the tests and the client's copy of the rule are
+one definition, not three.
+
+**`server/src/swagger.ts`** — a `SubmissionLink` schema, `links` on the submission-detail payload,
+and the two routes below.
+
+**`server/src/routes/submissions.ts`** — see §5.5.
 
 ---
 
@@ -651,6 +814,25 @@ Putting `attachments_can_upload` on the detail payload means the card's visibili
 `attachments_enabled` is sent separately so an admin can be shown the read-only
 "turned off for this form" card (§3.2) without the client re-deriving the rule.
 
+### 5.5 Extension — the Links routes (added 2026-10-31)
+
+| Method | Path | Purpose | Notes |
+| --- | --- | --- | --- |
+| `POST` | `/api/submissions/:publicId/links` | Add a link | JSON `{ title, url }`. `400` with `"Link URL must begin with https://"` when the URL fails `isHttpsUrl`; `403` when the caller may not use the card (same gate as upload); `201` with the new row. |
+| `DELETE` | `/api/submissions/:publicId/links/:id` | Remove a link | **Administrators only**, mirroring the attachment delete. Answers with the remaining links. |
+
+Both repeat the standard preamble (`requireAuth` → `requireRoles("staff","cdm_contact","admin")` →
+`getSubmissionDetail` → `submissionAccessError` → the attachments gate) and both are **ordinary
+JSON routes**, so they live in `routes/submissions.ts` beside the attachment routes — not in the
+pre-`express.json` upload router.
+
+The gate is `attachmentsAccessErrorForForm` (§5.2) — the same toggle → folder → role →
+reachability sequence. A link needs the folder to be *reachable* only because the card as a whole
+is gated on it; nothing in the link path touches Drive.
+
+`GET /api/submissions/:publicId/attachments` (the card's list call) gains `links` in its response,
+so a card refresh returns both groups in one round trip.
+
 ---
 
 ## 6. Client
@@ -822,6 +1004,70 @@ This is the **global default** (`attachments_roles` setting); the per-form value
 §11 decision D3 asks whether the global layer is wanted at all — if not, the panel is dropped and
 the setting is not added, which removes §7's settings rows.
 
+### 6.6 Extension — the "+ Link" button and the Links list (added 2026-10-31)
+
+All of this lives in `AttachmentsCard.tsx`; no new component and no new page.
+
+**Types & API** (`client/src/types/index.ts`, `client/src/lib/api.ts`):
+
+```ts
+export interface SubmissionLink {
+  id: number;
+  submission_id: number;
+  title: string;
+  url: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string;
+}
+
+api.addSubmissionLink(publicId, { title, url }): Promise<SubmissionLink>
+api.deleteSubmissionLink(publicId, linkId): Promise<SubmissionLink[]>
+```
+
+`SubmissionDetail` gains `links: SubmissionLink[]`; `api.listAttachments` gains `links` in its
+result (it is the card's refresh call).
+
+**The button.** `[ + Link ]` renders immediately to the right of `[ + Attachment ]` in the same
+flex row, using the same `secondary-button` style with a `Link2` icon. It is disabled with the
+same `title` reasons as the attachment button (`!canUpload`), but **not** at the 10-file cap —
+links do not count against the cap.
+
+**The form.** Clicking `+ Link` opens a small inline form *in place of nothing* — a panel above
+the list, not a drawer and not `window.prompt` (nothing in this app prompts natively, and a
+prompt cannot show a validation message next to the field):
+
+```
+┌ Add a link ───────────────────────────────────────────────┐
+│ Link Title  [ Student handbook                        ]   │
+│ Link URL    [ https://…                               ]   │
+│             ⚠ Link URL must begin with https://           │
+│                              [ Cancel ]  [ Add link ]     │
+└───────────────────────────────────────────────────────────┘
+```
+
+- `Link Title` — required, trimmed, max 200.
+- `Link URL` — required, **must begin with `https://`**. Validated on submit (and on blur) with
+  the same rule as the server; the message is the server's own sentence, so the two cannot
+  disagree. A URL typed as `http://…` or `www.…` is refused with that message rather than
+  silently rewritten — rewriting would store something the user did not type.
+- `Add link` is disabled while the request is in flight; errors render inside the panel
+  (`alert-error`) so the typed values are not lost.
+- On success the panel closes, the new row is appended to the **links** group (bottom of the
+  list), and a `notice` reads `Added “<title>”.`
+
+**The list.** One list, two groups, in this order:
+
+1. every attachment (unchanged rendering), then
+2. every link, oldest first — icon `Link2`, the **title** is the link (opens in a new tab with
+   `rel="noopener noreferrer"`), the URL shows beside it in `muted-note` (truncated, full URL in
+   the `title` attribute), then `· <creator>, <date>`, then `[Open]`, and for administrators the
+   same `✕` → confirmation drawer, whose copy for a link says the web page itself is not affected.
+
+The empty state changes from *"No attachments yet."* to *"No attachments or links yet."* and the
+counter line stays about files (`3 of 10 attachments`) — links are not counted, and saying so
+would imply they were.
+
 ---
 
 ## 7. Settings plumbing (only if D3 = "yes, global default")
@@ -846,28 +1092,29 @@ Follow `documents_link` exactly:
 
 | File | Change |
 | --- | --- |
-| `db/schema.ts` | table + index + `forms.attachments_enabled` / `forms.attachments_roles` guards + `SubmissionAttachment` interface |
-| `db/dialect/turso.ts` | table + index + both `forms` columns + two `addColumns` entries |
+| `db/schema.ts` | table + index + `forms.attachments_enabled` / `forms.attachments_roles` guards + `SubmissionAttachment` interface; **`submission_links` table + index + `SubmissionLink` interface (§4.6)** |
+| `db/dialect/turso.ts` | table + index + both `forms` columns + two `addColumns` entries; **`submission_links` table + index** |
 | `db/client.ts` | `TIMESTAMP_COLUMNS += "uploaded_at"`; `BOOLEAN_COLUMNS += "attachments_enabled"` |
-| `db/queries.ts` | `SUBMISSION_CHILD_TABLES`, `Form.attachments_roles`, form select/parse/create/update, `SubmissionDetail.attachments*`, `roleUsage()` census over `forms.attachments_roles`, `RoleUsage` (if D3) |
+| `db/queries.ts` | `SUBMISSION_CHILD_TABLES` (+ **`submission_links`**), `Form.attachments_roles`, form select/parse/create/update, `SubmissionDetail.attachments*` + **`links`**, `roleUsage()` census over `forms.attachments_roles`, `RoleUsage` (if D3) |
 | `db/attachments.ts` *(new)* | `listAttachmentsBySubmission`, `createAttachment` (transactional cap), `getAttachment`, `deleteAttachment` |
+| `db/links.ts` *(new)* | **`listLinksBySubmission`, `createLink`, `deleteLinkRow` (§4.6)** |
 | `google/drive-upload.ts` *(new)* | `uploadSubmissionAttachment`, `deleteDriveFile`, `ensureSubmissionFolder` |
 | `routes/attachments-access.ts` *(new)* | the shared gate (§5.2) |
 | `routes/attachments-upload.ts` *(new)* | the pre-json raw upload router (§5.1) |
-| `routes/submissions.ts` | `GET` list, `GET` file redirect, `DELETE` |
+| `routes/submissions.ts` | `GET` list (**+ `links`**), `GET` file redirect, `DELETE`; **`POST`/`DELETE …/links` (§5.5)** |
 | `routes/forms.ts` | `attachments_roles` on create/update; `drive-validate` unchanged |
-| `schemas.ts` | `attachments_enabled: z.boolean().optional()` and `attachments_roles: z.array(z.string().max(64)).nullable().optional()` on the create + update form schemas |
+| `schemas.ts` | `attachments_enabled: z.boolean().optional()` and `attachments_roles: z.array(z.string().max(64)).nullable().optional()` on the create + update form schemas; **`createSubmissionLinkSchema` + exported `isHttpsUrl`** |
 | `index.ts` | mount `helmet()` + the upload router **above** `express.json` |
-| `swagger.ts` | the three new submission routes; `attachments_roles` on the form schemas; settings enum (if D3) |
+| `swagger.ts` | the three new submission routes; `attachments_roles` on the form schemas; settings enum (if D3); **`SubmissionLink` schema, `links` on the detail payload, the two link routes** |
 | `package.json` | **no change** (option A) |
 
 ### Client
 
 | File | Change |
 | --- | --- |
-| `types/index.ts` | `SubmissionAttachment`, `Form.attachments_enabled` + `attachments_roles`, `SubmissionDetail.attachments*`, `AppSettingKey` (if D3) |
-| `lib/api.ts` | list/upload/delete; `uploadAttachment` via XHR |
-| `components/AttachmentsCard.tsx` *(new)* | the card (§6.2) |
+| `types/index.ts` | `SubmissionAttachment`, `Form.attachments_enabled` + `attachments_roles`, `SubmissionDetail.attachments*` + **`links`**, **`SubmissionLink`**, `AppSettingKey` (if D3) |
+| `lib/api.ts` | list/upload/delete; `uploadAttachment` via XHR; **`addSubmissionLink`, `deleteSubmissionLink`** |
+| `components/AttachmentsCard.tsx` *(new)* | the card (§6.2) **+ the `+ Link` button, the add-link panel and the links group (§6.6)** |
 | `pages/staff/StaffSubmissionDetail.tsx` | render the card below Staff-only fields |
 | `pages/admin/AdminFormDesigner.tsx` | replace Public link card with the Attachments card: **Enable Staff Attachments** toggle + Access row |
 | `pages/admin/AdminSettings.tsx` | Attachments panel (if D3) |
@@ -903,6 +1150,13 @@ Follow `documents_link` exactly:
 | Parent calls any attachment route | `403` (role guard) and the detail payload carries no attachment data. |
 | Role deleted while it holds a grant | `roleUsage()` gains a **`form_fields.roles`-style LIKE census over `forms.attachments_roles`** (`roles IS NOT NULL AND roles LIKE @pattern`), so the delete guard blocks it exactly as it does for a staff-only field. This is required **regardless of D3**. |
 | A role created after a form was saved with `NULL` | Sees the card — that is what `NULL` means. |
+| **A link URL typed as `http://…`, `www.…`, `ftp://…` or `javascript:…`** | Refused with *"Link URL must begin with https://"* — in the panel on the client, and `400` from the server. It is never rewritten to `https://`; storing a URL the user did not type is worse than refusing it. |
+| **A link URL with `https://` and no host (`https://`)** | Refused by the `new URL()` parse (§3.6.2) with the same message. |
+| **A link whose page is later deleted** | The row stays; clicking it reaches the site's own 404. The submission record is a record of what was linked, not a liveness check. |
+| **A link added while the submission is archived** | Allowed, same rule as an attachment upload (D4). |
+| **Submission deleted (archived → delete)** | `submission_links` rows are deleted with it (`SUBMISSION_CHILD_TABLES`). Nothing external exists to clean up. |
+| **A submission with 10 attachments** | `+ Link` is still enabled — links are not files and do not count against the cap. |
+| **A link added by a staff member, removed by staff** | `403`; only an administrator may remove a link (D2), and the `✕` is not rendered for anyone else. |
 
 ---
 
@@ -916,6 +1170,10 @@ Follow `documents_link` exactly:
 3. **Admin guide §3.7** (Figure 11) and the *Public link* references at
    `admin-guide.html` L435, L441 — the new figure must show the **Enable Staff Attachments**
    toggle and the Access row.
+4. **Card heading sub-line** — with links in the card, "Files are saved to this form's Google
+   Drive folder" is no longer the whole story. It becomes *"Files are saved to this form's Google
+   Drive folder. Links point to pages elsewhere."*
+5. **Empty state** — "No attachments yet." → **"No attachments or links yet."**
 
 ---
 
@@ -973,6 +1231,24 @@ Browser (with a real Drive folder configured):
 | Form designer | Attachments card where Public link was; **Enable Staff Attachments** toggle disabled until a Drive Folder ID is set; toggles match the staff-only Access row behaviour (untick all → `[]`; re-grant one → only that one); role selection survives switching the feature off and on |
 | Settings → Attachments (if D3) | Toggling a role changes the default for a form whose `attachments_roles` is `NULL` |
 
+**Links (added 2026-10-31):**
+
+| Probe | Expected |
+| --- | --- |
+| Card with no links | `+ Link` sits **next to** `+ Attachment`; empty state reads "No attachments or links yet." |
+| Click `+ Link` | The add-link panel appears with `Link Title` and `Link URL`; Cancel closes it and discards what was typed |
+| Submit with a `http://…` URL | Refused **in the panel** with "Link URL must begin with https://"; nothing is sent |
+| `POST …/links` directly with `http://…` (curl) | `400` with the same sentence — the client is not the authority |
+| Submit with a `https://…` URL | Row appears **below every attachment** and below earlier links; notice reads `Added “<title>”.` |
+| Add two links | The second renders below the first; both below the files |
+| Click a link title / Open | Opens the URL in a new tab |
+| Add a link as staff | Allowed (when the card allows uploads); **no ✕** on the row |
+| `DELETE …/links/:id` as staff (curl) | `403` |
+| Remove a link as admin | ✕ opens the drawer; copy says the web page is not affected; "Yes, remove it" removes the row only |
+| Submission with 10 attachments | `+ Link` still enabled; the counter still reads `10 of 10 attachments` |
+| Archive → delete the submission | `submission_links` rows gone along with the attachment rows |
+| Parent public page for the same submission | Neither attachments nor links in the network response |
+
 ---
 
 ## 13. Suggested build order
@@ -989,3 +1265,38 @@ Browser (with a real Drive folder configured):
 7. Designer card replacing Public link.
 8. Settings panel (if D3) + copy changes (§10) + guide updates.
 9. *(Only if D7 = B)* the resumable-session routes and the browser `PUT` path (§5.3.3).
+
+---
+
+## 14. Extension — Links: what shipped (2026-10-31)
+
+Built in the order below, on top of the implemented feature. No existing behaviour changed:
+attachments render exactly as before, and the 10-file cap, the role gate and the delete rule are
+untouched.
+
+1. **Database.** `dbo.submission_links` + `IX_submission_links_submission` on SQL Server; the same
+   table and index on Turso (new table, so no `addColumns` entry). `SUBMISSION_CHILD_TABLES` gains
+   `submission_links`, which `submissions-archive.test.ts` verifies against the DDL in both
+   directions.
+2. **Data layer.** `server/src/db/links.ts` — list / create / delete, with the creator's display
+   name joined (the same shape as `db/attachments.ts`).
+3. **Validation.** `isHttpsUrl()` in `schemas.ts`, used by `createSubmissionLinkSchema` and pinned
+   by unit tests (accepts `https://…`; refuses `http://`, `www.`, `javascript:`, `https://` with
+   no host, and over-long URLs).
+4. **Routes.** `POST` / `DELETE /api/submissions/:publicId/links` behind the existing gate;
+   `GET …/attachments` now also returns `links`; the detail payload carries `links`.
+5. **Client.** `SubmissionLink` type, `api.addSubmissionLink` / `api.deleteSubmissionLink`, the
+   `+ Link` button, the inline add-link panel, and the links group rendered below the attachments
+   with the same confirmation drawer for removal.
+
+**Decisions taken without asking** (recorded here because they are the ones a reviewer would
+otherwise ask about):
+
+| Question | Choice | Why |
+| --- | --- | --- |
+| Separate table, or a nullable-URL row in `submission_attachments`? | **Separate table** | §3.6 — the attachment row is a Drive row; a link has no file, no size and no MIME type. |
+| Do links count against the 10-file cap? | **No** | The cap is about Drive storage and the upload path; a link stores ~300 bytes. |
+| May a link be edited after it is added? | **No** (remove and re-add) | Same as attachments — the row is a record of what was linked, and an edit would silently change a record someone else may already have read. |
+| Who may remove a link? | **Administrators only** | D2, applied consistently. |
+| Is `http://` rewritten to `https://`? | **No — refused** | Storing a URL the user did not type is worse than refusing it. |
+

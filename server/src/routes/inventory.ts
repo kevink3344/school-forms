@@ -113,6 +113,11 @@ export const ROUTES: RouteEntry[] = [
   // Admin-only, like every other route that destroys data: removing an
   // attachment deletes the only copy of a file someone supplied.
   { method: "delete", path: "/api/submissions/{publicId}/attachments/{id}", auth: "admin", tags: "Submissions" },
+  // Staff Attachments — Links (docs/plans/staff-attachments.md §3.6). Ordinary
+  // JSON routes on the same router; the POST is held to the attachments gate,
+  // and the DELETE is admin-only for the same reason as the attachment delete.
+  { method: "post", path: "/api/submissions/{publicId}/links", auth: "staff", tags: "Submissions" },
+  { method: "delete", path: "/api/submissions/{publicId}/links/{id}", auth: "admin", tags: "Submissions" },
   { method: "get", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "post", path: "/api/users", auth: "admin", tags: "Users" },
   { method: "put", path: "/api/users/{id}", auth: "admin", tags: "Users" },

@@ -565,6 +565,19 @@ export interface SubmissionAttachment {
   uploaded_at: string;
 }
 
+// A link added from a submission's Attachments card
+// (docs/plans/staff-attachments.md §3.6). `url` always begins with `https://` —
+// the server refuses anything else before it is stored.
+export interface SubmissionLink {
+  id: number;
+  submission_id: number;
+  title: string;
+  url: string;
+  created_by: number | null;
+  created_by_name: string | null;
+  created_at: string;
+}
+
 export interface SubmissionDetail extends Submission {
   form_name: string;
   student_name: string | null;
@@ -583,6 +596,9 @@ export interface SubmissionDetail extends Submission {
   // parent viewer. The three flags are the server's verdict — the card renders
   // from them rather than re-deriving the access rule.
   attachments: SubmissionAttachment[];
+  // Links staff added to this submission, rendered BELOW the attachments on the
+  // same card. Always empty for a parent viewer.
+  links: SubmissionLink[];
   attachments_enabled: boolean;
   attachments_can_upload: boolean;
   attachments_folder_valid: boolean;

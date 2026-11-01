@@ -270,6 +270,23 @@ const TURSO_DDL: string[] = [
    )`,
   `CREATE INDEX IF NOT EXISTS IX_submission_attachments_submission ON submission_attachments(submission_id)`,
 
+  // --- submission_links ------------------------------------------------------
+  // docs/plans/staff-attachments.md §3.6. Links shown below the attachments on
+  // the same card. A separate table from `submission_attachments` because that
+  // one is a Drive table and a link has no file, size or MIME type. `url` is
+  // validated in the application (must begin with `https://`) — SQLite cannot add
+  // a CHECK via ALTER TABLE, so a constraint here would make the two dialects
+  // disagree about what the column accepts.
+  `CREATE TABLE IF NOT EXISTS submission_links (
+     id            INTEGER PRIMARY KEY AUTOINCREMENT,
+     submission_id INTEGER NOT NULL REFERENCES submissions(id) ON DELETE CASCADE,
+     title         TEXT NOT NULL,
+     url           TEXT NOT NULL,
+     created_by    INTEGER REFERENCES users(id) ON DELETE SET NULL,
+     created_at    TEXT NOT NULL DEFAULT ${NOW_DEFAULT}
+   )`,
+  `CREATE INDEX IF NOT EXISTS IX_submission_links_submission ON submission_links(submission_id)`,
+
   // --- report_views ----------------------------------------------------------
   `CREATE TABLE IF NOT EXISTS report_views (
      id              INTEGER PRIMARY KEY AUTOINCREMENT,

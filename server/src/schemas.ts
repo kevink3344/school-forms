@@ -542,6 +542,43 @@ export const promoteAdhocFieldSchema = z.object({
 });
 
 // -----------------------------------------------------------------------------
+// Submission links (docs/plans/staff-attachments.md §3.6)
+// -----------------------------------------------------------------------------
+/**
+ * True only for an absolute `https://` URL with a host.
+ *
+ * ★ The brief's rule is "must begin with https://", and that prefix check is
+ * what this does first. The `new URL()` parse is what makes the stored value
+ * SAFE as well as compliant: `https://` alone would still admit a host-less
+ * string, and a stored `javascript:`-style value is the one way a link list
+ * becomes an XSS vector. Requiring the prefix already excludes `javascript:`;
+ * the parse is the second lock on the same door.
+ *
+ * Exported so the client's copy of the rule and the tests read the same
+ * definition rather than re-deriving it.
+ */
+export function isHttpsUrl(value: string): boolean {
+  const trimmed = value.trim();
+  if (!/^https:\/\//i.test(trimmed)) return false;
+  if (trimmed.length > 2048) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === "https:" && parsed.hostname.length > 0;
+  } catch {
+    return false;
+  }
+}
+
+export const createSubmissionLinkSchema = z.object({
+  title: z.string().trim().min(1, "Link Title is required.").max(200),
+  url: z
+    .string()
+    .trim()
+    .max(2048)
+    .refine(isHttpsUrl, { message: "Link URL must begin with https://" }),
+});
+
+// -----------------------------------------------------------------------------
 // Export / query filters
 // -----------------------------------------------------------------------------
 export const exportQuerySchema = z.object({

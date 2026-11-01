@@ -526,15 +526,17 @@ describe("archive visibility — the permanent delete's child set", () => {
     return out.sort();
   }
 
-  it("reads the same four children out of both dialects' DDL", () => {
+  it("reads the same five children out of both dialects' DDL", () => {
     // `submission_attachments` joined this set with Staff Attachments
     // (docs/plans/staff-attachments.md): deleting a submission removes its
     // attachment ROWS, while the Drive files themselves are deliberately kept
-    // (the same rule as generated documents).
+    // (the same rule as generated documents). `submission_links` joined it with
+    // the Links extension (§3.6) — a link row has nothing external to keep.
     const expected = [
       "documents",
       "submission_adhoc_fields",
       "submission_attachments",
+      "submission_links",
       "submission_values",
     ];
     expect(

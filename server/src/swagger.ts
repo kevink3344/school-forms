@@ -437,6 +437,22 @@ export function buildSwaggerSpec(req?: Request) {
             uploaded_at: { type: "string", format: "date-time" },
           },
         },
+        SubmissionLink: {
+          type: "object",
+          description:
+            "A link staff added to a submission (docs/plans/staff-attachments.md §3.6). Rendered " +
+            "below the attachments on the same card. `url` always begins with `https://` — the " +
+            "server refuses anything else before it is stored.",
+          properties: {
+            id: { type: "integer" },
+            submission_id: { type: "integer" },
+            title: { type: "string", description: "The Link Title." },
+            url: { type: "string", description: "An absolute https:// URL." },
+            created_by: { type: "integer", nullable: true, description: "Null once that account is deleted." },
+            created_by_name: { type: "string", nullable: true },
+            created_at: { type: "string", format: "date-time" },
+          },
+        },
         WebhookEvent: {
           type: "object",
           description:
@@ -2914,6 +2930,7 @@ export function buildSwaggerSpec(req?: Request) {
                     type: "object",
                     properties: {
                       attachments: { type: "array", items: { $ref: "#/components/schemas/SubmissionAttachment" } },
+                      links: { type: "array", items: { $ref: "#/components/schemas/SubmissionLink" } },
                       can_upload: { type: "boolean" },
                       enabled: { type: "boolean" },
                       folder_valid: { type: "boolean" },
@@ -2987,6 +3004,72 @@ export function buildSwaggerSpec(req?: Request) {
             "403": { description: "Not an administrator" },
             "404": { description: "Submission or attachment not found" },
             "502": { description: "Google Drive refused the delete; nothing was changed" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/links": {
+        post: {
+          tags: ["Submissions"],
+          summary: "Add a link to a submission (staff/admin)",
+          description:
+            "Records a Link Title and Link URL against the submission (docs/plans/staff-attachments.md §3.6). Links render **below** the attachments on the same card and do not count against the 10-file attachment cap.\n\n" +
+            "★ `url` **must begin with `https://`** and must parse as an absolute URL with a host. Anything else — `http://`, `www.`, `javascript:`, a host-less `https://` — is refused with `400` and the message \"Link URL must begin with https://\". The value is never rewritten.\n\n" +
+            "The same gate as uploading an attachment applies: the form's Enable Staff Attachments switch, its role list, and the Drive folder being reachable.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [{ name: "publicId", in: "path", required: true, schema: { type: "string" } }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["title", "url"],
+                  properties: {
+                    title: { type: "string", maxLength: 200, description: "The Link Title." },
+                    url: { type: "string", maxLength: 2048, example: "https://example.org/handbook" },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": {
+              description: "Created — the new link",
+              content: {
+                "application/json": { schema: { $ref: "#/components/schemas/SubmissionLink" } },
+              },
+            },
+            "400": { description: "Title missing, or the URL does not begin with https://" },
+            "403": { description: "Attachments are not enabled for this form, or not available for this role" },
+            "404": { description: "Submission not found" },
+            "409": { description: "No Drive Folder ID, or the folder is unreachable" },
+          },
+        },
+      },
+      "/api/submissions/{publicId}/links/{id}": {
+        delete: {
+          tags: ["Submissions"],
+          summary: "Remove a link (admin only)",
+          description:
+            "**Administrators only**, mirroring the attachment delete — the person who added a link is not necessarily the right person to decide later that it should not be on the record.\n\n" +
+            "Deletes only the row: the web page it points at was never ours, so nothing external is touched. The UI requires a confirmation drawer first.",
+          security: [{ [bearerScheme]: [] }],
+          parameters: [
+            { name: "publicId", in: "path", required: true, schema: { type: "string" } },
+            { name: "id", in: "path", required: true, schema: { type: "integer" } },
+          ],
+          responses: {
+            "200": {
+              description: "OK — the remaining links",
+              content: {
+                "application/json": {
+                  schema: { type: "array", items: { $ref: "#/components/schemas/SubmissionLink" } },
+                },
+              },
+            },
+            "400": { description: "Invalid link id" },
+            "403": { description: "Not an administrator" },
+            "404": { description: "Submission or link not found" },
           },
         },
       },

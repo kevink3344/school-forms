@@ -1,7 +1,8 @@
 import { describe, it, expect } from "vitest";
-import { canUseAttachments } from "./schema.js";
+import { canUseAttachments, expectedIndexNames } from "./schema.js";
 import { sqlserverDialect } from "./dialect/sqlserver.js";
 import { tursoDialect } from "./dialect/turso.js";
+import { isHttpsUrl, createSubmissionLinkSchema } from "../schemas.js";
 import {
   signAttachmentLinkToken,
   verifyAttachmentLinkToken,
@@ -98,6 +99,91 @@ describe("submission_attachments is a child of submissions on both dialects", ()
         expect.objectContaining({ table: "forms", column: "attachments_roles" }),
       ])
     );
+  });
+});
+
+// -----------------------------------------------------------------------------
+// Links (docs/plans/staff-attachments.md §3.6)
+//
+// A link is a separate table from an attachment, because the attachment table is
+// a Drive table (drive_file_id NOT NULL, size_bytes, mime_type) and a link has
+// none of those. These pin the two things that would fail silently: the table
+// cascading with its submission (or the permanent delete leaves rows behind) and
+// the `https://` rule that keeps a stored URL safe to render as an href.
+// -----------------------------------------------------------------------------
+describe("submission_links is a child of submissions on both dialects", () => {
+  const ddl = (statements: string[]) => statements.join("\n");
+
+  it("SQL Server declares the table, the cascade and the index", () => {
+    const sql = ddl(sqlserverDialect.ddl);
+    expect(sql).toMatch(/CREATE TABLE dbo\.submission_links/);
+    expect(sql).toMatch(
+      /FOREIGN KEY \(submission_id\) REFERENCES dbo\.submissions\(id\) ON DELETE CASCADE/
+    );
+    expect(sql).toMatch(/IX_submission_links_submission/);
+    // The creator is SET NULL, so deleting a user never blocks on a link they
+    // once added.
+    expect(sql).toMatch(
+      /FOREIGN KEY \(created_by\) REFERENCES dbo\.users\(id\) ON DELETE SET NULL/
+    );
+  });
+
+  it("Turso declares the table, the cascade and the index", () => {
+    const sql = ddl(tursoDialect.ddl);
+    expect(sql).toMatch(/CREATE TABLE IF NOT EXISTS submission_links/);
+    expect(sql).toMatch(/REFERENCES submissions\(id\) ON DELETE CASCADE/);
+    expect(sql).toMatch(/CREATE INDEX IF NOT EXISTS IX_submission_links_submission/);
+  });
+
+  it("needs no addColumns entry — the table is new on both engines", () => {
+    // `addColumns` exists only for columns added to a table that predates them.
+    expect(tursoDialect.addColumns.some((c) => c.table === "submission_links")).toBe(false);
+  });
+
+  it("declares the index through indexGuard on SQL Server", () => {
+    // Otherwise the boot-time "N indexes MISSING" report cannot name it.
+    expect(expectedIndexNames(sqlserverDialect.ddl)).toContain("IX_submission_links_submission");
+    expect(expectedIndexNames(tursoDialect.ddl)).toContain("IX_submission_links_submission");
+  });
+});
+
+describe("isHttpsUrl — the Link URL rule", () => {
+  it("accepts an https URL with a host", () => {
+    expect(isHttpsUrl("https://example.org/handbook")).toBe(true);
+    expect(isHttpsUrl("  https://drive.google.com/drive/folders/abc  ")).toBe(true);
+    expect(isHttpsUrl("HTTPS://Example.ORG")).toBe(true);
+  });
+
+  it("refuses anything that does not begin with https://", () => {
+    // ★ The brief's rule, and the reason a stored link can never be a
+    // `javascript:` URL: the prefix is required before anything else is checked.
+    expect(isHttpsUrl("http://example.org")).toBe(false);
+    expect(isHttpsUrl("www.example.org")).toBe(false);
+    expect(isHttpsUrl("example.org")).toBe(false);
+    expect(isHttpsUrl("ftp://example.org")).toBe(false);
+    expect(isHttpsUrl("javascript:alert(1)")).toBe(false);
+    expect(isHttpsUrl("//example.org")).toBe(false);
+    expect(isHttpsUrl("")).toBe(false);
+  });
+
+  it("refuses a host-less https:// — the prefix alone is not enough", () => {
+    expect(isHttpsUrl("https://")).toBe(false);
+    expect(isHttpsUrl("https://   ")).toBe(false);
+  });
+
+  it("refuses an over-long URL", () => {
+    expect(isHttpsUrl(`https://example.org/${"a".repeat(2100)}`)).toBe(false);
+  });
+
+  it("is the rule the create schema applies", () => {
+    expect(createSubmissionLinkSchema.safeParse({ title: "Handbook", url: "https://a.org/x" }).success).toBe(true);
+    const bad = createSubmissionLinkSchema.safeParse({ title: "Handbook", url: "http://a.org/x" });
+    expect(bad.success).toBe(false);
+    if (!bad.success) {
+      expect(bad.error.issues[0].message).toBe("Link URL must begin with https://");
+    }
+    // A title is required — a bare URL is not a link the list can render.
+    expect(createSubmissionLinkSchema.safeParse({ title: "  ", url: "https://a.org/x" }).success).toBe(false);
   });
 });
 

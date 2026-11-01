@@ -8,6 +8,7 @@ import { findAliasedSchoolId, invalidateSchoolAliasCache } from "./school-alias-
 import { formVisibilityClause, type FormViewer } from "../access/formAccess.js";
 import { listDocumentsBySubmission } from "./documents.js";
 import { listAttachmentsBySubmission, MAX_SUBMISSION_ATTACHMENTS } from "./attachments.js";
+import { listLinksBySubmission } from "./links.js";
 import { validateDriveFolder } from "../google/docs.js";
 import { env } from "../config/env.js";
 import type {
@@ -24,6 +25,7 @@ import type {
   Organization,
   ListDocumentRow,
   SubmissionAttachment,
+  SubmissionLink,
   SystemMessage,
 } from "./schema.js";
 
@@ -1952,6 +1954,9 @@ export interface SubmissionDetail extends SubmissionRow {
   // Files staff attached to this submission (docs/plans/staff-attachments.md).
   // Empty for a parent viewer — the bytes live in Drive and are internal.
   attachments: SubmissionAttachment[];
+  // Links staff added to this submission (docs/plans/staff-attachments.md §3.6).
+  // Rendered BELOW the attachments on the same card. Empty for a parent viewer.
+  links: SubmissionLink[];
   // The form's "Enable Staff Attachments" switch, sent separately from
   // `attachments_can_upload` so an admin can be shown a read-only "turned off"
   // card without the client re-deriving the rule.
@@ -2391,6 +2396,9 @@ export async function getSubmissionDetail(
   // could actually use the card, so a parent or an ungranted role costs nothing.
   const form = await getForm(submission.form_id);
   const attachments = viewer === "parent" ? [] : await listAttachmentsBySubmission(submission.id);
+  // Links are the same class of staff-only material as attachments, so the same
+  // viewer rule applies: a parent never receives them.
+  const links = viewer === "parent" ? [] : await listLinksBySubmission(submission.id);
   const attachmentsEnabled = viewer === "parent" ? false : (form?.attachments_enabled ?? false);
   const roleAllowed = viewer === "parent" ? false : !!form && canUseAttachments(form, viewer);
   const folderValid =
@@ -2416,6 +2424,7 @@ export async function getSubmissionDetail(
     parentFields,
     documents,
     attachments,
+    links,
     attachments_enabled: attachmentsEnabled,
     attachments_can_upload: attachmentsCanUpload,
     attachments_folder_valid: folderValid,
@@ -2874,7 +2883,7 @@ export async function restoreSubmission(id: number): Promise<boolean> {
 // genuinely means "nothing was deleted". Without the rollback, that same race
 // would leave a restored submission standing with its answers and document rows
 // gone, which is the half-deletion this ordering exists to make impossible.
-const SUBMISSION_CHILD_TABLES = ["submission_values", "submission_adhoc_fields", "documents", "submission_attachments"] as const;
+const SUBMISSION_CHILD_TABLES = ["submission_values", "submission_adhoc_fields", "documents", "submission_attachments", "submission_links"] as const;
 
 /** Internal signal: the parent delete matched nothing, so unwind the children. */
 const NOT_ARCHIVED = new Error("submission is not archived");

@@ -30,6 +30,8 @@ import {
   deleteAttachmentRow,
   MAX_SUBMISSION_ATTACHMENTS,
 } from "../db/attachments.js";
+import { listLinksBySubmission, createLink, getLink, deleteLinkRow } from "../db/links.js";
+import { attachmentsAccessErrorForForm } from "./attachments-access.js";
 import { sendSlackAlert } from "../notify/slack.js";
 import {
   createSubmissionSchema,
@@ -38,6 +40,7 @@ import {
   createAdhocFieldSchema,
   updateAdhocFieldSchema,
   promoteAdhocFieldSchema,
+  createSubmissionLinkSchema,
 } from "../schemas.js";
 
 export const submissionsRouter = Router();
@@ -628,6 +631,9 @@ submissionsRouter.get("/:publicId/attachments", requireAuth, requireRoles("staff
     }
     res.json({
       attachments: submission.attachments,
+      // Links are returned here too so a card refresh gets both groups in one
+      // round trip (docs/plans/staff-attachments.md §5.5).
+      links: submission.links,
       can_upload: submission.attachments_can_upload,
       enabled: submission.attachments_enabled,
       folder_valid: submission.attachments_folder_valid,
@@ -819,6 +825,98 @@ submissionsRouter.delete("/:publicId/attachments/:id", requireAuth, requireRoles
     }
     await deleteAttachmentRow(submission.id, attachmentId);
     res.json(await listAttachmentsBySubmission(submission.id));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: POST /api/submissions/:publicId/links — add a link
+// (docs/plans/staff-attachments.md §3.6, §5.5)
+//
+// ★ The URL rule is enforced HERE, not only in the card. `https://` is the
+// brief's requirement, and `isHttpsUrl` (schemas.ts) adds the host check that
+// makes the stored value safe to render as an href. A caller that skips the
+// client — curl, a script — is held to the same rule.
+//
+// The gate is the attachments gate: a link is the same class of staff-only
+// material as a file, so a role that may not attach a file may not add a link.
+// -----------------------------------------------------------------------------
+submissionsRouter.post("/:publicId/links", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const parsed = createSubmissionLinkSchema.safeParse(req.body);
+    if (!parsed.success) {
+      // The card shows the first message verbatim, so the client and the server
+      // say the same sentence about the same field.
+      const first = parsed.error.issues[0];
+      res.status(400).json({ error: first?.message ?? "Invalid link." });
+      return;
+    }
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    const form = await getForm(submission.form_id);
+    if (!form) {
+      res.status(404).json({ error: "Form not found" });
+      return;
+    }
+    const gate = await attachmentsAccessErrorForForm({ role: String(req.user!.role) }, form);
+    if (gate) {
+      res.status(gate.status).json({ error: gate.error });
+      return;
+    }
+    const created = await createLink({
+      submissionId: submission.id,
+      title: parsed.data.title,
+      url: parsed.data.url,
+      createdBy: req.user!.id,
+    });
+    // Re-read so the response carries the creator's display name, exactly as
+    // the list does.
+    res.status(201).json((await getLink(submission.id, created.id)) ?? created);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// ADMIN: DELETE /api/submissions/:publicId/links/:id — remove a link
+//
+// ★ ADMIN-ONLY, for the same reason as deleting an attachment (D2): the person
+// who added a link is not necessarily the right person to decide later that it
+// should not be on the record. Nothing external is deleted — the page was never
+// ours — so this is a single row delete.
+// -----------------------------------------------------------------------------
+submissionsRouter.delete("/:publicId/links/:id", requireAuth, requireRoles("admin"), async (req, res, next) => {
+  try {
+    const submission = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
+    if (!submission) {
+      res.status(404).json({ error: "Submission not found" });
+      return;
+    }
+    const denied = await submissionAccessError(req, submission);
+    if (denied) {
+      res.status(denied.status).json({ error: denied.error });
+      return;
+    }
+    const linkId = Number(req.params.id);
+    if (!Number.isInteger(linkId) || linkId <= 0) {
+      res.status(400).json({ error: "Invalid link id" });
+      return;
+    }
+    const removed = await deleteLinkRow(submission.id, linkId);
+    if (!removed) {
+      res.status(404).json({ error: "Link not found on this submission" });
+      return;
+    }
+    res.json(await listLinksBySubmission(submission.id));
   } catch (err) {
     next(err);
   }

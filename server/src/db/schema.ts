@@ -533,6 +533,20 @@ export interface SubmissionAttachment {
   uploaded_at: Date;
 }
 
+// A link added from a submission's Attachments card
+// (docs/plans/staff-attachments.md §3.6). `url` is guaranteed to begin with
+// `https://` — the route refuses anything else before it is stored.
+export interface SubmissionLink {
+  id: number;
+  submission_id: number;
+  title: string;
+  url: string;
+  created_by: number | null;
+  // Joined for display: who added it. NULL once that account is deleted.
+  created_by_name: string | null;
+  created_at: Date;
+}
+
 // -----------------------------------------------------------------------------
 // Inbound webhook intake log (docs/plans/webhook-log.md).
 //
@@ -2096,6 +2110,40 @@ export const SQLSERVER_DDL_STATEMENTS: string[] = [
   // stays honest.
   `${indexGuard("IX_submission_attachments_submission", "submission_attachments", ["submission_id"])}
      CREATE INDEX IX_submission_attachments_submission ON dbo.submission_attachments(submission_id);`,
+
+  // ---------------------------------------------------------------------
+  // Staff Attachments — Links (docs/plans/staff-attachments.md §3.6)
+  //
+  // A link is a title + an external URL recorded against the submission and
+  // shown BELOW the attachments on the same card. It is a separate table, not a
+  // nullable-URL row in `submission_attachments`: that table is a Drive table
+  // (`drive_file_id NOT NULL`, `size_bytes`, `mime_type`) and a link has none of
+  // those, so folding them together would make every query branch on row shape.
+  //
+  // `url` is validated in the application (must begin with `https://` — see
+  // isHttpsUrl in schemas.ts) rather than by a CHECK constraint, because SQLite
+  // cannot add a CHECK via ALTER TABLE and the two dialects would then disagree
+  // about what the column accepts (dual-db.md §5.3).
+  //
+  // `created_by` is SET NULL so deleting a user never blocks on a link they once
+  // added.
+  // ---------------------------------------------------------------------
+  `IF OBJECT_ID('dbo.submission_links', 'U') IS NULL
+   CREATE TABLE dbo.submission_links (
+     id            INT IDENTITY(1,1) PRIMARY KEY,
+     submission_id INT NOT NULL,
+     title         NVARCHAR(200) NOT NULL,
+     url           NVARCHAR(2048) NOT NULL,
+     created_by    INT NULL,
+     created_at    DATETIME2 NOT NULL CONSTRAINT DF_submission_links_created_at DEFAULT SYSUTCDATETIME(),
+     CONSTRAINT FK_submission_links_submission FOREIGN KEY (submission_id) REFERENCES dbo.submissions(id) ON DELETE CASCADE,
+     CONSTRAINT FK_submission_links_creator FOREIGN KEY (created_by) REFERENCES dbo.users(id) ON DELETE SET NULL
+   );`,
+
+  // Its own batch (error 207), declared through indexGuard for the same reason
+  // as the attachment index above.
+  `${indexGuard("IX_submission_links_submission", "submission_links", ["submission_id"])}
+     CREATE INDEX IX_submission_links_submission ON dbo.submission_links(submission_id);`,
 ];
 
 // A saved report configuration. `filters`/`columns` are JSON strings in the DB

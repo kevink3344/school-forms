@@ -772,11 +772,11 @@ export default function StaffSubmissionDetail() {
         </div>
       </div>
 
-      {/* Staff Attachments (docs/plans/staff-attachments.md).
+      {/* Staff Attachments and Links (docs/plans/staff-attachments.md, §3.6).
           Sits directly below the Staff-only fields card, as the brief asks.
           Visibility is the SERVER's verdict — `attachments_folder_valid` and
           `attachments_can_upload` are resolved in getSubmissionDetail — so this
-          page never re-derives who may upload.
+          page never re-derives who may upload or add a link.
 
           An admin still sees the card on a form where the feature is switched
           off (or where their role is not in the list), read-only and with the
@@ -787,6 +787,7 @@ export default function StaffSubmissionDetail() {
           <AttachmentsCard
             publicId={detail.public_id}
             initial={detail.attachments}
+            initialLinks={detail.links ?? []}
             canUpload={detail.attachments_can_upload}
             // Administrators only — the server refuses anyone else, so this is
             // the courtesy half of the same rule.
