@@ -7,7 +7,7 @@ import {
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { Pencil, Trash2 } from "lucide-react";
+import { Paperclip, Pencil, Trash2 } from "lucide-react";
 import type { ExportColumn, FormField, SubmissionRow } from "../types";
 import { StatusBadge } from "./layout";
 import { renderEditor, renderValue, toStr, displayValue, type AnswerValue } from "./FieldValue";
@@ -255,16 +255,37 @@ export default function SubmissionsGrid({
                       view has to reverse it and an inline declaration cannot be
                       overridden by a rule (see `.grid-cell-pinned` in global.css). */}
                   <td className="cell-strong grid-cell-pinned" data-label="Student / School">
-                    <a
-                      className="link-name"
-                      href={submissionPath(s.public_id)}
-                      onClick={(e) => {
-                        e.preventDefault();
-                        onOpen(s.public_id);
-                      }}
-                    >
-                      {s.link_label || "None"}
-                    </a>
+                    {/* The name and its marker share a row so the marker sits
+                        BESIDE the name rather than on the school line below it,
+                        and so a long name truncates in the space that is left
+                        instead of pushing the icon out of the pinned column. */}
+                    <span className="grid-name-row">
+                      <a
+                        className="link-name"
+                        href={submissionPath(s.public_id)}
+                        onClick={(e) => {
+                          e.preventDefault();
+                          onOpen(s.public_id);
+                        }}
+                      >
+                        {s.link_label || "None"}
+                      </a>
+                      {/* Attachments and/or links exist on this submission
+                          (docs/plans/staff-attachments.md §3.7). The server
+                          resolves the flag, so the grid never guesses; the label
+                          is on the wrapper because the icon alone says nothing to
+                          a screen reader. */}
+                      {s.has_attachments && (
+                        <span
+                          className="grid-name-marker"
+                          title="This submission has attachments or links"
+                          aria-label="Has attachments or links"
+                          role="img"
+                        >
+                          <Paperclip size={12} aria-hidden="true" />
+                        </span>
+                      )}
+                    </span>
                     {/* Both inline declarations that used to sit here are gone.
                         `marginLeft: 8` was already dead: `.grid-cell-pinned
                         .cell-mono` resets it to 0 with `!important` in both the

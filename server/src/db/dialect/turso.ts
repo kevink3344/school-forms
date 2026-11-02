@@ -794,6 +794,19 @@ export const tursoDialect: Dialect = {
     );
   },
 
+  submissionHasAttachmentsSubquery() {
+    // The libSQL half of the grid's "this row has attachments or links" marker
+    // (docs/plans/staff-attachments.md §3.7). Identical text to SQL Server —
+    // `EXISTS` is standard and both tables carry the same `submission_id` — but
+    // declared per dialect so the two engines cannot drift, and with no `dbo.`
+    // qualifier, which the libSQL driver would otherwise have to rewrite.
+    return (
+      `(CASE WHEN EXISTS (SELECT 1 FROM submission_attachments sa WHERE sa.submission_id = s.id)\n` +
+      `           OR EXISTS (SELECT 1 FROM submission_links sl WHERE sl.submission_id = s.id)\n` +
+      `        THEN 1 ELSE 0 END)`
+    );
+  },
+
   submissionSchoolNameSubquery() {
     // Same limit relocation as `submissionValueSubquery`, and the same shared
     // predicate — including the LOWER() match, which matters more here than on

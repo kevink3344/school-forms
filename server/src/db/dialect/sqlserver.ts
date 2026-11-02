@@ -184,9 +184,19 @@ export const sqlserverDialect: Dialect = {
     );
   },
 
+  submissionHasAttachmentsSubquery() {
+    // The SQL Server half of the grid's "this row has attachments or links"
+    // marker (docs/plans/staff-attachments.md §3.7). Shared text, not a dialect
+    // difference, but declared here so the two engines cannot drift.
+    return (
+      `(CASE WHEN EXISTS (SELECT 1 FROM dbo.submission_attachments sa WHERE sa.submission_id = s.id)\n` +
+      `           OR EXISTS (SELECT 1 FROM dbo.submission_links sl WHERE sl.submission_id = s.id)\n` +
+      `        THEN 1 ELSE 0 END)`
+    );
+  },
+
   submissionSchoolNameSubquery() {
-    // The answer is what `submissions.school_id` is derived FROM, so it is the
-    // only value that can name a school the district feed has not imported yet.
+    // The answer is what `submissions.school_id` is derived FROM, so it is the    // only value that can name a school the district feed has not imported yet.
     // The LEFT JOIN turns the typed answer into the canonical school name when
     // one matches; `scs.id` breaks a tie between duplicate names the same way
     // for both dialects, and matching on LOWER() keeps that true on libSQL,

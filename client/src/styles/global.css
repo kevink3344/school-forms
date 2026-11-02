@@ -289,8 +289,8 @@ p { margin: 0; }
 .page-head .title-block p { margin: 2px 0 0; color: var(--text-muted); font-size: 0.8125rem; }
 .page-head .head-actions { margin-left: auto; display: flex; align-items: center; gap: 10px; }
 /* Explains a disabled action in place, since a disabled button cannot say why
-   and its `title` only shows on hover (the Submissions "Columns" button under
-   "All forms"). Sits to the left of the button it belongs to. */
+   and its `title` only shows on hover. Sits to the left of the button it
+   belongs to. */
 .page-head .head-hint { font-size: 0.75rem; color: var(--text-muted); }
 
 /* Buttons */
@@ -310,8 +310,8 @@ p { margin: 0; }
 }
 .secondary-button:hover { background: var(--tint); color: var(--accent-strong); }
 /* A disabled secondary button keeps its outline but goes flat grey, so it still
-   reads as a button that exists and is merely unavailable (the Submissions
-   "Columns" button with no single form selected) rather than as body text. */
+   reads as a button that exists and is merely unavailable rather than as body
+   text. */
 .secondary-button:disabled {
   border-color: var(--border); color: var(--text-muted); background: var(--panel-bg); cursor: not-allowed;
 }
@@ -845,6 +845,21 @@ table.grid tbody tr.grid-group-row > td {
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
 }
 .grid-cell-pinned .link-name { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+/* The name and the "has attachments or links" marker, side by side
+   (docs/plans/staff-attachments.md §3.7).
+   The name is the flex item that shrinks, so a long name ellipsises in the room
+   that is left instead of pushing the marker out of the pinned column; the marker
+   keeps its own width. `min-width: 0` is what actually lets a flex child shrink
+   below its content width — without it the ellipsis never engages. */
+.grid-cell-pinned .grid-name-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
+.grid-cell-pinned .grid-name-row .link-name { min-width: 0; }
+.grid-name-marker {
+  display: inline-flex; align-items: center; flex: 0 0 auto;
+  /* Muted, not accent: this is a property of the row, not a control. It must not
+     read as a second link beside the name. */
+  color: var(--text-muted);
+}
 
 /* Single-line cells are a DESKTOP presentation: this is a table there and one
    wrapped value would make its row taller than the rest. It is declared here
@@ -1554,6 +1569,11 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
   table.grid tbody td.grid-cell-pinned::before { content: none; }
   .grid-cell-pinned .link-name,
   .grid-cell-pinned .cell-mono { display: block; white-space: normal; }
+  /* The name row stays a row on mobile — the marker belongs beside the name, not
+     on a line of its own — but the name may now WRAP rather than ellipsise,
+     because there is no fixed column width to protect here. */
+  .grid-cell-pinned .grid-name-row { align-items: flex-start; }
+  .grid-cell-pinned .grid-name-row .link-name { white-space: normal; overflow: visible; text-overflow: clip; }
   /* A touch larger than the 13px cell text, so the name reads as the card title
      it has just become. Desktop is unaffected — this is the mobile block only. */
   .grid-cell-pinned .link-name { font-size: 0.875rem; }

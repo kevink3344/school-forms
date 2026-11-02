@@ -11,6 +11,9 @@
 > records a **Link Title + Link URL** (the URL must start with `https://`). Links render in the
 > same list, **below every attachment**, and are stored in their own table
 > (`dbo.submission_links`, §3.6). Implemented; see §3.6, §4.6, §5.5, §6.6 and §14.
+> **Extension — grid marker (2026-11-01):** a submission that has at least one attachment **or**
+> link shows a small paperclip beside its name in the grid's Student / School column (§3.7, §4.7,
+> §6.7, §15).
 > **Date:** 2026-10-31
 > **Audience:** Engineering, and the admin who will configure it
 > **Area:** Submission detail page (staff/admin), Google Drive, roles
@@ -71,6 +74,18 @@ Restated as requirements:
 | R11 | The URL **must begin with `https://`** — enforced on the client (immediate message) and again on the server (the authority). |
 | R12 | Links display **below any attachments**, and below the previously added links (oldest first). |
 | R13 | The same per-form toggle and role list govern links — a link is the same class of staff-only material as a file. |
+
+**Extension (2026-11-01) — the grid marker:**
+
+> "When a submission has attachments (or links), there should be a small icon next to the name
+> under 'Student/School' denoting the submission has one or both items."
+
+| # | Requirement |
+| --- | --- |
+| R14 | The Submissions grid (admin dashboard **and** staff queue) shows a **small icon beside the name** in the pinned Student / School column when that submission has **at least one attachment or at least one link**. |
+| R15 | No icon when it has neither — the marker means "there is something here", so a permanent placeholder would make it meaningless. |
+| R16 | The icon is **not** a control: the name is still the link to the submission. |
+
 
 ### 1.1 One question I need answered before building
 
@@ -423,6 +438,54 @@ link.
   confirmation drawer. Removing a link deletes the row only — nothing external is touched, so the
   drawer says *"This removes the link from this submission. The web page itself is not affected."*
 
+### 3.7 Extension — the "has attachments or links" grid marker (added 2026-11-01)
+
+A submission that has at least one attachment **or** at least one link shows a small paperclip
+immediately to the right of its name in the grid's pinned **Student / School** column.
+
+```
+Student / School
+──────────────────────────────────────────
+📎 Amara Okafor                ← has attachments or links
+   Wake STEM Early College
+   Jordan Lee                  ← neither: no marker
+   Sanderson High
+```
+
+**Where the truth comes from.** The flag is resolved **in SQL, per row**, not by a second request
+per row and not by the client:
+
+```sql
+(CASE WHEN EXISTS (SELECT 1 FROM dbo.submission_attachments sa WHERE sa.submission_id = s.id)
+           OR EXISTS (SELECT 1 FROM dbo.submission_links sl WHERE sl.submission_id = s.id)
+      THEN 1 ELSE 0 END) AS has_attachments
+```
+
+- **`EXISTS`, not `COUNT`** — this runs once per row of the grid; `EXISTS` stops at the first
+  matching row, a `COUNT` reads them all.
+- **Two independent `EXISTS`** rather than a `UNION`, so ten attachments cost the same as one.
+- Declared as `Dialect.submissionHasAttachmentsSubquery()` so the two engines cannot drift, and so
+  the libSQL copy carries no `dbo.` qualifier (the driver would otherwise have to rewrite it).
+- Both tables carry `IX_…_submission`, so each `EXISTS` is an index seek.
+
+**Why a scalar subquery on `listSubmissions` and not a join.** A `LEFT JOIN` to either child table
+would multiply the submission rows and need a `DISTINCT`/`GROUP BY` over every selected column —
+the classic way a grid query starts returning duplicate rows. The subquery adds one column and
+cannot change the row count.
+
+**The flag is normalised to a boolean** in `listSubmissions` (`toFlag`), because a driver numeric
+arrives as a number on SQL Server and may arrive as a string on libSQL — the same asymmetry
+`size_bytes` has (§3.1.1). Every consumer then compares a boolean.
+
+**Ordering, and the one exception to the archive rule.** The marker is computed from the child
+tables, which are **not** filtered by archive state — a submission that was archived with two
+attachments still has them, and the Archived view is exactly where someone looks to decide whether
+to delete it. The marker therefore describes the submission, not the view.
+
+**Scope.** Both grids that share `SubmissionsGrid` get it (admin dashboard and staff queue). The
+Reports grid does not: it renders its own rows from a different query, and the marker is a
+navigation aid for the queue rather than a report column.
+
 ---
 
 ---
@@ -609,6 +672,25 @@ one definition, not three.
 and the two routes below.
 
 **`server/src/routes/submissions.ts`** — see §5.5.
+
+### 4.7 Extension — the grid marker, in full (added 2026-11-01)
+
+**No schema change.** The marker is derived from the two child tables that already exist, so
+nothing is migrated and nothing new is stored — a stored flag would be one more thing to keep in
+step with every upload and delete.
+
+| File | Change |
+| --- | --- |
+| `server/src/db/dialect/types.ts` | `submissionHasAttachmentsSubquery(): string` on the `Dialect` interface |
+| `server/src/db/dialect/sqlserver.ts` | the `dbo.`-qualified implementation (§3.7) |
+| `server/src/db/dialect/turso.ts` | the same text without the `dbo.` qualifier |
+| `server/src/db/queries.ts` | `SubmissionRow.has_attachments: boolean`; the column added to `listSubmissions`' SELECT; `toFlag()` normalisation |
+| `client/src/types/index.ts` | `SubmissionRow.has_attachments?: boolean` |
+| `client/src/components/SubmissionsGrid.tsx` | the name + marker row in the pinned cell |
+| `client/src/styles/global.css` | `.grid-name-row`, `.grid-name-marker` (+ the mobile override) |
+
+`getSubmissionByPublicId` deliberately does **not** select it: the detail page already loads the
+rows themselves, so a flag there would be a second answer to a question nobody asks.
 
 ---
 
@@ -1068,6 +1150,37 @@ The empty state changes from *"No attachments yet."* to *"No attachments or link
 counter line stays about files (`3 of 10 attachments`) — links are not counted, and saying so
 would imply they were.
 
+### 6.7 Extension — the grid marker (added 2026-11-01)
+
+In `SubmissionsGrid.tsx`, the pinned cell's name becomes a row:
+
+```tsx
+<span className="grid-name-row">
+  <a className="link-name" href={submissionPath(s.public_id)} onClick={…}>{s.link_label || "None"}</a>
+  {s.has_attachments && (
+    <span className="grid-name-marker" role="img"
+          aria-label="Has attachments or links"
+          title="This submission has attachments or links">
+      <Paperclip size={12} aria-hidden="true" />
+    </span>
+  )}
+</span>
+```
+
+- **`Paperclip`**, the same icon the Attachments card uses for a file — one shape for "there is
+  material attached to this submission", whichever kind it is.
+- **Muted (`--text-muted`), not the accent colour.** The name beside it is a link; a second
+  accent-coloured glyph would read as a second control.
+- **`role="img"` with an `aria-label`** on the wrapper, because an icon alone announces nothing.
+  The `title` gives a mouse user the same sentence.
+- **Flex layout, name shrinks.** `.grid-name-row` is `display: flex` with `.link-name` as the
+  shrinking item (`min-width: 0`), so a long name ellipsises in the room that is left instead of
+  pushing the marker out of the 260px pinned column. On mobile the row stays a row but the name
+  wraps instead of ellipsising, since there is no fixed width to protect there.
+- **Not rendered at all** when the flag is false (R15) — no placeholder, so the marker's presence
+  is the information.
+
+
 ---
 
 ## 7. Settings plumbing (only if D3 = "yes, global default")
@@ -1095,7 +1208,7 @@ Follow `documents_link` exactly:
 | `db/schema.ts` | table + index + `forms.attachments_enabled` / `forms.attachments_roles` guards + `SubmissionAttachment` interface; **`submission_links` table + index + `SubmissionLink` interface (§4.6)** |
 | `db/dialect/turso.ts` | table + index + both `forms` columns + two `addColumns` entries; **`submission_links` table + index** |
 | `db/client.ts` | `TIMESTAMP_COLUMNS += "uploaded_at"`; `BOOLEAN_COLUMNS += "attachments_enabled"` |
-| `db/queries.ts` | `SUBMISSION_CHILD_TABLES` (+ **`submission_links`**), `Form.attachments_roles`, form select/parse/create/update, `SubmissionDetail.attachments*` + **`links`**, `roleUsage()` census over `forms.attachments_roles`, `RoleUsage` (if D3) |
+| `db/queries.ts` | `SUBMISSION_CHILD_TABLES` (+ **`submission_links`**), `Form.attachments_roles`, form select/parse/create/update, `SubmissionDetail.attachments*` + **`links`**, `roleUsage()` census over `forms.attachments_roles`, `RoleUsage` (if D3); **`SubmissionRow.has_attachments` + the grid marker subquery in `listSubmissions` (§4.7)** |
 | `db/attachments.ts` *(new)* | `listAttachmentsBySubmission`, `createAttachment` (transactional cap), `getAttachment`, `deleteAttachment` |
 | `db/links.ts` *(new)* | **`listLinksBySubmission`, `createLink`, `deleteLinkRow` (§4.6)** |
 | `google/drive-upload.ts` *(new)* | `uploadSubmissionAttachment`, `deleteDriveFile`, `ensureSubmissionFolder` |
@@ -1112,9 +1225,11 @@ Follow `documents_link` exactly:
 
 | File | Change |
 | --- | --- |
-| `types/index.ts` | `SubmissionAttachment`, `Form.attachments_enabled` + `attachments_roles`, `SubmissionDetail.attachments*` + **`links`**, **`SubmissionLink`**, `AppSettingKey` (if D3) |
+| `types/index.ts` | `SubmissionAttachment`, `Form.attachments_enabled` + `attachments_roles`, `SubmissionDetail.attachments*` + **`links`**, **`SubmissionLink`**, `AppSettingKey` (if D3), **`SubmissionRow.has_attachments`** |
 | `lib/api.ts` | list/upload/delete; `uploadAttachment` via XHR; **`addSubmissionLink`, `deleteSubmissionLink`** |
 | `components/AttachmentsCard.tsx` *(new)* | the card (§6.2) **+ the `+ Link` button, the add-link panel and the links group (§6.6)** |
+| `components/SubmissionsGrid.tsx` | **the name + marker row in the pinned cell (§6.7)** |
+| `styles/global.css` | **`.grid-name-row` / `.grid-name-marker`, plus the mobile override (§6.7)** |
 | `pages/staff/StaffSubmissionDetail.tsx` | render the card below Staff-only fields |
 | `pages/admin/AdminFormDesigner.tsx` | replace Public link card with the Attachments card: **Enable Staff Attachments** toggle + Access row |
 | `pages/admin/AdminSettings.tsx` | Attachments panel (if D3) |
@@ -1157,6 +1272,10 @@ Follow `documents_link` exactly:
 | **Submission deleted (archived → delete)** | `submission_links` rows are deleted with it (`SUBMISSION_CHILD_TABLES`). Nothing external exists to clean up. |
 | **A submission with 10 attachments** | `+ Link` is still enabled — links are not files and do not count against the cap. |
 | **A link added by a staff member, removed by staff** | `403`; only an administrator may remove a link (D2), and the `✕` is not rendered for anyone else. |
+| **A submission with no attachments and no links** | No marker in the grid — the icon means "there is something here", so rendering a dimmed one would make it meaningless (R15). |
+| **The last attachment and the last link are removed** | The marker disappears on the next list load. It is derived per request, so there is no stale flag to clear. |
+| **An archived submission that has attachments** | Still marked in the Archived view — the marker describes the submission, not the view (§3.7). |
+| **A very long student name** | The name ellipsises and the marker keeps its place; the marker is never pushed out of the pinned column (§6.7). |
 
 ---
 
@@ -1249,6 +1368,20 @@ Browser (with a real Drive folder configured):
 | Archive → delete the submission | `submission_links` rows gone along with the attachment rows |
 | Parent public page for the same submission | Neither attachments nor links in the network response |
 
+**Grid marker (added 2026-11-01):**
+
+| Probe | Expected |
+| --- | --- |
+| Submission with one attachment | Paperclip beside the name in Student / School, on the admin dashboard **and** the staff queue |
+| Submission with only a link | Same marker — the flag is "attachments **or** links" |
+| Submission with neither | No marker, and no gap where one would be |
+| Add the first attachment, then reload the grid | Marker appears |
+| Remove the last attachment and the last link, then reload | Marker disappears |
+| Hover the marker | Tooltip "This submission has attachments or links"; a screen reader announces the same |
+| Click the name beside the marker | Opens the submission (the marker is not a control) |
+| Long student name | Name ellipsises; the marker stays inside the pinned column |
+| Phone-width viewport | Marker still sits beside the name; the name wraps rather than truncating |
+
 ---
 
 ## 13. Suggested build order
@@ -1299,4 +1432,26 @@ otherwise ask about):
 | May a link be edited after it is added? | **No** (remove and re-add) | Same as attachments — the row is a record of what was linked, and an edit would silently change a record someone else may already have read. |
 | Who may remove a link? | **Administrators only** | D2, applied consistently. |
 | Is `http://` rewritten to `https://`? | **No — refused** | Storing a URL the user did not type is worse than refusing it. |
+
+---
+
+## 15. Extension — the grid marker: what shipped (2026-11-01)
+
+1. **Dialect.** `submissionHasAttachmentsSubquery()` on the `Dialect` interface, implemented for
+   both engines (§3.7). Two `EXISTS` clauses, `1`/`0`, correlated on `s`.
+2. **Query.** `listSubmissions` selects it as `has_attachments` and normalises it with `toFlag()`,
+   so `SubmissionRow.has_attachments` is a real boolean on both engines.
+3. **Grid.** The pinned cell's name becomes `.grid-name-row` — the link plus a muted `Paperclip`
+   with `role="img"` and an `aria-label`, rendered only when the flag is true.
+4. **Styles.** `.grid-name-row` (flex, name shrinks) and `.grid-name-marker` (muted, fixed width),
+   with a mobile override so the name wraps instead of ellipsising.
+
+**Decisions taken without asking:**
+
+| Question | Choice | Why |
+| --- | --- | --- |
+| One icon for both kinds, or two (file + link)? | **One paperclip** | The brief says "one or both items" and asks for *an* icon. Two icons in a 260px pinned column, on top of a name and a school, is clutter; the detail page is one click away and names each item. |
+| Stored column on `submissions`, or derived? | **Derived** | A stored flag would need writing on every upload, link add and delete, and would be wrong the first time one of those was missed. Two indexed `EXISTS` per row is cheap and cannot drift. |
+| Marker in the Reports grid too? | **No** | It renders its own rows from a different query; the marker is a queue-navigation aid, not a report column. |
+| Where exactly beside the name? | **Immediately right of the name**, same line | "Next to the name" — and it keeps the school line below untouched. |
 

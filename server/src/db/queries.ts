@@ -1903,6 +1903,15 @@ export interface SubmissionRow extends Submission {
   // deliberately keep using `student_name`, which is a "who is this" label for a
   // page header rather than a row identifier.
   link_label: string | null;
+  // 1 when the submission has at least one attachment OR at least one link, 0
+  // when it has neither (docs/plans/staff-attachments.md §3.7). The grid draws a
+  // small marker beside the name for it.
+  //
+  // ★ A driver numeric, so it arrives as a NUMBER on SQL Server and may arrive as
+  // a STRING on libSQL. `listSubmissions` normalises it to a real boolean before
+  // returning, so every consumer compares a boolean and no caller has to remember
+  // which engine it is talking to.
+  has_attachments: boolean;
   // The school name the submission's own answers declared — the parent's
   // spelling, recorded at intake (docs/plans/school-name-reconciliation.md). NULL
   // when the form has no school question, or on a row written before the column
@@ -2153,7 +2162,7 @@ export async function listSubmissions(
   // expected to see is missing", never "an archived row is on screen".
   clauses.unshift(params.archived ? archivedOnly("s") : notArchived("s"));
   const where = clauses.length ? `WHERE ${clauses.join(" AND ")}` : "";
-  return execute<SubmissionRow>(
+  const rows = await execute<SubmissionRow & { has_attachments: unknown }>(
     `SELECT s.id, s.public_id, s.form_id, s.school_id, s.organization_id, s.status,
             s.submission_seq, s.submitted_at, s.updated_at,
             s.school_year,
@@ -2164,7 +2173,8 @@ export async function listSubmissions(
             f.title AS form_name,
             COALESCE(${dialect().submissionSchoolNameSubquery()}, sch.name) AS school_name,
             ${dialect().submissionValueSubquery()} AS student_name,
-            ${dialect().submissionLinkLabelSubquery()} AS link_label
+            ${dialect().submissionLinkLabelSubquery()} AS link_label,
+            ${dialect().submissionHasAttachmentsSubquery()} AS has_attachments
      FROM dbo.submissions s
      JOIN dbo.forms f ON f.id = s.form_id
      LEFT JOIN dbo.schools sch ON sch.id = s.school_id
@@ -2174,6 +2184,20 @@ export async function listSubmissions(
      ORDER BY s.submitted_at DESC`,
     p
   );
+  // The marker is a driver numeric (see the note on `has_attachments`), so it is
+  // converted once, here, rather than at every render site.
+  return rows.map((row) => ({ ...row, has_attachments: toFlag(row.has_attachments) }));
+}
+
+/**
+ * A driver numeric (or boolean) read as a real boolean.
+ *
+ * `Number("1")`, `Number(1)` and `Number(true)` are all 1, so the three shapes
+ * the two drivers can produce agree; anything else — NULL, a string that is not a
+ * number — reads as FALSE, because "no marker" is the safe default for a badge.
+ */
+function toFlag(value: unknown): boolean {
+  return Number(value) === 1;
 }
 
 /**

@@ -154,6 +154,25 @@ export interface Dialect {
   submissionLinkLabelSubquery(): string;
 
   /**
+   * Parenthesised scalar subquery yielding 1 when a submission has at least one
+   * attachment OR one link, and 0 when it has neither
+   * (docs/plans/staff-attachments.md §3.7).
+   *
+   * Correlated on the outer alias `s` (a `submissions` row). The caller appends
+   * its own `AS <alias>` and normalises the numeric result.
+   *
+   * ★ EXISTS rather than COUNT: this runs once per row of the grid, and EXISTS
+   * stops at the first matching row while a COUNT reads every one of them. It is
+   * also two independent EXISTS rather than a UNION, so a submission with ten
+   * attachments and no links costs the same as one with a single attachment.
+   *
+   * The two tables are named literally rather than derived from
+   * `SUBMISSION_CHILD_TABLES`: that list is the DELETE census (every child of a
+   * submission), and this is a question about two specific features.
+   */
+  submissionHasAttachmentsSubquery(): string;
+
+  /**
    * Parenthesised scalar subquery yielding the SCHOOL a submission declares —
    * the value of its "School"-labelled answer, resolved against `schools` so
    * the canonical spelling wins over whatever the parent typed, and falling

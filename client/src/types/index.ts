@@ -480,6 +480,11 @@ export interface SubmissionRow extends Submission {
   // the form has not configured any. NULL means every configured answer is
   // blank, which the grid renders as "None".
   link_label: string | null;
+  // TRUE when the submission has at least one attachment OR at least one link
+  // (docs/plans/staff-attachments.md §3.7). The grid draws a small marker beside
+  // the name for it. Optional because rows from other endpoints (the detail
+  // payload, webhook replays) do not carry it.
+  has_attachments?: boolean;
 }
 
 export interface SubmissionAnswer {

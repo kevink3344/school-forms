@@ -147,8 +147,35 @@ describe("submission_links is a child of submissions on both dialects", () => {
   });
 });
 
-describe("isHttpsUrl — the Link URL rule", () => {
-  it("accepts an https URL with a host", () => {
+describe("submissionHasAttachmentsSubquery — the grid marker (§3.7)", () => {
+  // The marker is 1 when the submission has an attachment OR a link. Both halves
+  // must be present on both engines: dropping either one produces a marker that
+  // is silently wrong for exactly one kind of material, which no test elsewhere
+  // would notice.
+  const canonical = (sql: string) => sql.replaceAll("dbo.", "").replace(/\s+/g, " ").trim();
+
+  it("asks about BOTH child tables, with EXISTS rather than COUNT", () => {
+    for (const sql of [sqlserverDialect.submissionHasAttachmentsSubquery(), tursoDialect.submissionHasAttachmentsSubquery()]) {
+      expect(sql).toMatch(/EXISTS \(SELECT 1 FROM (?:dbo\.)?submission_attachments sa WHERE sa\.submission_id = s\.id\)/);
+      expect(sql).toMatch(/EXISTS \(SELECT 1 FROM (?:dbo\.)?submission_links sl WHERE sl\.submission_id = s\.id\)/);
+      expect(sql).not.toMatch(/COUNT\(/);
+      // A correlated scalar subquery, so the caller can append `AS <alias>`.
+      expect(sql.startsWith("(") && sql.endsWith(")")).toBe(true);
+    }
+  });
+
+  it("is the same statement on both engines, apart from the dbo. qualifier", () => {
+    expect(canonical(tursoDialect.submissionHasAttachmentsSubquery())).toBe(
+      canonical(sqlserverDialect.submissionHasAttachmentsSubquery())
+    );
+  });
+
+  it("the Turso copy carries no dbo. qualifier for the driver to rewrite", () => {
+    expect(tursoDialect.submissionHasAttachmentsSubquery()).not.toMatch(/dbo\./);
+  });
+});
+
+describe("isHttpsUrl — the Link URL rule", () => {  it("accepts an https URL with a host", () => {
     expect(isHttpsUrl("https://example.org/handbook")).toBe(true);
     expect(isHttpsUrl("  https://drive.google.com/drive/folders/abc  ")).toBe(true);
     expect(isHttpsUrl("HTTPS://Example.ORG")).toBe(true);
