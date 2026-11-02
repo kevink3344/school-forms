@@ -242,21 +242,15 @@ export default function StaffQueue() {
         }
         actions={
           <>
-            {/* Column choice is per form, so with "All forms" selected there is
-                nothing to choose from. Say so beside the button — a disabled
-                button on its own explains nothing, and its title only appears on
-                hover. On a single-form school the form is auto-selected, so the
-                button is enabled from the first render. */}
-            {!formId && (
-              <span className="head-hint">Select a single form to choose columns</span>
-            )}
+            {/* With "All forms" selected there are no field columns, but the
+                standard ones can still be turned off, so the button stays
+                available and the drawer lists just those. */}
             <button
               className="secondary-button"
-              disabled={!formId}
               title={
                 formId
                   ? "Choose which form fields appear as columns"
-                  : "Select a single form to choose columns"
+                  : "Choose which standard columns appear"
               }
               onClick={openPicker}
             >
@@ -421,6 +415,7 @@ export default function StaffQueue() {
         onToggle={toggleColumn}
         onToggleAll={toggleAll}
         onClose={closePicker}
+        scopeLabel={formId ? "this form" : "all forms"}
       />
 
       <ExportModal

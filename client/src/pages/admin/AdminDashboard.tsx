@@ -314,21 +314,15 @@ export default function AdminDashboard() {
             <button className="secondary-button" onClick={() => navigate("/admin/forms")}>
               + New Form
             </button>
-            {/* Column choice is per form — there is no sensible set for "All
-                forms", where the union of every form's fields would be enormous
-                and mostly empty. The reason is also spelled out beside the
-                button: a disabled button explains nothing on its own, and its
-                `title` only appears on hover. */}
-            {!formId && (
-              <span className="head-hint">Select a single form to choose columns</span>
-            )}
+            {/* With "All forms" selected there are no field columns, but the
+                standard ones can still be turned off, so the button stays
+                available and the drawer lists just those. */}
             <button
               className="secondary-button"
-              disabled={!formId}
               title={
                 formId
                   ? "Choose which form fields appear as columns"
-                  : "Select a single form to choose columns"
+                  : "Choose which standard columns appear"
               }
               onClick={openPicker}
             >
@@ -580,6 +574,7 @@ export default function AdminDashboard() {
         onToggle={toggleColumn}
         onToggleAll={toggleAll}
         onClose={closePicker}
+        scopeLabel={formId ? "this form" : "all forms"}
       />
 
       <ExportModal

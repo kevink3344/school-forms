@@ -25,7 +25,9 @@ import { useCellEdit } from "./useCellEdit";
 // never toggled.
 //
 // `formId` 0 means "no single form selected" (the "All forms" / "All reports"
-// case). Then there are no field columns at all and the standard ones all show.
+// case). Then there are no field columns at all, and the picker lists only the
+// standard ones — a choice there is remembered across every form, since it is
+// not tied to any one of them.
 // ---------------------------------------------------------------------------
 
 // Keys that survive a reseed whatever form is loaded. The standard columns are
@@ -35,6 +37,33 @@ const STATIC_KEYS = new Set<string>([
   GRID_PINNED_COLUMN.key,
   ...GRID_BASE_COLUMNS.map((c) => c.key),
 ]);
+
+// Standard columns are per form, so with "All forms" selected there is no form
+// config to hold a choice. It is kept here instead, per user and per browser, so
+// the standard columns stay as the user left them while they browse every form.
+const ALL_FORMS_HIDDEN_KEY = "school-forms.grid.allFormsHiddenBase";
+
+function readAllFormsHidden(): Set<string> {
+  try {
+    const raw = localStorage.getItem(ALL_FORMS_HIDDEN_KEY);
+    if (!raw) return new Set();
+    const parsed: unknown = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return new Set();
+    const base = new Set(GRID_BASE_COLUMNS.map((c) => c.key));
+    return new Set(parsed.filter((k): k is string => typeof k === "string" && base.has(k)));
+  } catch {
+    return new Set();
+  }
+}
+
+function writeAllFormsHidden(hidden: Set<string>) {
+  try {
+    localStorage.setItem(ALL_FORMS_HIDDEN_KEY, JSON.stringify([...hidden]));
+  } catch {
+    // Storage unavailable (private mode, quota). The choice still applies for
+    // this session; it just will not be remembered.
+  }
+}
 
 export interface SubmissionGridOptions {
   /** The selected form, or 0 for "all forms". */
@@ -112,12 +141,18 @@ export function useSubmissionGrid({
       setPreview(null);
       setFieldMeta(new Map());
       setValuesByPublicId(new Map());
-      // Every standard column, not an empty set. With no single form selected
-      // there is no per-form config and no picker to open (the Columns button is
-      // disabled), so the grid has to fall back to showing them all. An empty
-      // set would read as "hide every standard column" and leave the grid with
-      // nothing but the pinned one.
-      setChecked(new Set(STATIC_KEYS));
+      // The standard columns minus whatever the user hid under "All forms".
+      // Seeded from storage rather than always showing every one, so the picker
+      // is meaningful here: it is the only place that choice can be made, and it
+      // has to survive a reload. The pinned column is always in the set — it is
+      // what names the row, and it is never toggled.
+      const hidden = readAllFormsHidden();
+      setChecked(
+        new Set([
+          GRID_PINNED_COLUMN.key,
+          ...GRID_BASE_COLUMNS.map((c) => c.key).filter((k) => !hidden.has(k)),
+        ])
+      );
       pickerDirtyRef.current = false;
       setExtrasFormId(0);
       return;
@@ -279,11 +314,17 @@ export function useSubmissionGrid({
   // back where it started writes nothing at all.
   const closePicker = () => {
     setPickerOpen(false);
-    if (!formId || !pickerDirtyRef.current) return;
+    if (!pickerDirtyRef.current) return;
     pickerDirtyRef.current = false;
-    const keys = availableColumns.filter((c) => checked.has(c.key)).map((c) => c.key);
     // Negated on the way out, to match how it is stored and read back.
     const hidden = GRID_BASE_COLUMNS.map((c) => c.key).filter((k) => !checked.has(k));
+    if (!formId) {
+      // No form to save against — the standard columns are all this picker
+      // offers, so the choice is kept for every form instead.
+      writeAllFormsHidden(new Set(hidden));
+      return;
+    }
+    const keys = availableColumns.filter((c) => checked.has(c.key)).map((c) => c.key);
     api.setFormViewColumns(formId, keys, hidden).catch(() => {
       // The on-screen selection still applies for this session; it just will not
       // be remembered. Not worth interrupting the user over.
