@@ -1,7 +1,9 @@
-# Production schema deploy — objects and scripts for the latest changes
+# SQL Server schema deploy — objects and scripts for the latest changes
 
-Production is **Azure SQL (SQL Server)**. Its schema is not versioned by files: the
-server applies a *cumulative, idempotent* migration ladder at every boot
+Applies to **any Azure SQL (SQL Server) database** this app runs against —
+production **and** the `staging` slot (both report `dbMode: "sqlserver"`; only a
+`DB_MODE=turso` deployment would be different). The schema is not versioned by
+files: the server applies a *cumulative, idempotent* migration ladder at every boot
 (`SQLSERVER_DDL_STATEMENTS` in `server/src/db/schema.ts`, run by `initDb()` in
 `server/src/db/pool.ts`). Nothing here needs a migration tool — the SQL below is
 the same DDL the app runs, in the same order, so running it by hand and then
@@ -14,10 +16,9 @@ letting the app boot are equivalent.
 > no-op.
 >
 > **You may not need to run any of this by hand.** The ladder runs at startup, so
-> deploying the new code to production applies all of it automatically. The value of
-> running it manually first is that a failure (e.g. a column type that blocks an
-> index) is visible in the query window instead of aborting the boot with
-> `dbReady=false`.
+> deploying the new code applies all of it automatically. The value of running it
+> manually first is that a failure (e.g. a column type that blocks an index) is
+> visible in the query window instead of aborting the boot with `dbReady=false`.
 >
 > **If you are behind a firewall** and cannot reach the SQL server from your machine,
 > the only path is the app itself: deploy, then read the startup log
@@ -25,9 +26,30 @@ letting the app boot are equivalent.
 > then informational — they document exactly what that boot applies, and are useful
 > for review or for someone with portal access to the Query editor.
 
+> ## ⚠️ When the app cannot apply the ladder itself
+>
+> `dbReady=false` in `/api/health` means the ladder stopped. `run()` executes the
+> ladder **batch by batch and stops at the first failure**, so every batch after the
+> failing one is silently unapplied — the log line `DDL batch N of M failed and every
+> batch after it was not applied: …` names the culprit. The usual causes:
+>
+> | Symptom in the log | Cause | Fix |
+> |---|---|---|
+> | `Invalid column name 'x'` on a route | the ladder stopped earlier | find the batch that failed |
+> | `Could not create constraint or index` / index on a text column | the column is `nvarchar(max)` on a copied database | narrow the column (§8) |
+> | `The ALTER TABLE statement conflicted with the FOREIGN KEY` / error 1750 | `int` vs `bigint` ids | §8 |
+> | `Cannot add foreign key constraint … may cause cycles or multiple cascade paths` (1785) | copied database's FK shapes | §8 |
+>
+> **A deployment whose database already holds rows cannot be fixed by the app alone.**
+> The ladder is written for a database it created; on a *copied* database (staging is
+> one) the failing batch is usually a data-dependent one — e.g. the
+> `users.organization_id NOT NULL` tighten, or a `CHECK` re-add — and the remaining
+> batches (the newest tables) never run. In that case run **§8** first, then re-deploy
+> or restart the slot.
+
 ---
 
-## 0. Pre-flight — what does production already have?
+## 0. Pre-flight — what does the target already have?
 
 ```sql
 SELECT name FROM sys.tables WHERE schema_id = SCHEMA_ID('dbo') ORDER BY name;
@@ -605,8 +627,8 @@ END
 
 These are **not** part of the startup DDL — booting the app must not rewrite
 production rows — so run them explicitly. They use the `DB_*` settings from
-`server/.env` (or the shell environment), so point those at **production** before
-running:
+`server/.env` (or the shell environment), so point those at the **target** database
+(production, or staging) before running:
 
 ```bash
 cd server
@@ -647,3 +669,117 @@ Then boot the app: the startup log prints
 reported there as `[db] N index(es) the schema declares are MISSING …` — on a
 database whose columns are `nvarchar(max)` those indexes cannot be created until the
 columns are narrowed (see the note on `UX_schools_name` in `server/src/db/schema.ts`).
+
+---
+
+## 8. When the ladder cannot run — the copied-database repair
+
+Use this when `/api/health` reports `dbReady: false` and the log shows a batch
+failure, or when a route fails with `Invalid object name 'dbo.<new table>'` while
+the app is otherwise serving. The ladder stops at the first failing batch, so the
+newest tables are simply never created.
+
+### 8.1 Find the batch that failed
+
+The log line to search for is:
+
+```
+DDL batch <N> of <M> failed and every batch after it was not applied: <first 160 chars of the batch>
+```
+
+That prefix is the whole diagnosis: the batch's own text names the object. If the
+log has rolled, reproduce it read-only — the ladder is idempotent, so re-running it
+only re-attempts what is missing:
+
+```sql
+-- What the newest batches need, in ladder order. A NULL/0 here is the gap.
+SELECT
+  CASE WHEN OBJECT_ID('dbo.roles','U')                     IS NULL THEN 'MISSING roles' END,
+  CASE WHEN OBJECT_ID('dbo.user_form_view_columns','U')    IS NULL THEN 'MISSING user_form_view_columns' END,
+  CASE WHEN OBJECT_ID('dbo.form_access','U')               IS NULL THEN 'MISSING form_access' END,
+  CASE WHEN OBJECT_ID('dbo.form_access_events','U')        IS NULL THEN 'MISSING form_access_events' END,
+  CASE WHEN OBJECT_ID('dbo.form_access_notice_dismissals','U') IS NULL THEN 'MISSING form_access_notice_dismissals' END,
+  CASE WHEN OBJECT_ID('dbo.webhook_events','U')            IS NULL THEN 'MISSING webhook_events' END,
+  CASE WHEN OBJECT_ID('dbo.system_messages','U')           IS NULL THEN 'MISSING system_messages' END,
+  CASE WHEN OBJECT_ID('dbo.system_message_dismissals','U') IS NULL THEN 'MISSING system_message_dismissals' END,
+  CASE WHEN OBJECT_ID('dbo.school_name_aliases','U')       IS NULL THEN 'MISSING school_name_aliases' END,
+  CASE WHEN OBJECT_ID('dbo.submission_attachments','U')    IS NULL THEN 'MISSING submission_attachments' END,
+  CASE WHEN OBJECT_ID('dbo.submission_links','U')          IS NULL THEN 'MISSING submission_links' END;
+```
+
+### 8.2 Clear the data-dependent batch
+
+These are the batches that fail on a database that already holds rows. Each is
+guarded, so running them is safe whether or not they are the cause:
+
+```sql
+-- (a) users.organization_id: the ladder tightens to NOT NULL and adds the FK.
+--     Any NULL row (a user created before organizations existed) makes the
+--     tighten fail with error 515, which aborts the batch and everything after it.
+SELECT COUNT(*) AS users_without_org FROM dbo.users WHERE organization_id IS NULL;
+GO
+IF OBJECT_ID('dbo.organizations') IS NOT NULL
+BEGIN
+  UPDATE u SET u.organization_id = o.id
+    FROM dbo.users u CROSS JOIN dbo.organizations o
+   WHERE o.slug = N'academics' AND u.organization_id IS NULL;
+END
+GO
+-- (b) forms.organization_id / submissions.organization_id: same shape.
+IF OBJECT_ID('dbo.organizations') IS NOT NULL
+BEGIN
+  UPDATE f SET f.organization_id = o.id
+    FROM dbo.forms f CROSS JOIN dbo.organizations o
+   WHERE o.slug = N'academics' AND f.organization_id IS NULL;
+  UPDATE s SET s.organization_id = f.organization_id
+    FROM dbo.submissions s JOIN dbo.forms f ON f.id = s.form_id
+   WHERE s.organization_id IS NULL;
+END
+GO
+-- (c) users.role → dbo.roles FK: fails with 547 if a user holds a role key that
+--     is not in dbo.roles (a role created before Settings → Roles existed).
+SELECT DISTINCT u.role FROM dbo.users u
+ WHERE NOT EXISTS (SELECT 1 FROM dbo.roles r WHERE r.role_key = u.role);
+GO
+-- (d) The role CHECK drop/widen: a CHECK constraint blocks ALTER COLUMN, so the
+--     ladder's own order matters — run §3a verbatim after (c) is clean.
+```
+
+If (c) lists anything, insert those keys into `dbo.roles` (or reassign the users)
+before re-running §3a. If (a)/(b) changed rows, re-run §5a.
+
+### 8.3 Apply the missing objects
+
+Run §1 → §5 in order. They are exactly the batches the ladder would have applied,
+so afterwards the app's own boot finds nothing left to do and sets `dbReady=true`.
+
+### 8.4 The copied-database type problems (only if a batch says so)
+
+A database copied from an older system declares `nvarchar(max)` where this DDL
+declares a sized type, and `bigint` where it declares `int`. Symptoms and fixes:
+
+| Error | Meaning | Fix |
+|---|---|---|
+| `Cannot create index … key length exceeds 1700` | `nvarchar(max)` key column | narrow the column (§8.5) |
+| 1750 `foreign key … incompatible types` | `int` vs `bigint` | the ladder's `isSameTypeAs` guard skips the FK; leave it, ids still work |
+| 1785 `multiple cascade paths` | copied FK shapes | drop the duplicate FK the message names, then re-run |
+
+### 8.5 Narrowing a column (safe, verified on the tenant)
+
+The measured data fits: longest `schools.name` 69/200, `users.email` 35/320,
+`submissions.public_id` 10/64, `forms.code` 8/20, no NULLs in the key columns, and
+no duplicate values in the six UNIQUE indexes. Check the target before running:
+
+```sql
+SELECT MAX(LEN(name)) AS longest_school_name FROM dbo.schools;   -- must be <= 200
+GO
+ALTER TABLE dbo.schools ALTER COLUMN name NVARCHAR(200) NOT NULL;
+```
+
+Repeat per blocking column the log names. Nothing references these columns (no FK,
+computed column or full-text index), so the `ALTER` is not blocked by the schema.
+
+### 8.6 Finish
+
+Restart the slot (or redeploy) and confirm `/api/health` reports `dbReady: true`.
+
