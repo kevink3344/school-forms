@@ -7,7 +7,7 @@ import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
-import SubmissionsGrid from "../../components/SubmissionsGrid";
+import SubmissionsGrid, { ColumnEditBar } from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 import { fieldIdFromColumnKey, formLabel, searchableColumns, selectableForms } from "../../lib/forms";
 import { useAuth } from "../../context/AuthContext";
@@ -123,6 +123,7 @@ export default function AdminDashboard() {
     toggleColumn,
     toggleAll,
     edit,
+    columnEdit,
   } = useSubmissionGrid({
     formId,
     status: filters.status || undefined,
@@ -541,6 +542,7 @@ export default function AdminDashboard() {
           onOpen={(publicId) => navigate(`/admin/submissions/${publicId}`)}
           submissionPath={(publicId) => `/admin/submissions/${publicId}`}
           edit={edit}
+          columnEdit={columnEdit}
           emptyMessage={
             filters.archived
               ? "No archived submissions match these filters."
@@ -565,6 +567,17 @@ export default function AdminDashboard() {
           }
         />
       )}
+
+      {/* The bulk column editor's save bar (docs/plans/column-bulk-edit.md). It
+          renders nothing unless a staff-only column is in edit mode, and it sits
+          OUTSIDE the grid because .grid-scroll clips what would otherwise have to
+          be a sticky child. */}
+      <ColumnEditBar
+        columnEdit={columnEdit}
+        label={
+          visibleColumns.find((c) => c.key === `field_${columnEdit.activeFieldId}`)?.label ?? null
+        }
+      />
 
       {/* Column picker — right slide-out panel, same pattern as the Reports page */}
       <ColumnsDrawer

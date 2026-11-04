@@ -1,16 +1,19 @@
 import {
   useEffect,
   useRef,
+  useState,
   type KeyboardEvent as ReactKeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
   type RefObject,
 } from "react";
 import { createPortal } from "react-dom";
-import { Paperclip, Pencil, Trash2 } from "lucide-react";
+import { Check, Pencil, Paperclip, Trash2, X } from "lucide-react";
 import type { ExportColumn, FormField, SubmissionRow } from "../types";
 import { StatusBadge } from "./layout";
 import { renderEditor, renderValue, toStr, displayValue, type AnswerValue } from "./FieldValue";
+import type { ColumnEditApi } from "../lib/useColumnEdit";
+import { menuPosition } from "../lib/useCellEdit";
 
 // ---------------------------------------------------------------------------
 // Shared Submissions grid — used by the admin dashboard and the staff queue.
@@ -125,7 +128,6 @@ function editorMode(type: string, options: string[] | null): "immediate" | "menu
   if (type === "checkbox" && (options ?? []).length > 1) return "menu";
   return "immediate";
 }
-
 // Selects, single-option checkbox toggles and `toggle` switches are one-gesture
 // controls: the change *is* the decision, so there is nothing to confirm.
 // Text-like types hold a draft until Enter / blur.
@@ -160,6 +162,13 @@ export default function SubmissionsGrid({
    * wording can name what is being deleted.
    */
   onDelete,
+  /**
+   * Supplying this turns every staff-only column header into a bulk-edit target
+   * (docs/plans/column-bulk-edit.md). Omitted means the header carries no pencil
+   * and the grid behaves exactly as before — which is how the Reports page keeps
+   * its single-cell editing without knowing this mode exists.
+   */
+  columnEdit,
 }: {
   rows: SubmissionRow[];
   columns: ExportColumn[];
@@ -174,6 +183,8 @@ export default function SubmissionsGrid({
   emptyMessage?: string;
   /** Adds a permanent-delete action to each row when supplied. */
   onDelete?: (publicId: string) => void;
+  /** Adds the bulk column editor to staff-only headers when supplied. */
+  columnEdit?: ColumnEditApi;
 }) {
   const gridScrollRef = useRef<HTMLDivElement | null>(null);
   const topScrollRef = useRef<HTMLDivElement | null>(null);
@@ -221,14 +232,28 @@ export default function SubmissionsGrid({
                    worth of width in a grid where width is the scarce resource, and
                    it repeated the same word once per column. The column marks
                    itself instead (`.grid-col-staff`) and these two attributes keep
-                   the meaning available to a screen reader and to a mouse hover. */
+                   the meaning available to a screen reader and to a mouse hover.
+
+                   A staff-only column whose header is given `columnEdit` also
+                   carries the bulk-edit pencil (docs/plans/column-bulk-edit.md):
+                   a real button, revealed on hover AND on focus, so the mode is
+                   reachable by keyboard rather than being a hover-only affordance. */
                 <th
                   key={c.key}
-                  className={c.staff_only ? "grid-col-staff" : undefined}
+                  className={c.staff_only ? "grid-col-staff grid-col-staff-head" : undefined}
                   aria-label={c.staff_only ? `${c.label} (staff only)` : undefined}
                   title={c.staff_only ? "Staff-only column" : undefined}
                 >
-                  {c.label}
+                  <span className="grid-head-inner">
+                    <span className="grid-head-label">{c.label}</span>
+                    {c.staff_only && columnEdit && (
+                      <ColumnEditButton
+                        label={c.label}
+                        active={columnEdit.activeFieldId === fieldIdFromKey(c.key)}
+                        onToggle={() => columnEdit.begin(fieldIdFromKey(c.key))}
+                      />
+                    )}
+                  </span>
                 </th>
               ))}
               {!hiddenBase.has(BASE_KEYS.actions) && (
@@ -327,6 +352,8 @@ export default function SubmissionsGrid({
                         value={value}
                         field={raw}
                         edit={edit}
+                        columnEdit={columnEdit}
+                        rowArchived={Boolean(s.archived_at)}
                       />
                     );
                   })}
@@ -461,18 +488,35 @@ export function StaffCell({
   value,
   field,
   edit,
+  columnEdit,
+  rowArchived = false,
 }: {
   column: ExportColumn;
   publicId: string;
   value: unknown;
   field: Pick<FormField, "id" | "label" | "type" | "options">;
   edit: CellEditApi;
+  /** Supplied by the Submissions grid; absent on the Reports page. */
+  columnEdit?: ColumnEditApi;
+  /** An archived row is never written in bulk — the editor renders it disabled. */
+  rowArchived?: boolean;
 }) {
   const isEditing = edit.editing?.publicId === publicId && edit.editing?.fieldId === field.id;
   const key = cellKey(publicId, field.id);
   const editorRef = useRef<HTMLDivElement | null>(null);
   const type = field.type;
   const mode = editorMode(type, field.options);
+
+  // Bulk mode owns the whole column: when it is active, this cell renders the
+  // draft control instead of the click-to-edit span, so a cell is never both.
+  const bulkActive = columnEdit?.activeFieldId === field.id;
+  const bulkDraft = bulkActive ? columnEdit!.drafts.get(key) : undefined;
+  const bulkValue = bulkDraft === undefined ? toAnswerValue(value) : bulkDraft;
+  const bulkDirty = bulkActive ? columnEdit!.dirtyKeys.has(key) : false;
+  const bulkSaved = bulkActive ? columnEdit!.savedKeys.has(key) : false;
+  const bulkRowError = bulkActive ? columnEdit!.rowErrors.get(publicId) : undefined;
+  const bulkMenuRef = useRef<HTMLButtonElement | null>(null);
+  const [bulkMenuOpen, setBulkMenuOpen] = useState(false);
 
   // Focus the control as soon as the cell becomes an editor, so a click lands the
   // caret rather than requiring a second click. Text inputs select their existing
@@ -506,6 +550,61 @@ export function StaffCell({
     const rect = e.currentTarget.getBoundingClientRect();
     edit.begin({ publicId, fieldId: field.id }, rect, toAnswerValue(value));
   };
+
+  // Bulk column mode. Every cell in the active staff-only column becomes a
+  // control bound to the hook's draft map — no per-cell save, no per-cell audit
+  // stamp; the column's one Save writes the batch.
+  if (bulkActive && columnEdit) {
+    const api = columnEdit;
+    const disabled = api.saving || rowArchived;
+    return (
+      <td
+        data-label={column.label}
+        className={`grid-col-staff grid-col-bulk${bulkDirty ? " grid-cell-dirty" : ""}${
+          bulkSaved ? " grid-cell-saved-td" : ""
+        }`}
+      >
+        {rowArchived ? (
+          <span className="grid-bulk-disabled" title="Archived submissions cannot be edited">
+            {renderValue(value, type)}
+          </span>
+        ) : mode === "menu" ? (
+          <button
+            ref={bulkMenuRef}
+            type="button"
+            className="grid-bulk-menu-trigger"
+            disabled={disabled}
+            aria-label={`Edit ${column.label}`}
+            onClick={() => setBulkMenuOpen(true)}
+          >
+            <span className="grid-bulk-value">{displayValue(bulkValue, type)}</span>
+          </button>
+        ) : (
+          <div className="grid-bulk-editor">
+            {renderEditor(
+              type,
+              field.options,
+              bulkValue,
+              (val) => api.change(publicId, val),
+              `bulk-${publicId}-${field.id}`
+            )}
+          </div>
+        )}
+        {bulkMenuOpen && mode === "menu" && (
+          <GridOptionMenu
+            type={type}
+            options={field.options ?? []}
+            value={bulkValue}
+            position={bulkMenuRef.current ? menuPosition(bulkMenuRef.current.getBoundingClientRect()) : null}
+            onChange={(val) => api.change(publicId, val)}
+            onCancel={() => setBulkMenuOpen(false)}
+            onSave={() => setBulkMenuOpen(false)}
+          />
+        )}
+        {bulkRowError && <span className="grid-cell-error">{bulkRowError}</span>}
+      </td>
+    );
+  }
 
   if (isEditing) {
     // While the save is in flight the value is authoritative on neither side, so
@@ -589,6 +688,97 @@ export function StaffCell({
         <Pencil size={12} className="cell-edit-hint" />
       </span>
     </td>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The bulk-editor affordance in a staff-only column header.
+//
+// A button, not an icon: it is the only way into the mode, so it has to be
+// reachable by keyboard and announced. `aria-pressed` carries the mode, and the
+// label names the column so a screen-reader user hears which one they are about
+// to edit — the visible pencil is hidden from the tree.
+// ---------------------------------------------------------------------------
+function ColumnEditButton({
+  label,
+  active,
+  onToggle,
+}: {
+  label: string;
+  active: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className={`grid-col-edit-hint${active ? " is-active" : ""}`}
+      aria-pressed={active}
+      aria-label={active ? `Stop editing all ${label} values` : `Edit all ${label} values`}
+      title={active ? "Stop editing this column" : "Edit every value in this column"}
+      onClick={(e) => {
+        // The header is not a link, but stopping propagation keeps a future
+        // sort-on-header-click from firing when the pencil is used.
+        e.stopPropagation();
+        onToggle();
+      }}
+    >
+      <Pencil size={12} aria-hidden="true" />
+    </button>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// The bulk editor's save bar.
+//
+// Rendered by the owning page directly under the grid rather than inside it: the
+// grid's scroll container clips absolutely-positioned children, and the bar has
+// to stay visible while the user scrolls the column they are editing. It shows
+// only while a column is active, so a grid that never uses the mode is unchanged.
+// ---------------------------------------------------------------------------
+export function ColumnEditBar({
+  columnEdit,
+  label,
+}: {
+  columnEdit: ColumnEditApi;
+  /** The column's header text, so the bar names what it is about to write. */
+  label: string | null;
+}) {
+  if (columnEdit.activeFieldId === null) return null;
+  const dirty = columnEdit.dirtyKeys.size;
+  const failed = columnEdit.rowErrors.size;
+  return (
+    <div className="grid-bulk-bar" role="region" aria-label={`Editing all ${label ?? ""} values`}>
+      <span className="grid-bulk-bar-text">
+        {columnEdit.saving
+          ? `Saving ${dirty} ${dirty === 1 ? "value" : "values"}…`
+          : dirty > 0
+            ? `${dirty} unsaved ${dirty === 1 ? "change" : "changes"}`
+            : "No changes yet"}
+        {failed > 0 && !columnEdit.saving && (
+          <span className="grid-bulk-bar-failed"> · {failed} not saved</span>
+        )}
+      </span>
+      {columnEdit.error && <span className="grid-cell-error">{columnEdit.error}</span>}
+      <span className="grid-bulk-bar-actions">
+        <button
+          type="button"
+          className="secondary-button"
+          onClick={columnEdit.cancel}
+          disabled={columnEdit.saving}
+        >
+          <X size={13} aria-hidden="true" /> Done
+        </button>
+        <button
+          type="button"
+          className="primary-button"
+          onClick={columnEdit.save}
+          disabled={columnEdit.saving || dirty === 0}
+          title={dirty === 0 ? "Change a value to save" : `Save ${dirty} values`}
+        >
+          <Check size={14} aria-hidden="true" /> {columnEdit.saving ? "Saving…" : "Save column"}
+        </button>
+      </span>
+    </div>
   );
 }
 

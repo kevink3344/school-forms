@@ -8,6 +8,7 @@ import {
   type CellEditApi,
 } from "../components/SubmissionsGrid";
 import { useCellEdit } from "./useCellEdit";
+import { useColumnEdit, type ColumnEditApi } from "./useColumnEdit";
 
 // ---------------------------------------------------------------------------
 // Shared Submissions-grid behaviour: which columns the grid shows, the column
@@ -105,6 +106,8 @@ export interface SubmissionGridState {
   toggleAll: () => void;
   selectedCount: number;
   edit: CellEditApi;
+  /** The bulk staff-only column editor (docs/plans/column-bulk-edit.md). */
+  columnEdit: ColumnEditApi;
 }
 
 export function useSubmissionGrid({
@@ -349,6 +352,38 @@ export function useSubmissionGrid({
       }),
   });
 
+  // ---------------------------------------------------------------------------
+  // Bulk staff-only column editing (docs/plans/column-bulk-edit.md).
+  //
+  // Scoped to the rows the preview returned — i.e. exactly what the grid is
+  // showing under the current filters — so a bulk save never writes to a row the
+  // user cannot see. The preview (not the page's row list) is the source, because
+  // it is the one that carries the values each draft is compared against.
+  // ---------------------------------------------------------------------------
+  const columnRows = useMemo(
+    () =>
+      (preview?.rows ?? [])
+        .filter((r) => typeof r.submission_public_id === "string")
+        .map((r) => ({ public_id: r.submission_public_id as string, values: r })),
+    [preview]
+  );
+
+  const columnEdit = useColumnEdit({
+    rows: columnRows,
+    onSaved: (publicId, fieldId, value) =>
+      setValuesByPublicId((prev) => {
+        const next = new Map(prev);
+        const row = { ...(next.get(publicId) ?? {}) };
+        row[`field_${fieldId}`] = value;
+        next.set(publicId, row);
+        return next;
+      }),
+    confirmDiscard: (count) =>
+      window.confirm(
+        `Discard ${count} unsaved ${count === 1 ? "change" : "changes"}? Nothing has been saved yet.`
+      ),
+  });
+
   return {
     availableColumns,
     visibleColumns,
@@ -367,5 +402,6 @@ export function useSubmissionGrid({
     // with the "N of M columns" the drawer footer shows.
     selectedCount: pickerColumns.filter((c) => checked.has(c.key)).length,
     edit,
+    columnEdit,
   };
 }

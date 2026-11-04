@@ -503,6 +503,30 @@ export const updateSubmissionValuesSchema = z.object({
   staff_only: z.boolean().optional(),
 });
 
+// Editing ONE staff-only column across many submissions (the grid's bulk column
+// editor — docs/plans/column-bulk-edit.md). Same answer shape as the single
+// submission PUT, grouped by row.
+//
+// `staff_only` is REQUIRED and must be true: the bulk path exists only for the
+// staff-only columns, and an optional flag would let a caller reach the parent-
+// field write path while bypassing the per-cell audit trail the grid relies on.
+//
+// `.max(500)` is the guard against one request writing an unbounded number of
+// rows; the client chunks well below it. `public_id` is not coerced to a number —
+// it is the opaque string the rest of the API uses.
+export const bulkUpdateSubmissionValuesSchema = z.object({
+  staff_only: z.literal(true),
+  updates: z
+    .array(
+      z.object({
+        public_id: z.string().min(1),
+        answers: z.array(submissionAnswerSchema).min(1),
+      })
+    )
+    .min(1)
+    .max(500),
+});
+
 // -----------------------------------------------------------------------------
 // Submission ad-hoc staff-only fields (staff/extended on a specific submission)
 // -----------------------------------------------------------------------------

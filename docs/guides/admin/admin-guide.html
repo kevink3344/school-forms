@@ -37,31 +37,32 @@
       <ol>
         <li>The dashboard <span class="fig-ref">— Figure 3</span></li>
         <li>Filtering and searching</li>
-        <li>Exporting <span class="fig-ref">— Figure 4</span></li>
+        <li>Editing a staff-only column in bulk <span class="fig-ref">— Figure 4</span></li>
+        <li>Exporting <span class="fig-ref">— Figure 5</span></li>
         <li>Reviewing and archiving a submission</li>
       </ol>
     </li>
     <li>Forms
       <ol>
-        <li>The Forms list <span class="fig-ref">— Figure 5</span></li>
-        <li>Creating a form <span class="fig-ref">— Figure 6</span></li>
-        <li>Form Details <span class="fig-ref">— Figure 7</span></li>
-        <li>Adding fields <span class="fig-ref">— Figure 8</span></li>
-        <li>Staff-only fields and access <span class="fig-ref">— Figure 9</span></li>
-        <li>Visibility: public and private <span class="fig-ref">— Figure 10</span></li>
+        <li>The Forms list <span class="fig-ref">— Figure 6</span></li>
+        <li>Creating a form <span class="fig-ref">— Figure 7</span></li>
+        <li>Form Details <span class="fig-ref">— Figure 8</span></li>
+        <li>Adding fields <span class="fig-ref">— Figure 9</span></li>
+        <li>Staff-only fields and access <span class="fig-ref">— Figure 10</span></li>
+        <li>Visibility: public and private <span class="fig-ref">— Figure 11</span></li>
         <li>Staff attachments <span class="fig-ref">— the Attachments card</span></li>
       </ol>
     </li>
-    <li>Access requests <span class="fig-ref">— Figure 12</span></li>
+    <li>Access requests <span class="fig-ref">— Figure 13</span></li>
     <li>Reports and export
       <ol>
-        <li>Building a report <span class="fig-ref">— Figure 13</span></li>
-        <li>Selecting columns <span class="fig-ref">— Figure 14</span></li>
+        <li>Building a report <span class="fig-ref">— Figure 14</span></li>
+        <li>Selecting columns <span class="fig-ref">— Figure 15</span></li>
       </ol>
     </li>
-    <li>Webhook Log <span class="fig-ref">— Figure 15</span></li>
-    <li>Generated Documents <span class="fig-ref">— Figure 16</span></li>
-    <li>Your account <span class="fig-ref">— Figure 17</span></li>
+    <li>Webhook Log <span class="fig-ref">— Figure 16</span></li>
+    <li>Generated Documents <span class="fig-ref">— Figure 17</span></li>
+    <li>Your account <span class="fig-ref">— Figure 18</span></li>
     <li>Reference
       <ol>
         <li>Status meanings</li>
@@ -89,6 +90,8 @@ everyone else sees. In practice that means:</p>
       staff-only field, and which menu items each role gets.</li>
   <li><strong>Manage accounts and roles</strong> — create users, reset passwords, and define what
       a role may do.</li>
+  <li><strong>Work the submissions grid</strong> — filter and search across schools, edit a
+      staff-only field in one cell or across an entire column, and export what you see.</li>
   <li><strong>Watch the plumbing</strong> — the Webhook Log shows every response Google Forms
       sent, including the ones the app rejected.</li>
 </ul>
@@ -216,16 +219,72 @@ including the form.</p>
   <li>Picking a <strong>Form</strong> is what makes that form's fields available as columns and as
       search targets.</li>
   <li>Staff-only columns sort to the right-hand end and are tinted. You can edit them in place,
-      exactly as staff do.</li>
+      exactly as staff do — or edit a whole column at once, see
+      <a href="#s23">2.3</a>.</li>
 </ul>
 
 <div class="callout warning">
   <span class="callout-title">Archived submissions are hidden by default</span>
   <p>An archived submission disappears from this grid, from exports, from reports and from the
-     documents list. It is not deleted — see <a href="#s24">2.4</a> for restoring it.</p>
+     documents list. It is not deleted — see <a href="#s25">2.5</a> for restoring it.</p>
 </div>
 
-<h2>2.3 Exporting</h2>
+<h2 id="s23">2.3 Editing a staff-only column in bulk</h2>
+
+<p>When the same staff-only field has to be filled in for many submissions — a course placement,
+a letter that went out, a checkbox for every student in a batch — you do not have to open the
+cells one at a time. Pick the form first, then edit the whole column and save it in one go.</p>
+
+<figure class="shot">
+  <div class="shot-frame">
+    <img src="images/A18-bulk-column.png" alt="A staff-only column in bulk edit mode with a pencil in the header, a switch in every row, and a save bar reading 3 unsaved changes with Done and Save column buttons">
+    <span class="pin" style="--x:84.6%;--y:36%">1</span>
+    <span class="pin" style="--x:78.3%;--y:46.4%">2</span>
+    <span class="pin" style="--x:88.4%;--y:96%">3</span>
+  </div>
+  <figcaption>
+    <span class="fig-label">Figure 4 — Editing a whole staff-only column.</span>
+    <ol>
+      <li>The <strong>pencil</strong> in a staff-only column's header — it appears when you hover
+          the header, or when you tab to it.</li>
+      <li>Every cell in the column becomes a control: a switch, a dropdown, a text box, or a
+          <strong>Choose</strong> button for a field with several options.</li>
+      <li>The save bar: how many changes are waiting, <strong>Done</strong> to leave, and
+          <strong>Save column</strong> to write them all.</li>
+    </ol>
+    <p class="fig-note">A changed cell gets a blue bar down its left edge, so you can see what is
+       still unsaved while you scroll.</p>
+  </figcaption>
+</figure>
+
+<ol>
+  <li>Choose the <strong>Form</strong> and any filters you want. The column covers exactly the
+      rows on screen — so if you have filtered to one school or one status, only those rows are
+      written.</li>
+  <li>Hover a staff-only column's header and click the <strong>pencil</strong>. The header turns
+      solid blue while the column is open.</li>
+  <li>Change as many rows as you like. Nothing is saved yet — the bar counts the changes.</li>
+  <li>Click <strong>Save column</strong>. One save writes every changed row, and each row records
+      you as the person who last changed its staff-only fields — the same audit line a
+      single-cell edit writes.</li>
+  <li>Click <strong>Done</strong> to leave the column. If changes are still waiting, you are asked
+      to confirm before they are discarded.</li>
+</ol>
+
+<div class="callout">
+  <span class="callout-title">Only staff-only columns can be edited this way</span>
+  <p>The pencil appears on staff-only columns only. A parent's answers are never written in bulk —
+     those are corrected one at a time, on the submission page.</p>
+</div>
+
+<div class="callout warning">
+  <span class="callout-title">A row that cannot be saved does not undo the others</span>
+  <p>If a submission was archived, moved to another school, or deleted while you were editing, it
+     is skipped and named in the bar — everything else is still saved. Your changes to the skipped
+     rows are kept, so you can look at them and try again.</p>
+</div>
+
+<h2>2.4 Exporting</h2>
 
 <figure class="shot">
   <div class="shot-frame">
@@ -236,7 +295,7 @@ including the form.</p>
     <span class="pin" style="--x:78%;--y:90%">4</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 4 — Exporting from the dashboard.</span>
+    <span class="fig-label">Figure 5 — Exporting from the dashboard.</span>
     <ol>
       <li>How many rows and columns the file will hold.</li>
       <li>Tick the columns to include.</li>
@@ -249,7 +308,7 @@ including the form.</p>
 <p>The file downloads as <code>submissions-export.csv</code>. For Excel or PDF, or to save the
 setup for next time, use <a href="#part5">Reports</a> instead.</p>
 
-<h2 id="s24">2.4 Reviewing and archiving a submission</h2>
+<h2 id="s25">2.5 Reviewing and archiving a submission</h2>
 
 <p>Click a student's name or <strong>Review</strong> to open the submission. The page is the same
 one staff use, with two additions only an administrator sees:</p>
@@ -282,7 +341,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:22%;--y:31.5%">3</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 5 — The Forms list.</span>
+    <span class="fig-label">Figure 6 — The Forms list.</span>
     <ol>
       <li><strong>New Form</strong> — opens the create card (Figure 6).</li>
       <li>The per-row action buttons: <strong>Design</strong>,
@@ -309,7 +368,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:8.5%;--y:43.4%">2</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 6 — Creating a form.</span>
+    <span class="fig-label">Figure 7 — Creating a form.</span>
     <ol>
       <li>The <strong>title</strong> — for example <em>Course Designation Form (CDM)</em>.</li>
       <li><strong>Create &amp; Design</strong> saves it as a Draft and opens the designer.</li>
@@ -330,7 +389,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:50%;--y:63.7%">5</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 7 — The Form Details card.</span>
+    <span class="fig-label">Figure 8 — The Form Details card.</span>
     <ol>
       <li>The <strong>Form Details</strong> card.</li>
       <li><strong>Title</strong> — shown to parents and staff.</li>
@@ -349,7 +408,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
   <span class="callout-title">There is no "generate fields from Google Form"</span>
   <p>The Google Form URL is a link for staff to follow. Fields are always built by hand in the
      designer. A question a Google Form asks that the designer does not define is still captured
-     on the submission and can be promoted later — see <a href="#s24">2.4</a>.</p>
+     on the submission and can be promoted later — see <a href="#s25">2.5</a>.</p>
 </div>
 
 <h2>3.4 Adding fields</h2>
@@ -363,7 +422,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:73.1%;--y:36.5%">4</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 8 — Building the parent-facing fields.</span>
+    <span class="fig-label">Figure 9 — Building the parent-facing fields.</span>
     <ol>
       <li><strong>Form Fields</strong> — the questions parents answer.</li>
       <li><strong>Staff Only Fields</strong> — the tab for fields parents never see
@@ -387,7 +446,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:5.7%;--y:45.2%">2</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 9 — Staff-only fields and their Access row.</span>
+    <span class="fig-label">Figure 10 — Staff-only fields and their Access row.</span>
     <ol>
       <li>The <strong>Staff Only Fields</strong> tab, with a count of how many exist.</li>
       <li>The <strong>Access</strong> row under each field: one button per role. A filled button
@@ -416,7 +475,7 @@ exactly as described in the <a href="staff-guide.pdf">Staff Guide</a>, Part 5.</
     <span class="pin" style="--x:5.4%;--y:14.4%">1</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 10 — Choosing who can open the form.</span>
+    <span class="fig-label">Figure 11 — Choosing who can open the form.</span>
     <ol>
       <li>The <strong>Visibility</strong> card. It offers <strong>Public</strong> — every account
           in the organization can read the form — and <strong>Private</strong>, where an account
@@ -488,7 +547,7 @@ arrive here, and in the bell in the banner.</p>
     <span class="pin" style="--x:10.7%;--y:18.9%">2</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 12 — Access requests.</span>
+    <span class="fig-label">Figure 13 — Access requests.</span>
     <ol>
       <li>The page heading, with the count of pending requests.</li>
       <li>The decision controls on a request: approve it, or decline it with an optional reason
@@ -523,7 +582,7 @@ arrive here, and in the bell in the banner.</p>
     <span class="pin" style="--x:51.4%;--y:19.2%">5</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 13 — The Reports page.</span>
+    <span class="fig-label">Figure 14 — The Reports page.</span>
     <ol>
       <li><strong>Save View</strong> — keep the filters and columns under a name.</li>
       <li><strong>Export</strong> — download in the chosen format.</li>
@@ -561,7 +620,7 @@ arrive here, and in the bell in the banner.</p>
     <span class="pin" style="--x:78%;--y:88%">3</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 14 — Choosing report columns.</span>
+    <span class="fig-label">Figure 15 — Choosing report columns.</span>
     <ol>
       <li>Tick the fields to show and export.</li>
       <li>Staff-only fields are in the same list.</li>
@@ -586,7 +645,7 @@ every response Google Forms posted to the app, <em>including the ones it rejecte
     <span class="pin" style="--x:5.6%;--y:37.8%">3</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 15 — The Webhook Log.</span>
+    <span class="fig-label">Figure 16 — The Webhook Log.</span>
     <ol>
       <li>The <strong>Status</strong> filter — set it to <strong>Failed</strong> to see what was
           rejected.</li>
@@ -632,7 +691,7 @@ every response Google Forms posted to the app, <em>including the ones it rejecte
     <span class="pin" style="--x:92.1%;--y:25.2%">3</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 16 — Generated documents.</span>
+    <span class="fig-label">Figure 17 — Generated documents.</span>
     <ol>
       <li><strong>Refresh</strong> — reload, useful while a document is still being made.</li>
       <li><strong>Open</strong> opens the Google Doc; <strong>View PDF</strong> previews it here.</li>
@@ -658,7 +717,7 @@ for your role.</p>
     <span class="pin" style="--x:84%;--y:16.2%">2</span>
   </div>
   <figcaption>
-    <span class="fig-label">Figure 17 — The account menu.</span>
+    <span class="fig-label">Figure 18 — The account menu.</span>
     <ol>
       <li>Your name in the banner. Click it to open the menu.</li>
       <li><strong>Change password</strong> — you must enter your current password, then the new

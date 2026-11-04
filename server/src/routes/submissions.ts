@@ -2,6 +2,7 @@ import { Router, type Request } from "express";
 import {
   createSubmission,
   getSubmissionDetail,
+  getSubmissionByPublicId,
   listSubmissions,
   listSubmissionValues,
   updateSubmissionStatus,
@@ -20,7 +21,7 @@ import {
   getExportColumns,
   getOrganizationBySlug,
 } from "../db/queries.js";
-import { filterColumnsForRole } from "../export/table.js";
+import { filterColumnsForRole, withFieldId } from "../export/table.js";
 import { requireAuth, requireRoles, canAccessSchool, scopedSchoolId, requireAuthOrAttachmentToken, signAttachmentLinkToken } from "../auth.js";
 import { canAccessForm } from "../access/formAccess.js";
 import { maybeGenerateDocument } from "../google/docs.js";
@@ -37,6 +38,7 @@ import {
   createSubmissionSchema,
   updateSubmissionStatusSchema,
   updateSubmissionValuesSchema,
+  bulkUpdateSubmissionValuesSchema,
   createAdhocFieldSchema,
   updateAdhocFieldSchema,
   promoteAdhocFieldSchema,
@@ -478,6 +480,111 @@ submissionsRouter.put("/:publicId/values", requireAuth, requireRoles("staff", "c
     }
     const updated = await getSubmissionDetail(req.params.publicId, req.user!.organization_id, req.user!.role);
     res.json(updated);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// -----------------------------------------------------------------------------
+// STAFF: PUT /api/submissions/values/batch — write ONE staff-only column across
+// many submissions (the grid's bulk column editor, docs/plans/column-bulk-edit.md)
+//
+// ★ Registered BEFORE `/:publicId/values` would ever need to match it — the two
+// paths differ in shape (`/values/batch` is not `/:publicId/values`), so order is
+// not load-bearing here, but the literal `values` segment is why this route is
+// declared above the parameterised ones: a future `/:publicId/...` route must
+// never be able to swallow it.
+//
+// Deliberately narrower than the single-submission PUT:
+//   • staff-only fields only — a `field_id` naming a parent field is a 400 for the
+//     whole request, because bulk mode is a staff-only affordance and a partially
+//     applied batch would be the worst of both outcomes;
+//   • every row is re-authorized (school + form + the field's role grant) before
+//     it is written, and a row that fails is reported in `failed[]` rather than
+//     failing the batch — one archived or moved row must not undo the other 39.
+//
+// The write itself goes through the SAME `updateSubmissionValues` as the single
+// path, so the staff audit stamp (`staff_fields_updated_by/_at`) and the
+// "Generate document" hook behave identically in both modes.
+// -----------------------------------------------------------------------------
+submissionsRouter.put("/values/batch", requireAuth, requireRoles("staff", "cdm_contact", "admin"), async (req, res, next) => {
+  try {
+    const parsed = bulkUpdateSubmissionValuesSchema.safeParse(req.body);
+    if (!parsed.success) {
+      res.status(400).json({ error: "Validation failed", details: parsed.error.flatten() });
+      return;
+    }
+    const { updates } = parsed.data;
+
+    // One column list per form, resolved lazily: a batch normally names a single
+    // form, so this is one query rather than one per row.
+    const columnsByForm = new Map<number, { field_id: number; staff_only: boolean; roles: string[] | null }[]>();
+    const columnsFor = async (formId: number) => {
+      const cached = columnsByForm.get(formId);
+      if (cached) return cached;
+      const cols = withFieldId(await getExportColumns(formId));
+      columnsByForm.set(formId, cols);
+      return cols;
+    };
+
+    const failed: { public_id: string; error: string }[] = [];
+    let saved = 0;
+
+    for (const update of updates) {
+      try {
+        const submission = await getSubmissionByPublicId(update.public_id, req.user!.organization_id);
+        if (!submission) {
+          failed.push({ public_id: update.public_id, error: "Submission not found" });
+          continue;
+        }
+        const denied = await submissionAccessError(req, submission);
+        if (denied) {
+          failed.push({ public_id: update.public_id, error: denied.error });
+          continue;
+        }
+        const columns = await columnsFor(submission.form_id);
+        const writable = new Map(columns.filter((c) => c.staff_only).map((c) => [c.field_id, c]));
+        const notStaffOnly = update.answers.find((a) => !writable.has(Number(a.field_id)));
+        if (notStaffOnly) {
+          failed.push({
+            public_id: update.public_id,
+            error: `Field ${notStaffOnly.field_id} is not a staff-only field of this form`,
+          });
+          continue;
+        }
+        // The field's role grant is the WRITE authorization, read through the same
+        // filter the preview uses for reads — so a role can never write a column
+        // it would not have been shown.
+        const granted = new Set(
+          filterColumnsForRole(columns, req.user!.role, true)
+            .filter((c) => c.staff_only)
+            .map((c) => c.field_id)
+        );
+        const ungranted = update.answers.find((a) => !granted.has(Number(a.field_id)));
+        if (ungranted) {
+          failed.push({
+            public_id: update.public_id,
+            error: "Forbidden: no access to this staff-only field",
+          });
+          continue;
+        }
+
+        await updateSubmissionValues(submission.id, update.answers, {
+          staffOnly: true,
+          updaterId: req.user!.id,
+        });
+        await maybeGenerateDocument(submission.id, req.user!.id, update.answers);
+        saved += 1;
+      } catch (err) {
+        // A per-row failure is data about the batch, not a reason to abandon it.
+        failed.push({
+          public_id: update.public_id,
+          error: err instanceof Error ? err.message : "Could not save this submission",
+        });
+      }
+    }
+
+    res.json({ saved, failed });
   } catch (err) {
     next(err);
   }

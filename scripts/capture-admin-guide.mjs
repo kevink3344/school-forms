@@ -293,6 +293,68 @@ const figures = [
     },
   },
 
+  {
+    id: "A18",
+    async run(page) {
+      // The bulk staff-only column editor (docs/plans/column-bulk-edit.md).
+      // Form #2 is the one the other designer figures use, and its "Toggle Probe"
+      // staff-only column is a switch — the clearest shape for the figure.
+      await go(page, "/admin");
+      // The dashboard opens on "All forms", which has no field columns at all —
+      // the form has to be picked before any staff-only header exists. The Form
+      // control has no id, so it is found by the label beside it.
+      await page.waitForFunction(
+        () =>
+          Array.from(document.querySelectorAll(".filter-group")).some(
+            (g) => g.querySelector("label")?.textContent.trim() === "Form",
+          ),
+        { timeout: 30_000 },
+      );
+      await page.evaluate(() => {
+        const group = Array.from(document.querySelectorAll(".filter-group")).find(
+          (g) => g.querySelector("label")?.textContent.trim() === "Form",
+        );
+        const select = group.querySelector("select");
+        // React tracks the value on the DOM node, so assigning `.value` directly
+        // is swallowed as "no change" and no state update fires. Going through the
+        // prototype setter is what makes React see a real change.
+        const setValue = Object.getOwnPropertyDescriptor(
+          HTMLSelectElement.prototype,
+          "value",
+        ).set;
+        setValue.call(select, "2");
+        select.dispatchEvent(new Event("change", { bubbles: true }));
+      });
+      await page.waitForSelector("table.grid thead th.grid-col-staff .grid-col-edit-hint", {
+        timeout: 30_000,
+      });
+      await page.hover("table.grid thead th.grid-col-staff");
+      await sleep(400);
+      await page.click("table.grid thead th.grid-col-staff .grid-col-edit-hint");
+      await sleep(700);
+      // Change three rows so the figure shows a real "3 unsaved changes" bar and
+      // the dirty marker, rather than an empty editor.
+      const cells = await page.$$("td.grid-col-bulk label.toggle");
+      for (const cell of cells.slice(0, 3)) await cell.click();
+      await sleep(500);
+      await freeze(page);
+      // A taller frame than the other figures: the save bar is sticky to the
+      // bottom of the viewport, so a 900px capture cuts it off and the figure
+      // would show the editor without the control the section is about.
+      await shot(page, "A18", "bulk-column", { clip: clip(1080) });
+      // Leave the column open but discard the drafts: Done asks for confirmation
+      // when changes are pending, and the guide must not leave a half-saved
+      // column behind for the next figure.
+      page.once("dialog", (d) => d.accept());
+      await page.evaluate(() => {
+        Array.from(document.querySelectorAll(".grid-bulk-bar button")).find((b) =>
+          /Done/i.test(b.textContent),
+        )?.click();
+      });
+      await sleep(500);
+    },
+  },
+
   // ===== SETTINGS REFERENCE ===============================================
   {
     id: "S1",

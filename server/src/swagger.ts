@@ -2296,6 +2296,72 @@ export function buildSwaggerSpec(req?: Request) {
           },
         },
       },
+      "/api/submissions/values/batch": {
+        put: {
+          tags: ["Submissions"],
+          summary: "Update one staff-only column across many submissions (staff/admin)",
+          description:
+            "The Submissions grid's bulk column editor (docs/plans/column-bulk-edit.md). Writes the same staff-only field on many submissions in one request.\n\n" +
+            "Deliberately narrower than `PUT /api/submissions/{publicId}/values`: every `field_id` must be a staff-only field of that row's form, and the caller's role must be granted that field — otherwise the whole request is a 400 (a malformed batch is refused rather than half-applied). Each row is then re-authorized for school and form access, and a row that fails is reported in `failed[]` instead of failing the batch.\n\n" +
+            "Writes go through the same path as the single-submission PUT, so the staff audit stamp (`staff_fields_updated_by` / `_at`) and the staff-only \"Generate document\" hook behave identically. `updates` is capped at 500 rows per request.",
+          security: [{ [bearerScheme]: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["staff_only", "updates"],
+                  properties: {
+                    staff_only: { type: "boolean", enum: [true] },
+                    updates: {
+                      type: "array",
+                      maxItems: 500,
+                      items: {
+                        type: "object",
+                        required: ["public_id", "answers"],
+                        properties: {
+                          public_id: { type: "string" },
+                          answers: {
+                            type: "array",
+                            items: {
+                              type: "object",
+                              properties: { field_id: { type: "integer" }, value: { type: "object", nullable: true } },
+                            },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "200": {
+              description: "Per-row outcome — `saved` count plus the rows that were refused",
+              content: {
+                "application/json": {
+                  schema: {
+                    type: "object",
+                    properties: {
+                      saved: { type: "integer" },
+                      failed: {
+                        type: "array",
+                        items: {
+                          type: "object",
+                          properties: { public_id: { type: "string" }, error: { type: "string" } },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            "400": { description: "Validation error, or a field that is not staff-only for its form" },
+          },
+        },
+      },
       "/api/submissions/{publicId}/adhoc": {
         get: {
           tags: ["Submissions"],

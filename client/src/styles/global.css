@@ -903,6 +903,74 @@ table.grid tbody tr:hover td.grid-col-staff { background: var(--staff-tint-hover
 .grid-editable:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .grid-cell-value { display: inline-flex; align-items: center; min-width: 0; }
 
+/* ---------------------------------------------------------------------------
+   Bulk column editing (docs/plans/column-bulk-edit.md).
+
+   The header pencil is the way in. It follows the same "reveal on hover" rule as
+   `.cell-edit-hint` so a dense grid is not a wall of icons — but it is a real
+   button, so it also reveals on focus and stays visible while its column is in
+   edit mode. `opacity` rather than `display` keeps it in the tab order.
+   --------------------------------------------------------------------------- */
+.grid-head-inner { display: inline-flex; align-items: center; gap: 6px; min-width: 0; }
+.grid-head-label { min-width: 0; }
+.grid-col-edit-hint {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 20px; height: 20px; padding: 0; flex: none;
+  border: 1px solid transparent; border-radius: 4px;
+  background: transparent; color: var(--text-muted);
+  cursor: pointer; opacity: 0; transition: opacity .15s, background .15s;
+}
+.grid-col-staff-head:hover .grid-col-edit-hint,
+.grid-col-edit-hint:focus-visible,
+.grid-col-edit-hint.is-active { opacity: 1; }
+.grid-col-edit-hint:hover { background: rgba(0, 0, 0, 0.06); color: var(--accent-strong); }
+.grid-col-edit-hint.is-active {
+  background: var(--accent); border-color: var(--accent); color: #fff;
+}
+.grid-col-edit-hint:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+
+/* A cell whose draft differs from the saved value. The left edge is what reads
+   while scrolling a long column; the wash alone is too close to the staff tint. */
+table.grid tbody td.grid-col-bulk { padding-top: 4px; padding-bottom: 4px; }
+table.grid tbody td.grid-col-bulk.grid-cell-dirty { box-shadow: inset 3px 0 0 var(--accent); }
+table.grid tbody td.grid-col-bulk.grid-cell-saved-td { background: var(--filled-bg); }
+.grid-bulk-editor { min-width: 120px; }
+.grid-bulk-editor .edit-input,
+.grid-bulk-editor .edit-select,
+.grid-bulk-editor .edit-textarea {
+  width: auto; min-width: 120px; padding: 4px 6px; font-size: 0.8125rem;
+}
+.grid-bulk-editor .toggle { display: inline-flex; align-items: center; }
+.grid-bulk-menu-trigger {
+  display: inline-flex; align-items: center; width: 100%; min-width: 120px;
+  padding: 4px 6px; text-align: left; cursor: pointer;
+  background: var(--panel-bg); border: 1px solid var(--border); border-radius: 4px;
+  font: inherit; font-size: 0.8125rem; color: inherit;
+}
+.grid-bulk-menu-trigger:hover { border-color: var(--accent); }
+.grid-bulk-menu-trigger:focus-visible { outline: 2px solid var(--accent); outline-offset: 0; }
+.grid-bulk-menu-trigger:disabled { cursor: not-allowed; opacity: .6; }
+.grid-bulk-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.grid-bulk-disabled { color: var(--text-muted); }
+
+/* The save bar. Sticky to the bottom of the viewport so it is reachable from any
+   row of a long column, and only present while a column is in edit mode. */
+.grid-bulk-bar {
+  position: sticky; bottom: 0; z-index: 5;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+  margin-top: 8px; padding: 10px 14px;
+  background: var(--panel-bg); border: 1px solid var(--accent);
+  border-radius: 6px; box-shadow: 0 6px 18px rgba(0, 0, 0, 0.10);
+}
+.grid-bulk-bar-text { font-size: 0.8125rem; color: var(--text-muted); }
+.grid-bulk-bar-failed { color: var(--wcpss-orange-strong); }
+.grid-bulk-bar .grid-cell-error { margin-top: 0; }
+.grid-bulk-bar-actions { margin-left: auto; display: inline-flex; gap: 8px; }
+.grid-bulk-bar-actions .primary-button,
+.grid-bulk-bar-actions .secondary-button {
+  display: inline-flex; align-items: center; gap: 6px;
+}
+
 /* Saving / saved / failed states for an in-place edit. No optimistic write, so
    the "saved" tint is confirmation of something the server already accepted.
    It lands on the value span rather than the cell so a wide cell does not flash

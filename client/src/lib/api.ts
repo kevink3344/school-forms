@@ -1121,6 +1121,24 @@ export const api = {
     });
   },
 
+  /**
+   * Writes ONE staff-only column across many submissions, for the grid's bulk
+   * column editor (docs/plans/column-bulk-edit.md). The server answers per row:
+   * `saved` counts the writes that landed and `failed` names the rows it refused
+   * (archived, moved school, no grant) — a partial success is the normal shape,
+   * not an error, so the caller keeps the drafts of the failed rows.
+   *
+   * `updates` is capped at 500 by the server; `useColumnEdit` chunks below that.
+   */
+  async updateSubmissionValuesBatch(
+    updates: { public_id: string; answers: SubmissionAnswer[] }[]
+  ): Promise<{ saved: number; failed: { public_id: string; error: string }[] }> {
+    return request<{ saved: number; failed: { public_id: string; error: string }[] }>(
+      "/api/submissions/values/batch",
+      { method: "PUT", auth: true, body: { staff_only: true, updates } }
+    );
+  },
+
   // -------------------------------------------------------------------------
   // Submission ad-hoc staff-only fields
   // -------------------------------------------------------------------------

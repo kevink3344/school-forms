@@ -96,6 +96,10 @@ export const ROUTES: RouteEntry[] = [
   { method: "get", path: "/api/submissions/{publicId}", auth: "staff", tags: "Submissions" },
   { method: "patch", path: "/api/submissions/{publicId}/status", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/values", auth: "staff", tags: "Submissions" },
+  // Bulk staff-only column write (docs/plans/column-bulk-edit.md). A literal
+  // segment, not a `{publicId}` one — declared above the parameterised routes in
+  // submissions.ts so it can never be shadowed by one.
+  { method: "put", path: "/api/submissions/values/batch", auth: "staff", tags: "Submissions" },
   { method: "get", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "post", path: "/api/submissions/{publicId}/adhoc", auth: "staff", tags: "Submissions" },
   { method: "put", path: "/api/submissions/{publicId}/adhoc/{fieldId}", auth: "staff", tags: "Submissions" },

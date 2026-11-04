@@ -8,7 +8,7 @@ import { PageHead } from "../../components/layout";
 import { Toggle } from "../../components/Toggle";
 import ExportModal from "../../components/ExportModal";
 import ColumnsDrawer from "../../components/ColumnsDrawer";
-import SubmissionsGrid from "../../components/SubmissionsGrid";
+import SubmissionsGrid, { ColumnEditBar } from "../../components/SubmissionsGrid";
 import { useSubmissionGrid } from "../../lib/useSubmissionGrid";
 import { formLabel, selectableForms } from "../../lib/forms";
 import { ARCHIVE_TOGGLE_LABEL, archivedMatches, submissionNoun } from "../../lib/archive";
@@ -118,6 +118,7 @@ export default function StaffQueue() {
     toggleColumn,
     toggleAll,
     edit,
+    columnEdit,
   } = useSubmissionGrid({ formId, status: statusFilter || undefined });
 
   useEffect(() => {
@@ -396,6 +397,7 @@ export default function StaffQueue() {
           onOpen={openSubmission}
           submissionPath={(publicId) => `/staff/${publicId}`}
           edit={edit}
+          columnEdit={columnEdit}
           emptyMessage={
             showArchived
               ? "No archived submissions match these filters."
@@ -407,6 +409,15 @@ export default function StaffQueue() {
           }
         />
       )}
+
+      {/* The bulk column editor's save bar (docs/plans/column-bulk-edit.md) —
+          rendered only while a staff-only column is in edit mode. */}
+      <ColumnEditBar
+        columnEdit={columnEdit}
+        label={
+          visibleColumns.find((c) => c.key === `field_${columnEdit.activeFieldId}`)?.label ?? null
+        }
+      />
 
       <ColumnsDrawer
         open={pickerOpen}

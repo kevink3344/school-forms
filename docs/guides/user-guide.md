@@ -124,7 +124,8 @@ That guide covers, task by task and with an annotated screenshot for each:
 - **Available Forms** — which forms you can open, and how to request, track, or withdraw access
   to a private one
 - The submissions queue — status chips, the form filter, choosing columns, archived submissions
-- **Filling in staff-only fields** — both inline in the queue and on the submission page
+- **Filling in staff-only fields** — both inline in the queue and on the submission page, plus
+  the bulk column editor (edit every row of one column at once, then save them together)
 - Reviewing a submission — status, editing a parent's answer, archiving and restoring
 - Generated documents, reports and export
 - **Changing your password** and signing out

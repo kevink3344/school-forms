@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import {
+  bulkUpdateSubmissionValuesSchema,
   createSubmissionSchema,
   createWebhookSubmissionSchema,
   decideAccessSchema,
@@ -149,6 +150,46 @@ describe("updateSubmissionValuesSchema — shares the same answer shape", () => 
       );
     }
     expect(typeof parsed.data.answers[0].field_id).toBe("number");
+  });
+});
+
+describe("bulkUpdateSubmissionValuesSchema — the column bulk editor's contract", () => {
+  const update = { public_id: "CDM2-00018", answers: [{ field_id: 9, value: "Yes" }] };
+
+  it("accepts a batch of staff-only writes", () => {
+    const parsed = bulkUpdateSubmissionValuesSchema.safeParse({
+      staff_only: true,
+      updates: [update, { ...update, public_id: "CDM2-00017" }],
+    });
+    expect(parsed.success).toBe(true);
+  });
+
+  it("refuses a batch that does not declare staff_only: true", () => {
+    // The bulk path exists only for staff-only columns; an omitted flag would
+    // reach the parent-field write path while skipping the staff audit stamp.
+    expect(bulkUpdateSubmissionValuesSchema.safeParse({ updates: [update] }).success).toBe(false);
+    expect(
+      bulkUpdateSubmissionValuesSchema.safeParse({ staff_only: false, updates: [update] }).success
+    ).toBe(false);
+  });
+
+  it("refuses an empty batch and one over the 500-row cap", () => {
+    expect(bulkUpdateSubmissionValuesSchema.safeParse({ staff_only: true, updates: [] }).success).toBe(
+      false
+    );
+    const many = Array.from({ length: 501 }, (_, i) => ({ ...update, public_id: `P-${i}` }));
+    expect(bulkUpdateSubmissionValuesSchema.safeParse({ staff_only: true, updates: many }).success).toBe(
+      false
+    );
+  });
+
+  it("keeps text field ids coercible, like the single-submission path", () => {
+    const parsed = bulkUpdateSubmissionValuesSchema.safeParse({
+      staff_only: true,
+      updates: [{ public_id: "CDM2-00018", answers: [{ field_id: "9", value: "Yes" }] }],
+    });
+    if (!parsed.success) throw new Error("a string id was rejected on the bulk path");
+    expect(typeof parsed.data.updates[0].answers[0].field_id).toBe("number");
   });
 });
 
